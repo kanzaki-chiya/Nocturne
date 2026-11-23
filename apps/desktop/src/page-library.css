@@ -1,0 +1,195 @@
+/* 项目页面库（ADR-0114，参照 phase12.html 第 ① 节） */
+
+.plib-page .plib-head {
+  height: var(--h-page-head);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--page-px);
+  border-bottom: 1px solid var(--a-border);
+}
+
+.plib-page .plib-head h1 {
+  margin: 0;
+  font-size: var(--fs-4);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+  line-height: var(--lh-tight);
+  color: var(--a-text);
+  flex: none;
+}
+
+.plib-page .plib-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.plib-page .plib-proj .ddw {
+  min-width: 0;
+}
+
+.plib-page .plib-proj .dd {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  gap: var(--space-1);
+  border-color: var(--a-border-strong);
+  border-radius: var(--radius-2);
+  font-size: var(--fs-1);
+  color: var(--a-secondary);
+  background: transparent;
+}
+
+.plib-page .plib-proj .dd:hover:not(:disabled) {
+  background: var(--a-sel);
+  color: var(--a-text);
+}
+
+.plib-page .plib-search {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 28px;
+  width: 200px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-2);
+  background: var(--a-bg);
+  color: var(--a-secondary);
+  cursor: text;
+}
+
+.plib-page .plib-search:focus-within {
+  border-color: var(--a-accent-border);
+  box-shadow: var(--shadow-focus);
+}
+
+.plib-page .plib-search-icon {
+  flex: none;
+  color: var(--a-muted);
+}
+
+.plib-page .plib-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--a-text);
+  font: var(--fs-1) / 1 var(--sans);
+}
+
+.plib-page .plib-search input::placeholder {
+  color: var(--a-faint);
+}
+
+.plib-page .plib-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+.plib-page .plib-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3) var(--page-px) var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.plib-page .plib-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+}
+
+.plib-page .plib-group {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--fs-1);
+  color: var(--a-muted);
+  user-select: none;
+}
+
+.plib-page .plib-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+}
+
+.plib-page .plib-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) minmax(0, 200px) 44px 64px;
+  align-items: center;
+  gap: var(--space-3);
+  height: 40px;
+  width: 100%;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: var(--a-text);
+  font: var(--fs-2) / 1.4 var(--sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.plib-page .plib-row:hover {
+  background: var(--a-sel);
+}
+
+.plib-page .plib-row:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.plib-page .plib-icon {
+  color: var(--a-secondary);
+  flex: none;
+}
+
+.plib-page .plib-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--a-text);
+}
+
+.plib-page .plib-session {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--a-muted);
+}
+
+.plib-page .plib-ver {
+  font: var(--fs-1) / 1 var(--mono);
+  color: var(--a-faint);
+}
+
+.plib-page .plib-time {
+  font-size: var(--fs-1);
+  color: var(--a-faint);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 720px) {
+  .plib-page .plib-head {
+    padding: 0 var(--space-4);
+  }
+  .plib-page .plib-body {
+    padding: var(--space-3) var(--space-4) var(--space-6);
+  }
+  .plib-page .plib-search {
+    width: 150px;
+  }
+  .plib-page .plib-row {
+    grid-template-columns: 20px minmax(0, 1fr) minmax(0, 120px) 38px 52px;
+    gap: var(--space-2);
+  }
+}

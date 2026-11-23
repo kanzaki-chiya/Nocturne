@@ -176,8 +176,8 @@ export interface SidePanelController {
     thread: { threadId: string; childSessionId: string; title: string },
     targetSessionId?: string,
   ) => void;
-  /** 打开或切换到当前会话的某个页面标签并定位到指定版本（ADR-0109） */
-  openPage: (page: string, version?: number) => void;
+  /** 打开或切换到指定会话（缺省当前会话）的某个页面标签并定位到指定版本（ADR-0109、ADR-0114） */
+  openPage: (page: string, version?: number, targetSessionId?: string) => void;
   /** 实时收到当前会话面板页面新版本时按自动打开规则更新面板（ADR-0109） */
   onLivePanelPage: (targetSessionId: string, page: string) => void;
   /** 面板当前正在显示的页面与版本号；面板关闭或非页面标签时为 undefined */
@@ -1260,39 +1260,47 @@ export function useSidePanel({
     });
   }, [hideBrowserThen, update]);
   const openPage = useCallback(
-    (page: string, version?: number) => {
-      const latestVersion = active?.view.pages
-        .find((item) => item.page === page)
-        ?.versions.at(-1)?.version;
+    (page: string, version?: number, targetSessionId?: string) => {
+      const target = targetSessionId ?? sessionId;
+      if (target === null) return;
+      const latestVersion =
+        target === sessionId
+          ? active?.view.pages.find((item) => item.page === page)?.versions.at(-1)?.version
+          : undefined;
       const nextVersion =
-        version !== undefined && latestVersion !== undefined && version < latestVersion
+        version !== undefined && (latestVersion === undefined || version < latestVersion)
           ? version
           : undefined;
-      hideBrowserThen(() => {
-        update((panel) => {
-          const found = panel.tabs.find(
-            (tab): tab is PageTab => tab.kind === "page" && tab.page === page,
-          );
-          if (found !== undefined) {
-            return {
-              ...panel,
-              open: true,
-              activeId: found.id,
-              tabs: panel.tabs.map((tab) =>
-                tab.id === found.id ? { ...found, version: nextVersion } : tab,
-              ),
-            };
-          }
-          return withTab(panel, {
-            id: newTabId(),
-            kind: "page",
-            page,
-            ...(nextVersion !== undefined ? { version: nextVersion } : {}),
-          });
+      const applyTo = (panel: SessionPanel): SessionPanel => {
+        const found = panel.tabs.find(
+          (tab): tab is PageTab => tab.kind === "page" && tab.page === page,
+        );
+        if (found !== undefined) {
+          return {
+            ...panel,
+            open: true,
+            activeId: found.id,
+            tabs: panel.tabs.map((tab) =>
+              tab.id === found.id ? { ...found, version: nextVersion } : tab,
+            ),
+          };
+        }
+        return withTab(panel, {
+          id: newTabId(),
+          kind: "page",
+          page,
+          ...(nextVersion !== undefined ? { version: nextVersion } : {}),
         });
-      });
+      };
+      if (target === sessionId) {
+        hideBrowserThen(() => {
+          update(applyTo);
+        });
+      } else {
+        setPanels((map) => new Map(map).set(target, applyTo(panelFor(target, map))));
+      }
     },
-    [active, hideBrowserThen, update],
+    [sessionId, active, hideBrowserThen, update, panelFor],
   );
   const onLivePanelPage = useCallback(
     (targetSessionId: string, page: string) => {

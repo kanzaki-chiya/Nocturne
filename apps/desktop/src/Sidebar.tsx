@@ -56,6 +56,9 @@ export interface SidebarProps {
   /** 主区正在显示组曲列表页 */
   suitesOpen?: boolean;
   onOpenSuites?: () => void;
+  /** 主区正在显示页面库（ADR-0114） */
+  pagesOpen?: boolean;
+  onOpenPages?: () => void;
   onSelectSuite?: (id: string) => void;
   onSearch?: () => void;
   onExpandScheduled?: () => void;
@@ -608,7 +611,7 @@ export function Sidebar(props: SidebarProps) {
       key={`${row.id}:${renaming === row.id ? "editing" : "view"}`}
       row={row}
       {...(pinned !== undefined ? { pinned: { project: pinned.project } } : {})}
-      selected={props.selectedId === row.id}
+      selected={props.pagesOpen !== true && props.selectedId === row.id}
       multiSelected={effectiveMultiSelected.has(row.id)}
       editing={renaming === row.id}
       error={renameError?.id === row.id ? renameError.message : undefined}
@@ -827,6 +830,17 @@ export function Sidebar(props: SidebarProps) {
             <span className="meta">{props.suiteNeedsAttentionCount}</span>
           )}
         </button>
+        <button
+          type="button"
+          className={`item${props.pagesOpen === true ? " on" : ""}`}
+          aria-current={props.pagesOpen === true ? "page" : undefined}
+          onClick={() => {
+            props.onOpenPages?.();
+          }}
+        >
+          <Icon name="file" size={ICON_MD} className="glyph" />
+          <span className="t">页面</span>
+        </button>
       </nav>
       <div className="tree">
         {props.tree.pinned.length > 0 && (
@@ -845,6 +859,7 @@ export function Sidebar(props: SidebarProps) {
                 const active =
                   props.suitesOpen !== true &&
                   props.schedulesOpen !== true &&
+                  props.pagesOpen !== true &&
                   props.selectedId === suite.coordinatorSessionId;
                 return (
                   <button

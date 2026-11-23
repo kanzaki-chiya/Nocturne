@@ -48,6 +48,8 @@ export const PREFS_KEY = "nocturne.desktop.prefs.v1";
 export interface Prefs {
   /** 置顶会话 id（数组顺序即显示顺序） */
   pinned: string[];
+  /** 页面库置顶页面来源键（originKey，如 "<sessionId>/<page>"；ADR-0114） */
+  pinnedPages?: string[] | undefined;
   /** 手动添加的项目路径（原始字符串，添加顺序） */
   projects: string[];
   /** 从列表移除（隐藏）的项目路径 */
@@ -196,9 +198,11 @@ function parse(raw: string | null): Prefs {
   if (typeof value !== "object" || value === null) return prefs;
   const obj = value as Record<string, unknown>;
   const pinned = strings(obj.pinned);
+  const pinnedPages = strings(obj.pinnedPages);
   const projects = strings(obj.projects);
   const hidden = strings(obj.hidden);
   if (pinned !== undefined) prefs.pinned = pinned;
+  if (pinnedPages !== undefined && pinnedPages.length > 0) prefs.pinnedPages = pinnedPages;
   if (projects !== undefined) prefs.projects = projects;
   if (hidden !== undefined) prefs.hidden = hidden;
   if (
@@ -326,6 +330,9 @@ export function createPrefsStore(storage: Storage | undefined): PrefsStore {
     get() {
       return {
         pinned: [...prefs.pinned],
+        ...(prefs.pinnedPages !== undefined && prefs.pinnedPages.length > 0
+          ? { pinnedPages: [...prefs.pinnedPages] }
+          : {}),
         projects: [...prefs.projects],
         hidden: [...prefs.hidden],
         projectSort: prefs.projectSort,

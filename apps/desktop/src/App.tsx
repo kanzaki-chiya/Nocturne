@@ -12,6 +12,7 @@ import type {
   ApplicationTarget,
   ExternalAgentOverview,
   ModelRef,
+  PageLibraryItem,
   PendingInputsSnapshot,
   RewindMode,
   RuntimeEvent,
@@ -98,6 +99,7 @@ import { useRemoteStatus } from "./remote";
 import { UsagePage } from "./UsagePage";
 import { SchedulePage, type ScheduleWorkspaceOption } from "./SchedulePage";
 import { SuitesPage, type SuiteWorkspaceOption } from "./SuitesPage";
+import { PageLibraryPage } from "./PageLibraryPage";
 import { SearchDialog, type SearchItem, type SettledSearch } from "./SearchDialog";
 import { catchupPreface } from "./schedule-format";
 import { Button, MoonMark } from "./ui";
@@ -467,6 +469,9 @@ export function App({ host }: { host: DesktopHost }) {
   const [schedulesOpen, setSchedulesOpen] = useState(false);
   /** 组曲列表页盖在会话区上，左栏会话树保持显示 */
   const [suitesOpen, setSuitesOpen] = useState(false);
+  /** 项目页面库盖在会话区上，左栏会话树保持显示（ADR-0114） */
+  const [pagesOpen, setPagesOpen] = useState(false);
+  const [pagesVersion, setPagesVersion] = useState(0);
   const [suites, setSuites] = useState<SuiteRecord[]>([]);
   const [suitesVersion, setSuitesVersion] = useState(0);
   const [scheduleTasks, setScheduleTasks] = useState<ScheduleTaskOverview[]>([]);
@@ -530,6 +535,7 @@ export function App({ host }: { host: DesktopHost }) {
     page: null as SettingsSection | null,
     schedulesOpen: false,
     suitesOpen: false,
+    pagesOpen: false,
     prefs: NOTIFY_DEFAULTS,
     /** 会话标题来源（treeSessions：会话标题 ?? 首条用户消息首行） */
     sessions: [] as SessionSummary[],
@@ -542,6 +548,7 @@ export function App({ host }: { host: DesktopHost }) {
   notifyState.current.page = page;
   notifyState.current.schedulesOpen = schedulesOpen;
   notifyState.current.suitesOpen = suitesOpen;
+  notifyState.current.pagesOpen = pagesOpen;
   /** 侧栏留痕：本次运行里「没看到」的出错 / 已完成，打开会话即清除（不持久化） */
   const [sessionMarks, setSessionMarks] = useState<Record<string, SessionMark>>({});
 
@@ -654,7 +661,11 @@ export function App({ host }: { host: DesktopHost }) {
         const lastPanelFile = panelFiles.at(-1);
         if (lastPanelFile !== undefined) {
           panelRef.current?.onLivePanelPage(sessionId, resolveInlinePageId(lastPanelFile));
+          setPagesVersion((v) => v + 1);
         }
+      }
+      if (live && (event.type === "session.rewound" || event.type === "session.titled")) {
+        setPagesVersion((v) => v + 1);
       }
       if (event.type === "turn.started") {
         const started = Date.parse(event.time);
@@ -675,6 +686,7 @@ export function App({ host }: { host: DesktopHost }) {
         state.page === null &&
         !state.schedulesOpen &&
         !state.suitesOpen &&
+        !state.pagesOpen &&
         state.selectedId === sessionId;
       if (live && !watching) {
         const mark = sessionMarkFor(event);
@@ -790,6 +802,7 @@ export function App({ host }: { host: DesktopHost }) {
       });
       sessionsRef.current = list;
       setSessions(list);
+      setPagesVersion((v) => v + 1);
       setListed(true);
       setSessionsVisible(true);
       writeSessionsCache(() => globalThis.localStorage, host, list);
@@ -1206,6 +1219,7 @@ export function App({ host }: { host: DesktopHost }) {
     setPage(null);
     setSchedulesOpen(false);
     setSuitesOpen(false);
+    setPagesOpen(false);
     selectedIdRef.current = existing.coordinatorSessionId;
     setSelectedId(existing.coordinatorSessionId);
     setPanel(null);
@@ -1278,6 +1292,7 @@ export function App({ host }: { host: DesktopHost }) {
       const summary = sessions.find((session) => session.id === item.sessionId);
       setSchedulesOpen(false);
       setSuitesOpen(false);
+      setPagesOpen(false);
       searchArrived.current = false;
       setSearchTarget({ sessionId: item.sessionId, seq: item.seq, nonce: Date.now() });
       void selectSession(item.sessionId, summary?.cwd ?? effectiveWorkspace ?? "");
@@ -1287,6 +1302,7 @@ export function App({ host }: { host: DesktopHost }) {
       const key = item.projectKey;
       setSchedulesOpen(false);
       setSuitesOpen(false);
+      setPagesOpen(false);
       setCollapsed((current) => {
         const next = new Set(current);
         next.delete(key);
@@ -1303,6 +1319,7 @@ export function App({ host }: { host: DesktopHost }) {
     if (item.kind === "schedules" && item.scheduleId !== undefined) {
       setScheduleTarget({ id: item.scheduleId });
       setSuitesOpen(false);
+      setPagesOpen(false);
       setSchedulesOpen(true);
     }
   };
@@ -1319,6 +1336,7 @@ export function App({ host }: { host: DesktopHost }) {
         setPage(null);
         setSchedulesOpen(false);
         setSuitesOpen(false);
+        setPagesOpen(false);
         void Promise.resolve(selectSessionRef.current?.(summary.id, summary.cwd)).then(() => {
           if (memberName === undefined) return;
           const member = conversations.opened
@@ -1840,7 +1858,7 @@ export function App({ host }: { host: DesktopHost }) {
     openIds: new Set(conversations.opened.keys()),
     loadDiff: (entry, seq, path) => conversations.turnChangeDiff(entry, seq, path),
     editors,
-    settingsOpen: page !== null || schedulesOpen || suitesOpen,
+    settingsOpen: page !== null || schedulesOpen || suitesOpen || pagesOpen,
     plainKey: effectiveWorkspace === null ? null : projectKey(effectiveWorkspace),
     client: panelClient,
     ensureClient: () => pool.ensure(),
@@ -2079,8 +2097,21 @@ export function App({ host }: { host: DesktopHost }) {
     setPage(null);
     setSchedulesOpen(false);
     setSuitesOpen(false);
+    setPagesOpen(false);
     void selectSession(summary.id, summary.cwd);
   };
+
+  /** 点页面库一行：切到对应会话并打开其面板页面标签（最新版）；归档会话照样打开（ADR-0114） */
+  const openLibraryPage = (item: PageLibraryItem): void => {
+    const summary = sessions.find((session) => session.id === item.sessionId);
+    setPage(null);
+    setSchedulesOpen(false);
+    setSuitesOpen(false);
+    setPagesOpen(false);
+    panelRef.current?.openPage(item.page, undefined, item.sessionId);
+    void selectSession(item.sessionId, summary?.cwd ?? effectiveWorkspace ?? "");
+  };
+  const pinnedPageOriginKeys = useMemo(() => new Set(p.pinnedPages ?? []), [p.pinnedPages]);
 
   const projects = tree.projects.map((project) => ({
     key: project.key,
@@ -2135,18 +2166,27 @@ export function App({ host }: { host: DesktopHost }) {
           suites={sidebarSuites}
           suiteNeedsAttentionCount={suiteNeedsAttentionCount}
           suitesOpen={suitesOpen}
+          pagesOpen={pagesOpen}
           onSearch={() => {
             setSearchOpen(true);
           }}
           onOpenSchedules={() => {
             setPage(null);
             setSuitesOpen(false);
+            setPagesOpen(false);
             setSchedulesOpen(true);
           }}
           onOpenSuites={() => {
             setPage(null);
             setSchedulesOpen(false);
+            setPagesOpen(false);
             setSuitesOpen(true);
+          }}
+          onOpenPages={() => {
+            setPage(null);
+            setSchedulesOpen(false);
+            setSuitesOpen(false);
+            setPagesOpen(true);
           }}
           onSelectSuite={(id) => {
             void selectSuite(id);
@@ -2163,6 +2203,7 @@ export function App({ host }: { host: DesktopHost }) {
               setPage(null);
               setSchedulesOpen(false);
               setSuitesOpen(false);
+              setPagesOpen(false);
               void selectSession(summary.id, summary.cwd);
             }
           }}
@@ -2242,12 +2283,14 @@ export function App({ host }: { host: DesktopHost }) {
             setPage(null);
             setSchedulesOpen(false);
             setSuitesOpen(false);
+            setPagesOpen(false);
             void newSession(workspace);
           }}
           page={page}
           onOpenPage={(target) => {
             setSchedulesOpen(false);
             setSuitesOpen(false);
+            setPagesOpen(false);
             setPage(target);
           }}
           onLeaveSettings={() => {
@@ -2369,6 +2412,35 @@ export function App({ host }: { host: DesktopHost }) {
                   onChanged={() => {
                     void refreshSuites();
                   }}
+                />
+              </PaneErrorBoundary>
+            </div>
+          )}
+          {pagesOpen && page === null && (
+            <div className="settings-over">
+              <PaneErrorBoundary key="pages">
+                <PageLibraryPage
+                  api={pageClient?.runtime}
+                  currentWorkspaceRoot={
+                    active?.workspace ?? selected?.cwd ?? effectiveWorkspace ?? undefined
+                  }
+                  version={pagesVersion}
+                  pinnedOriginKeys={pinnedPageOriginKeys}
+                  onPin={(originKey) => {
+                    const cur = prefs.get().pinnedPages ?? [];
+                    prefs.update({
+                      pinnedPages: cur.includes(originKey) ? cur : [originKey, ...cur],
+                    });
+                    bumpPrefs();
+                  }}
+                  onUnpin={(originKey) => {
+                    const next = (prefs.get().pinnedPages ?? []).filter((k) => k !== originKey);
+                    prefs.update({
+                      pinnedPages: next.length > 0 ? next : undefined,
+                    });
+                    bumpPrefs();
+                  }}
+                  onOpenPage={openLibraryPage}
                 />
               </PaneErrorBoundary>
             </div>
@@ -2674,8 +2746,10 @@ export function App({ host }: { host: DesktopHost }) {
           </SettingsDeck>
           <div
             className="mainpane"
-            inert={page !== null || schedulesOpen || suitesOpen}
-            aria-hidden={page !== null || schedulesOpen || suitesOpen ? true : undefined}
+            inert={page !== null || schedulesOpen || suitesOpen || pagesOpen}
+            aria-hidden={
+              page !== null || schedulesOpen || suitesOpen || pagesOpen ? true : undefined
+            }
           >
             {active !== undefined && selectedOpenError === undefined ? (
               <PaneErrorBoundary key={active.session.id}>
