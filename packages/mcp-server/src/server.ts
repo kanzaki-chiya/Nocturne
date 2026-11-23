@@ -292,7 +292,7 @@ export interface NocturneMcpServerHandle {
   close(): Promise<void>;
 }
 
-const SERVER_VERSION = "0.61.1";
+const SERVER_VERSION = "0.62.0";
 
 export function createNocturneMcpServer(
   options: NocturneMcpServerOptions = {},
