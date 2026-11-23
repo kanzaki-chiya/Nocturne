@@ -112,6 +112,13 @@ describe("执行方式命令（ADR-0076）", () => {
     expect(cliHelpText()).toContain("/ensemble");
     expect(helpLines().join("\n")).toContain("/ensemble");
   });
+
+  it("/panel 出现在 TUI 目录和 CLI 帮助里，并可补全", () => {
+    const ctx = { effortLevels: [], providerIds: [] };
+    expect(helpLines().join("\n")).toContain("/panel");
+    expect(cliHelpText()).toContain("/panel");
+    expect(completeSlash("/pan", ctx).map((item) => item.insert)).toEqual(["/panel "]);
+  });
 });
 
 describe("TUI /rename", () => {

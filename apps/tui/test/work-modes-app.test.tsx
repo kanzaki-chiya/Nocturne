@@ -34,6 +34,41 @@ const callTool = (id: string, name: string, input: unknown): FakeScript[number] 
   input,
 });
 
+it("在 TUI 发送 /panel 并显示一行页面版本", async () => {
+  const provider = new FakeProvider({
+    scripts: [
+      [
+        callTool("make-page", "render_html", {
+          title: "周报",
+          html: "<h1>周报</h1>",
+          display: "panel",
+        }),
+        { type: "finish", reason: "tool_calls" },
+      ],
+      text("已生成周报"),
+    ],
+  });
+  const runtime = await createRuntime({ cwd: temp(), sessionsDir: temp(), providers: [provider] });
+  const session = await runtime.createSession({ model: "fake/fake-1" });
+  const ui = render(
+    createElement(App, { session, runtime, env: { ascii: false, animated: false } }),
+  );
+  try {
+    await settle(() => ui.lastFrame()?.includes("fake-1") === true);
+    ui.stdin.write("/panel 做周报");
+    await flush();
+    ui.stdin.write("\r");
+    await settle(() => ui.lastFrame()?.includes("已生成周报") === true);
+    expect(ui.lastFrame()).toContain("▣ 周报 v1");
+    expect(
+      session.durableEvents().find((event) => event.type === "message.user")?.payload,
+    ).toMatchObject({ workMode: { name: "panel" } });
+  } finally {
+    ui.unmount();
+    await session.close();
+  }
+});
+
 it("计划模式中设定目标：回复照常显示、不续跑；/goal 看到进行中，/goal stop 停止", async () => {
   const provider = new FakeProvider({ scripts: [text("计划初稿"), text("交付清单已列出")] });
   const runtime = await createRuntime({ cwd: temp(), sessionsDir: temp(), providers: [provider] });
