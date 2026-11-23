@@ -555,6 +555,11 @@ it("手机斜杠菜单的命令和技能说明都左对齐并单行省略", asyn
   if (!field) throw new Error("缺少输入框");
   act(() => fireEvent.change(field, { target: { value: "/" } }));
   const summaries = [...container.querySelectorAll(".phone-slash-row > span")];
+  const fugue = [...container.querySelectorAll(".phone-slash-row")].find((row) =>
+    row.textContent?.includes("/fugue"),
+  );
+  expect(fugue?.textContent).toContain("多代理攻坚");
+  expect(container.textContent).not.toContain("/boost");
   const page = [...container.querySelectorAll(".phone-slash-row")].find((row) =>
     row.textContent?.includes("/cadenza"),
   );

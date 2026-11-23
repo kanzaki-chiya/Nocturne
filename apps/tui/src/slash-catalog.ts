@@ -58,7 +58,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     task: true,
   },
   {
-    name: "/boost",
+    name: "/fugue",
     summary: "多代理攻坚",
     cli: "<任务> 拆解任务、并行后台子代理实现与调查、汇总回归",
     task: true,

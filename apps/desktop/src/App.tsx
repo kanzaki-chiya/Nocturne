@@ -3332,7 +3332,7 @@ function SessionPane({
         workModeDisabled={
           view.ensemble?.status === "active" || scheduleSource !== undefined
             ? {
-                ...(scheduleSource !== undefined ? { boost: "当前环境不支持后台子代理" } : {}),
+                ...(scheduleSource !== undefined ? { fugue: "当前环境不支持后台子代理" } : {}),
                 ...(view.ensemble?.status === "active"
                   ? { ensemble: "当前会话已有进行中的合奏，请先结束当前合奏" }
                   : scheduleSource !== undefined

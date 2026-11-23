@@ -1,6 +1,7 @@
 import {
   parseSkillSlash,
   parseWorkModeSlash,
+  workModeCommandName,
   type SkillOverview,
   type WorkModeName,
 } from "@nocturne/core/protocol";
@@ -19,13 +20,19 @@ export const WORK_MODE_ITEMS: readonly (InputLabelData & { name: WorkModeName })
   { name: "grill-me", label: "追问需求", icon: "question" },
   { name: "goal", label: "目标", icon: "target" },
   { name: "plan", label: "计划", icon: "list_check" },
-  { name: "boost", label: "多代理攻坚", icon: "robot" },
+  { name: "fugue", label: "多代理攻坚", icon: "robot" },
   { name: "ensemble", label: "合奏", icon: "group" },
   { name: "cadenza", label: "面板页面", icon: "layout_right" },
 ];
 
 export function workModeLabel(name: string): InputLabelData {
-  return WORK_MODE_ITEMS.find((item) => item.name === name) ?? { icon: "list_check", label: name };
+  const canonical = workModeCommandName(name);
+  return (
+    WORK_MODE_ITEMS.find((item) => item.name === canonical) ?? {
+      icon: "list_check",
+      label: canonical,
+    }
+  );
 }
 
 export function skillLabel(name: string, skill?: SkillOverview): InputLabelData {

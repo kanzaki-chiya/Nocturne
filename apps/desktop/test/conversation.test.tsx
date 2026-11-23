@@ -729,7 +729,7 @@ describe("回复与代码复制", () => {
     attachments: [],
   });
 
-  it.each(["grill-me", "goal", "plan", "boost"])(
+  it.each(["grill-me", "goal", "plan", "fugue"])(
     "用户提交的 /%s 消息：重发与编辑并重发都带原 workMode（ADR-0076 §1）",
     async (name) => {
       const onResubmit = vi.fn(async () => undefined);
@@ -754,6 +754,24 @@ describe("回复与代码复制", () => {
       expect(onResubmit).toHaveBeenLastCalledWith(7, "做个注册页", "both", name);
     },
   );
+
+  it("旧日志 workMode.name 为 boost 时显示多代理攻坚标签，编辑并重发保留 fugue", async () => {
+    const onResubmit = vi.fn(async () => undefined);
+    const view = createSessionView();
+    view.entries = [modeEntry("boost", "并行改造")];
+    const rendered = mount(view, { onResubmit });
+    expect(screen.getByRole("button", { name: "多代理攻坚" })).toBeTruthy();
+    Object.assign(rendered.methods, {
+      rewindTargets: vi.fn<RpcSession["rewindTargets"]>().mockResolvedValue([]),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "编辑并重发" }));
+    const box = await screen.findByLabelText<HTMLTextAreaElement>("编辑消息");
+    expect(box.value).toBe("并行改造");
+    fireEvent.click(
+      within(box.closest(".u-edit") as HTMLElement).getByRole("button", { name: "发送" }),
+    );
+    expect(onResubmit).toHaveBeenLastCalledWith(7, "并行改造", "both", "fugue");
+  });
 
   it("Runtime 写入的模式消息（核对、继续目标、批准计划）不显示编辑并重发与重发", () => {
     for (const entry of [

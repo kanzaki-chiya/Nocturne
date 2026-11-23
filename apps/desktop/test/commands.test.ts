@@ -106,10 +106,15 @@ describe("parseSlash", () => {
       workMode: "plan",
       text: "重构登录",
     });
-    expect(parseSlash("/boost 并行改造")).toEqual({
+    expect(parseSlash("/fugue 并行改造")).toEqual({
       kind: "work",
-      workMode: "boost",
+      workMode: "fugue",
       text: "并行改造",
+    });
+    expect(parseSlash("/boost 并行改造")).toEqual({
+      kind: "unknown",
+      name: "/boost",
+      hint: "未知命令 /boost；输入 / 查看可用命令",
     });
   });
 
@@ -185,11 +190,12 @@ describe("completeSlash", () => {
       "/grill-me",
       "/goal",
       "/plan",
-      "/boost",
+      "/fugue",
       // 执行方式补全来自 Core 的 WORK_MODE_COMMANDS（ADR-0089 修订：对外显示 /ensemble）
       "/ensemble",
       "/cadenza",
     ]);
+    expect(groups[0]?.items.find((item) => item.label === "/fugue")?.summary).toBe("多代理攻坚");
     expect(groups[0]?.items.find((item) => item.label === "/ensemble")?.summary).toBe("合奏协作");
     expect(groups[0]?.items.find((item) => item.label === "/cadenza")?.summary).toBe("面板页面");
     expect(completeSlash("/sw")).toEqual([]);

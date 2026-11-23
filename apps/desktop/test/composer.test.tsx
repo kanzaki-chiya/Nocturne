@@ -498,15 +498,37 @@ describe("Composer 斜杠命令", () => {
       expect.stringContaining("/grill-me"),
       expect.stringContaining("/goal"),
       expect.stringContaining("/plan"),
-      expect.stringContaining("/boost"),
+      expect.stringContaining("/fugue"),
       expect.stringContaining("/ensemble"),
       expect.stringContaining("/cadenza"),
     ]);
+    expect(menu.textContent).toContain("多代理攻坚");
     expect(menu.textContent).toContain("面板页面");
     fireEvent.keyDown(field, { key: "Tab" });
     expect(field.value).toBe("/compact ");
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("斜杠菜单选中 /fugue 后显示多代理攻坚标签，发送时携带 workMode: fugue", async () => {
+    const onSubmit = vi.fn(async () => true);
+    render(<Composer {...props({ variant: "session", onSubmit })} />);
+    const field = input("/fu");
+    const option = await screen.findByRole("option", { name: /\/fugue/ });
+    fireEvent.click(option);
+    expect(field.value).toBe("/fugue ");
+    fireEvent.change(field, { target: { value: "/fugue 并行改造" } });
+    const tag = await screen.findByRole("button", { name: "取消多代理攻坚" });
+    expect(tag.querySelector(".input-label")?.textContent).toBe("多代理攻坚");
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith({
+        text: "并行改造",
+        draftText: "/fugue 并行改造",
+        workMode: "fugue",
+        attachments: [],
+      }),
+    );
   });
 
   it("/compact 由 onSlash 处理；/mcp 同样不在输入框里执行", async () => {
