@@ -219,6 +219,11 @@
             // ignore user listener errors
           }
 
+          if (commentMode || commentPins.length > 0) {
+            ensureCommentUi();
+            renderCommentPins();
+          }
+
           if (!fullscreen) {
             if (typeof ResizeObserver !== "undefined") {
               const ro = new ResizeObserver(scheduleMeasure);
@@ -467,6 +472,7 @@
 
           function walk(node, isRootContainer) {
             if (node.nodeType !== Node.ELEMENT_NODE) return;
+            if (node.hasAttribute(COMMENT_UI_ATTR)) return;
             const tag = node.tagName.toUpperCase();
             if (NON_TRAVERSED_TAGS.has(tag)) return;
 
@@ -599,6 +605,13 @@
             for (const s of document.adoptedStyleSheets) sheets.push(s);
           }
           for (const sheet of sheets) {
+            if (
+              sheet.ownerNode &&
+              typeof sheet.ownerNode.hasAttribute === "function" &&
+              sheet.ownerNode.hasAttribute(COMMENT_UI_ATTR)
+            ) {
+              continue;
+            }
             try {
               const rules = sheet.cssRules;
               if (rules) {
@@ -629,6 +642,9 @@
         }
 
         async function syncClonedSubtree(origEl, cloneEl, blobCache) {
+          if (origEl.hasAttribute && origEl.hasAttribute(COMMENT_UI_ATTR)) {
+            return;
+          }
           const tag = origEl.tagName.toUpperCase();
           if (
             tag === "HEAD" ||
@@ -745,7 +761,27 @@
           }
         }
 
-        async function captureDocument() {
+        function clampCaptureRegion(region, docWidth, docHeight) {
+          if (
+            !region ||
+            typeof region !== "object" ||
+            !Number.isFinite(region.x) ||
+            !Number.isFinite(region.y) ||
+            !Number.isFinite(region.width) ||
+            !Number.isFinite(region.height) ||
+            region.width <= 0 ||
+            region.height <= 0
+          ) {
+            return null;
+          }
+          const width = Math.min(Math.ceil(region.width), docWidth);
+          const height = Math.min(Math.ceil(region.height), docHeight);
+          const x = Math.max(0, Math.min(Math.floor(region.x), Math.max(0, docWidth - width)));
+          const y = Math.max(0, Math.min(Math.floor(region.y), Math.max(0, docHeight - height)));
+          return { x, y, width: Math.max(1, width), height: Math.max(1, height) };
+        }
+
+        async function captureDocument(region) {
           if (document.fonts && document.fonts.ready) {
             try {
               await document.fonts.ready;
@@ -764,7 +800,9 @@
           const docHeight = Math.ceil(
             Math.max(docEl.scrollHeight, body.scrollHeight, docEl.clientHeight, 1),
           );
-          const bounds = computeCaptureBounds(docEl, body, docWidth, docHeight);
+          const bounds =
+            clampCaptureRegion(region, docWidth, docHeight) ??
+            computeCaptureBounds(docEl, body, docWidth, docHeight);
 
           let scale = DEFAULT_CAPTURE_SCALE;
           if (bounds.width * scale > MAX_CANVAS_DIM) {
@@ -789,9 +827,12 @@
 
           const cloneRoot = docEl.cloneNode(true);
           await syncClonedSubtree(docEl, cloneRoot, blobCache);
+          cloneRoot.removeAttribute("data-nct-comment-mode");
 
           for (const el of Array.from(
-            cloneRoot.querySelectorAll("script, noscript, style, link"),
+            cloneRoot.querySelectorAll(
+              `script, noscript, style, link, [${COMMENT_UI_ATTR}="true"]`,
+            ),
           )) {
             el.remove();
           }
@@ -848,9 +889,9 @@
           return blob.arrayBuffer();
         }
 
-        async function handleCapture(requestId) {
+        async function handleCapture(requestId, region) {
           try {
-            const png = await captureDocument();
+            const png = await captureDocument(region);
             window.parent.postMessage(
               { type: "nocturne:inline-html:captured", id: instanceId, requestId, png },
               "*",
@@ -868,6 +909,363 @@
             );
           }
         }
+
+        // ---- 面板页面评论层（ADR-0113） ----
+        const COMMENT_UI_ATTR = "data-nct-comment-ui";
+        const COMMENT_TEXT_MAX = 200;
+        const COMMENT_EMPTY_TEXT_TAGS = new Set(["IMG", "CANVAS", "VIDEO", "AUDIO", "HR", "BR"]);
+        const COMMENT_SKIP_TEXT_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
+        let commentMode = false;
+        let commentPins = [];
+        let commentLayer = null;
+        let commentHoverEl = null;
+        let dragStart = null;
+        let preMouseDownSelection = null;
+        let suppressNextClick = false;
+
+        function isInsideCommentUi(node) {
+          let cur = node && node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+          while (cur && cur.nodeType === Node.ELEMENT_NODE) {
+            if (cur.hasAttribute(COMMENT_UI_ATTR)) return true;
+            cur = cur.parentElement;
+          }
+          return false;
+        }
+
+        function ensureCommentUi() {
+          if (!document.getElementById("__nct_comment_style__")) {
+            const style = document.createElement("style");
+            style.id = "__nct_comment_style__";
+            style.setAttribute(COMMENT_UI_ATTR, "true");
+            style.textContent = [
+              ':root[data-nct-comment-mode="true"], :root[data-nct-comment-mode="true"] * { cursor: crosshair !important; }',
+              "#__nct_comment_layer__ { position: absolute; top: 0; left: 0; width: 0; height: 0; overflow: visible; pointer-events: none; z-index: 2147483647; }",
+              "#__nct_comment_hover__ { position: fixed; pointer-events: none; display: none; border: 1.5px solid var(--accent, #c4683b); background: color-mix(in srgb, var(--accent, #c4683b) 10%, transparent); border-radius: 4px; box-sizing: border-box; z-index: 2147483646; }",
+              ".nct-comment-pin { position: absolute; width: 22px; height: 22px; margin: 0; padding: 0; border-radius: 11px 11px 11px 2px; background: var(--accent, #c4683b); color: var(--bg, #ffffff); border: 2px solid var(--bg, #ffffff); box-shadow: 0 2px 6px rgba(0,0,0,0.22); font: 600 11px/1 var(--sans, system-ui, sans-serif); display: flex; align-items: center; justify-content: center; cursor: pointer !important; pointer-events: auto; transform: translate(-2px, -20px); box-sizing: border-box; transition: transform 100ms ease; }",
+              '.nct-comment-pin:hover, .nct-comment-pin[data-active="true"] { transform: translate(-2px, -20px) scale(1.1); }',
+              '.nct-comment-pin[data-active="true"] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #c4683b) 28%, transparent), 0 2px 6px rgba(0,0,0,0.22); }',
+            ].join("\n");
+            document.head.appendChild(style);
+          }
+          if (!commentHoverEl || !commentHoverEl.isConnected) {
+            commentHoverEl = document.createElement("div");
+            commentHoverEl.id = "__nct_comment_hover__";
+            commentHoverEl.setAttribute(COMMENT_UI_ATTR, "true");
+            document.documentElement.appendChild(commentHoverEl);
+          }
+          if (!commentLayer || !commentLayer.isConnected) {
+            commentLayer = document.createElement("div");
+            commentLayer.id = "__nct_comment_layer__";
+            commentLayer.setAttribute(COMMENT_UI_ATTR, "true");
+            document.documentElement.appendChild(commentLayer);
+          }
+        }
+
+        function hideCommentHover() {
+          if (commentHoverEl) commentHoverEl.style.display = "none";
+        }
+
+        function renderCommentPins() {
+          if (commentPins.length === 0 && !commentLayer) return;
+          ensureCommentUi();
+          commentLayer.replaceChildren();
+          for (const pin of commentPins) {
+            if (
+              !pin ||
+              typeof pin.id !== "string" ||
+              !Number.isFinite(pin.x) ||
+              !Number.isFinite(pin.y)
+            ) {
+              continue;
+            }
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "nct-comment-pin";
+            btn.setAttribute(COMMENT_UI_ATTR, "true");
+            btn.setAttribute("data-pin-id", pin.id);
+            btn.setAttribute("aria-label", `评论 ${pin.number}`);
+            if (pin.active) btn.setAttribute("data-active", "true");
+            btn.style.left = `${Math.round(pin.x)}px`;
+            btn.style.top = `${Math.round(pin.y)}px`;
+            btn.textContent = String(pin.number);
+            commentLayer.appendChild(btn);
+          }
+        }
+
+        function setCommentMode(enabled) {
+          commentMode = Boolean(enabled);
+          if (commentMode) {
+            ensureCommentUi();
+            document.documentElement.setAttribute("data-nct-comment-mode", "true");
+          } else {
+            document.documentElement.removeAttribute("data-nct-comment-mode");
+            hideCommentHover();
+            dragStart = null;
+            preMouseDownSelection = null;
+          }
+        }
+
+        function setCommentPins(pins) {
+          commentPins = pins;
+          renderCommentPins();
+        }
+
+        function escapeCssIdent(ident) {
+          if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+            return CSS.escape(ident);
+          }
+          return String(ident)
+            .replace(/^([0-9])/, "\\3$1 ")
+            .replace(/([^\w-])/g, "\\$1");
+        }
+
+        function computeElementPath(el) {
+          if (!el || el === document.body || el === document.documentElement) {
+            return "body";
+          }
+          const segments = [];
+          let cur = el;
+          while (cur && cur !== document.body && cur !== document.documentElement) {
+            if (cur.id) {
+              segments.push(`#${escapeCssIdent(cur.id)}`);
+            } else {
+              const tag = cur.tagName.toLowerCase();
+              let idx = 1;
+              let sib = cur.previousElementSibling;
+              while (sib) {
+                if (sib.tagName.toLowerCase() === tag) idx += 1;
+                sib = sib.previousElementSibling;
+              }
+              segments.push(`${tag}:nth-of-type(${idx})`);
+            }
+            cur = cur.parentElement;
+          }
+          segments.push("body");
+          segments.reverse();
+          return segments.join(" > ");
+        }
+
+        function isHiddenElement(el) {
+          if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+          if (el.hasAttribute(COMMENT_UI_ATTR)) return true;
+          try {
+            const cs = getComputedStyle(el);
+            if (cs.display === "none" || cs.visibility === "hidden") return true;
+          } catch {
+            // ignore
+          }
+          return false;
+        }
+
+        function collectTextFromNode(node, parts) {
+          if (node.nodeType === Node.TEXT_NODE) {
+            if (node.nodeValue) parts.push(node.nodeValue);
+            return;
+          }
+          if (node.nodeType !== Node.ELEMENT_NODE) return;
+          if (isHiddenElement(node)) return;
+          const tag = node.tagName.toUpperCase();
+          if (COMMENT_SKIP_TEXT_TAGS.has(tag) || COMMENT_EMPTY_TEXT_TAGS.has(tag)) return;
+          if (node.namespaceURI === SVG_NS) {
+            if (tag === "TEXT" || tag === "TSPAN") {
+              for (const child of node.childNodes) collectTextFromNode(child, parts);
+              return;
+            }
+            if (tag === "SVG" || tag === "G") {
+              for (const child of node.childNodes) collectTextFromNode(child, parts);
+            }
+            return;
+          }
+          for (const child of node.childNodes) collectTextFromNode(child, parts);
+        }
+
+        function extractVisibleText(el) {
+          if (!el || el.nodeType !== Node.ELEMENT_NODE) return "";
+          const tag = el.tagName.toUpperCase();
+          if (COMMENT_EMPTY_TEXT_TAGS.has(tag)) return "";
+          if ((tag === "INPUT" || tag === "TEXTAREA") && el.namespaceURI !== SVG_NS) {
+            if ((el.type || "").toLowerCase() === "password") return "";
+            return String(el.value || "")
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, COMMENT_TEXT_MAX);
+          }
+          if (el.namespaceURI === SVG_NS) {
+            if (tag !== "TEXT" && tag !== "TSPAN" && tag !== "SVG" && tag !== "G") {
+              return "";
+            }
+          }
+          const parts = [];
+          collectTextFromNode(el, parts);
+          return parts.join(" ").replace(/\s+/g, " ").trim().slice(0, COMMENT_TEXT_MAX);
+        }
+
+        function resolvePickElement(node) {
+          let el = node && node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+          if (!el || el.nodeType !== Node.ELEMENT_NODE) return document.body;
+          if (el === document.documentElement) return document.body;
+          return el;
+        }
+
+        function emitCommentPick(targetNode, clientX, clientY, selectedText) {
+          const target = resolvePickElement(targetNode);
+          if (!target) return;
+          const scrollX = window.scrollX || document.documentElement.scrollLeft || 0;
+          const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+          const x = Math.round(clientX + scrollX);
+          const y = Math.round(clientY + scrollY);
+          const normalizedSelected =
+            typeof selectedText === "string"
+              ? selectedText.replace(/\s+/g, " ").trim().slice(0, COMMENT_TEXT_MAX)
+              : "";
+          const text = normalizedSelected !== "" ? normalizedSelected : extractVisibleText(target);
+          window.parent.postMessage(
+            {
+              type: "nocturne:inline-html:comment-pick",
+              id: instanceId,
+              path: computeElementPath(target),
+              text,
+              x,
+              y,
+              hasVisibleText: text !== "",
+              viewportX: Math.round(clientX),
+              viewportY: Math.round(clientY),
+            },
+            "*",
+          );
+        }
+
+        document.addEventListener(
+          "mousemove",
+          (event) => {
+            if (!commentMode || !commentHoverEl) return;
+            if (isInsideCommentUi(event.target)) {
+              hideCommentHover();
+              return;
+            }
+            const target = resolvePickElement(event.target);
+            if (!target || target === document.body) {
+              hideCommentHover();
+              return;
+            }
+            const rect = target.getBoundingClientRect();
+            if (!(rect.width > 0) || !(rect.height > 0)) {
+              hideCommentHover();
+              return;
+            }
+            commentHoverEl.style.left = `${rect.left}px`;
+            commentHoverEl.style.top = `${rect.top}px`;
+            commentHoverEl.style.width = `${rect.width}px`;
+            commentHoverEl.style.height = `${rect.height}px`;
+            commentHoverEl.style.display = "block";
+          },
+          true,
+        );
+
+        document.addEventListener("mouseleave", hideCommentHover, true);
+
+        document.addEventListener(
+          "mousedown",
+          (event) => {
+            if (!commentMode || event.button !== 0 || isInsideCommentUi(event.target)) return;
+            dragStart = { x: event.clientX, y: event.clientY };
+            preMouseDownSelection = null;
+            const sel = window.getSelection();
+            const selText = sel ? sel.toString().replace(/\s+/g, " ").trim() : "";
+            if (sel && selText !== "" && sel.rangeCount > 0) {
+              const rect = sel.getRangeAt(0).getBoundingClientRect();
+              const pad = 16;
+              if (
+                event.clientX >= rect.left - pad &&
+                event.clientX <= rect.right + pad &&
+                event.clientY >= rect.top - pad &&
+                event.clientY <= rect.bottom + pad
+              ) {
+                preMouseDownSelection = {
+                  text: selText,
+                  target: sel.getRangeAt(0).commonAncestorContainer,
+                };
+              }
+            }
+          },
+          true,
+        );
+
+        document.addEventListener(
+          "mouseup",
+          (event) => {
+            if (!commentMode || !dragStart) return;
+            const start = dragStart;
+            dragStart = null;
+            const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+            if (moved <= 4) return;
+            const sel = window.getSelection();
+            const selText = sel ? sel.toString().replace(/\s+/g, " ").trim() : "";
+            if (sel && selText !== "" && sel.rangeCount > 0) {
+              const anchor = sel.getRangeAt(0).commonAncestorContainer;
+              suppressNextClick = true;
+              setTimeout(() => {
+                suppressNextClick = false;
+              }, 0);
+              preMouseDownSelection = null;
+              emitCommentPick(anchor, event.clientX, event.clientY, selText);
+            }
+          },
+          true,
+        );
+
+        document.addEventListener(
+          "click",
+          (event) => {
+            const rawTarget =
+              event.target && event.target.nodeType === Node.TEXT_NODE
+                ? event.target.parentElement
+                : event.target;
+            const pinBtn =
+              rawTarget && typeof rawTarget.closest === "function"
+                ? rawTarget.closest(".nct-comment-pin")
+                : null;
+            if (pinBtn) {
+              event.preventDefault();
+              event.stopPropagation();
+              event.stopImmediatePropagation();
+              const pinId = pinBtn.getAttribute("data-pin-id") || "";
+              const rect = pinBtn.getBoundingClientRect();
+              window.parent.postMessage(
+                {
+                  type: "nocturne:inline-html:comment-pin-click",
+                  id: instanceId,
+                  pinId,
+                  viewportX: Math.round(rect.left + rect.width / 2),
+                  viewportY: Math.round(rect.bottom),
+                },
+                "*",
+              );
+              return;
+            }
+            if (!commentMode) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+            if (suppressNextClick) {
+              suppressNextClick = false;
+              return;
+            }
+            if (isInsideCommentUi(event.target)) return;
+            const sel = window.getSelection();
+            const liveSel = sel ? sel.toString().replace(/\s+/g, " ").trim() : "";
+            const chosenSel = liveSel !== "" ? liveSel : preMouseDownSelection?.text || "";
+            const target =
+              liveSel !== "" && sel && sel.rangeCount > 0
+                ? sel.getRangeAt(0).commonAncestorContainer
+                : preMouseDownSelection
+                  ? preMouseDownSelection.target
+                  : event.target;
+            preMouseDownSelection = null;
+            emitCommentPick(target, event.clientX, event.clientY, chosenSel);
+          },
+          true,
+        );
 
         window.addEventListener("message", (event) => {
           if (event.source !== window.parent) return;
@@ -889,6 +1287,12 @@
           } else if (data.type === "nocturne:inline-html:theme") {
             applyTheme(data.theme, data.colorScheme, data.fontSize);
             scheduleMeasure();
+          } else if (data.type === "nocturne:inline-html:comment-mode") {
+            if (data.id !== instanceId) return;
+            setCommentMode(Boolean(data.enabled));
+          } else if (data.type === "nocturne:inline-html:comment-pins") {
+            if (data.id !== instanceId) return;
+            setCommentPins(Array.isArray(data.pins) ? data.pins : []);
           } else if (data.type === "nocturne:inline-html:capture") {
             if (
               !rendered ||
@@ -898,7 +1302,7 @@
             ) {
               return;
             }
-            void handleCapture(data.requestId);
+            void handleCapture(data.requestId, data.region);
           }
         });
 
