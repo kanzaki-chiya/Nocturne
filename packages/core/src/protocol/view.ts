@@ -12,6 +12,7 @@ import {
   type SuiteView,
 } from "./suite.js";
 import {
+  normalizeWorkModeSnapshot,
   reduceGoal,
   reducePlan,
   type GoalState,
@@ -665,7 +666,9 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(event.payload.suiteReport !== undefined
           ? { suiteReport: event.payload.suiteReport }
           : {}),
-        ...(event.payload.workMode !== undefined ? { workMode: event.payload.workMode } : {}),
+        ...(event.payload.workMode !== undefined
+          ? { workMode: normalizeWorkModeSnapshot(event.payload.workMode) }
+          : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
           : {}),

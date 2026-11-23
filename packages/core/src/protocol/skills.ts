@@ -163,7 +163,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "grill-me",
   "goal",
   "plan",
-  "boost",
+  "fugue",
   "ensemble",
   "cadenza",
   "suite",

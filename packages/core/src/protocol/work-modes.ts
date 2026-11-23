@@ -8,12 +8,28 @@ export const WORK_MODE_NAMES = [
   "grill-me",
   "goal",
   "plan",
-  "boost",
+  "fugue",
   "ensemble",
   "cadenza",
 ] as const;
 
 export type WorkModeName = (typeof WORK_MODE_NAMES)[number];
+
+/** 旧日志中改名前的执行方式名映射；只用于读取旧快照，不作为命令别名（ADR-0076 修订）。 */
+const LEGACY_WORK_MODE_NAMES: Readonly<Record<string, WorkModeName>> = {
+  boost: "fugue",
+};
+
+/** 将旧日志中的执行方式名归一化为现行名；未知名字原样返回。 */
+export function normalizeWorkModeName(name: string): string {
+  return LEGACY_WORK_MODE_NAMES[name] ?? name;
+}
+
+/** 归一化快照中的执行方式名，说明块正文与来源原样沿用。 */
+export function normalizeWorkModeSnapshot(workMode: WorkModeSnapshot): WorkModeSnapshot {
+  const name = normalizeWorkModeName(workMode.name);
+  return name === workMode.name ? workMode : { ...workMode, name };
+}
 
 /**
  * `message.user.workMode`：说明块正文快照，回放与回退沿用，不重新生成。
@@ -34,7 +50,8 @@ export function userWorkMode(
   workMode: { name: string; source?: string | undefined } | undefined,
 ): WorkModeName | undefined {
   if (workMode === undefined || workMode.source !== undefined) return undefined;
-  return isWorkModeName(workMode.name) ? workMode.name : undefined;
+  const name = normalizeWorkModeName(workMode.name);
+  return isWorkModeName(name) ? name : undefined;
 }
 
 /** Runtime 写入的模式消息（不是用户提交的） */
@@ -263,7 +280,7 @@ const USAGE: Record<WorkModeName, string> = {
   "grill-me": "用法：/grill-me 需求",
   goal: "用法：/goal 目标",
   plan: "用法：/plan 任务",
-  boost: "用法：/boost 任务",
+  fugue: "用法：/fugue 任务",
   ensemble: "用法：/ensemble 任务",
   cadenza: "用法：/cadenza 要求",
 };
@@ -275,9 +292,9 @@ const ACTIONS: Partial<Record<WorkModeName, Record<string, WorkModeAction>>> = {
   ensemble: { board: "ensemble-board", end: "ensemble-end" },
 };
 
-/** 执行方式对外显示的命令名，与内部名一致。 */
+/** 执行方式对外显示的命令名；旧日志里的历史名映射到现行名。 */
 export function workModeCommandName(name: string): string {
-  return name;
+  return normalizeWorkModeName(name);
 }
 
 /**
@@ -307,7 +324,7 @@ export const WORK_MODE_COMMANDS: readonly { name: string; summary: string }[] = 
   { name: "/grill-me", summary: "追问需求" },
   { name: "/goal", summary: "目标模式" },
   { name: "/plan", summary: "计划模式" },
-  { name: "/boost", summary: "多代理攻坚" },
+  { name: "/fugue", summary: "多代理攻坚" },
   { name: "/ensemble", summary: "合奏协作" },
   { name: "/cadenza", summary: "面板页面" },
 ];

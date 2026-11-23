@@ -25,6 +25,7 @@ import {
   replaySessionView,
   userEntryText,
   userWorkMode,
+  workModeCommandName,
   workModeDisplayText,
   workModeOrigins,
   type DurableEvent,
@@ -781,9 +782,9 @@ describe("/plan（ADR-0076 §5）", () => {
   });
 });
 
-describe("/boost（ADR-0076 §6）", () => {
+describe("/fugue（ADR-0076 §6）", () => {
   async function initGitRepo(): Promise<string> {
-    const root = makeTmp("nct-wm-boost-");
+    const root = makeTmp("nct-wm-fugue-");
     await worktreeGit(root, ["init"]);
     await worktreeGit(root, ["config", "core.autocrlf", "false"]);
     writeFileSync(path.join(root, "readme.txt"), "base\n");
@@ -803,17 +804,137 @@ describe("/boost（ADR-0076 §6）", () => {
     return root;
   }
 
+  it("/fugue 解析为 fugue 且说明块以 Fugue mode 开头；/boost 不再解析为执行方式", async () => {
+    expect(parseWorkModeSlash("/fugue")).toEqual({
+      kind: "usage",
+      name: "fugue",
+      hint: "用法：/fugue 任务",
+    });
+    expect(parseWorkModeSlash("/fugue 并行改造")).toEqual({
+      kind: "submit",
+      workMode: "fugue",
+      text: "并行改造",
+    });
+    expect(isWorkModeName("fugue")).toBe(true);
+    expect(isWorkModeName("boost")).toBe(false);
+    expect(parseWorkModeSlash("/boost")).toBeUndefined();
+    expect(parseWorkModeSlash("/boost 并行改造")).toBeUndefined();
+
+    const provider = new FakeProvider({ scripts: [textScript("已调查")] });
+    const runtime = await makeRuntime(provider, {
+      subagent: { background: true, maxBackground: 3 },
+    });
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    try {
+      await rejects(
+        session.submit({ text: "攻坚", workMode: "boost" as never }),
+        "invalid_command",
+      );
+      await session.submit({ text: "并行改造", workMode: "fugue" });
+      const message = users(session)[0];
+      expect(message?.payload.workMode?.name).toBe("fugue");
+      expect(message?.payload.workMode?.body).toMatch(/^Fugue mode:/);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("旧日志 workMode.name 为 boost 时按 fugue 读取、回放与重发，说明块正文原样沿用", async () => {
+    const legacyBody = "Boost mode: legacy snapshot body";
+    expect(userWorkMode({ name: "boost" })).toBe("fugue");
+    expect(userWorkMode({ name: "boost", source: "runtime" })).toBeUndefined();
+    expect(workModeCommandName("boost")).toBe("fugue");
+    expect(workModeDisplayText("并行改造", { name: "boost" })).toBe("/fugue 并行改造");
+
+    const sessionsDir = makeTmp("nct-wm-legacy-sd-");
+    const cwd = makeTmp("nct-wm-legacy-ws-");
+    const first = await makeRuntime(new FakeProvider({ scripts: [textScript("旧回复")] }), {
+      sessionsDir,
+      cwd,
+      subagent: { background: true },
+    });
+    const created = await first.createSession({ model: "fake/fake-1" });
+    await created.submit({ text: "并行改造", workMode: "fugue" });
+    const sessionId = created.id;
+    await created.close();
+
+    // 把磁盘上的 message.user 快照改写为旧版本落盘的 name: "boost"
+    const logPath = path.join(sessionsDir, `${sessionId}.jsonl`);
+    const rewritten = readFileSync(logPath, "utf8")
+      .trimEnd()
+      .split("\n")
+      .map((line) => {
+        const parsed = decodeDurableEvent(line);
+        if (parsed.type !== "message.user") return line;
+        return encodeDurableEvent({
+          ...parsed,
+          payload: {
+            ...parsed.payload,
+            content: [
+              ...parsed.payload.content.slice(0, -1),
+              { type: "text", text: `<work-mode name="boost">\n${legacyBody}\n</work-mode>` },
+            ],
+            workMode: { name: "boost", body: legacyBody },
+          },
+        });
+      })
+      .join("\n");
+    writeFileSync(logPath, `${rewritten}\n`, "utf8");
+    const beforeResumeDisk = readFileSync(logPath, "utf8");
+
+    const second = await makeRuntime(new FakeProvider({ scripts: [textScript("重发回复")] }), {
+      sessionsDir,
+      cwd,
+      subagent: { background: true },
+    });
+    const resumed = await second.resumeSession(sessionId);
+    try {
+      // 不迁移、不改写旧日志文件
+      expect(readFileSync(logPath, "utf8")).toBe(beforeResumeDisk);
+      const legacyEvent = users(resumed)[0];
+      if (legacyEvent === undefined) throw new Error("missing legacy user event");
+      expect(legacyEvent.payload.workMode).toEqual({ name: "boost", body: legacyBody });
+      expect(userWorkMode(legacyEvent.payload.workMode)).toBe("fugue");
+
+      // 回放视图归一化名字，说明块正文原样沿用
+      const view = replaySessionView(resumed.durableEvents());
+      const entry = view.entries.find((item) => item.kind === "user");
+      if (entry?.kind !== "user") throw new Error("missing user entry");
+      expect(entry.workMode).toEqual({ name: "fugue", body: legacyBody });
+      expect(userEntryText(entry)).toBe("并行改造");
+
+      // 回退列表与回填文本映射为 /fugue
+      const targets = await resumed.rewindTargets();
+      expect(targets[0]).toMatchObject({
+        firstLine: "/fugue 并行改造",
+        text: "/fugue 并行改造",
+      });
+
+      // 编辑并重发保留执行方式 fugue
+      await resumed.rewind(legacyEvent.seq, "conversation");
+      await resumed.submit({
+        text: "并行改造 v2",
+        workMode: userWorkMode(legacyEvent.payload.workMode),
+      });
+      const resent = users(resumed).at(-1);
+      expect(resent?.payload.workMode?.name).toBe("fugue");
+      expect(resent?.payload.workMode?.body).toMatch(/^Fugue mode:/);
+    } finally {
+      await resumed.close();
+    }
+  });
+
   it("未开启后台子代理或子代理停用时报 invalid_command；非 git 目录写明只并行调查", async () => {
     const noBg = await makeRuntime(new FakeProvider({ scripts: [] }));
     const s1 = await noBg.createSession({ model: "fake/fake-1" });
-    await rejects(s1.submit({ text: "攻坚", workMode: "boost" }), "invalid_command");
+    await rejects(s1.submit({ text: "攻坚", workMode: "fugue" }), "invalid_command");
     await s1.close();
 
     const disabled = await makeRuntime(new FakeProvider({ scripts: [] }), {
       subagent: { enabled: false, background: true },
     });
     const s2 = await disabled.createSession({ model: "fake/fake-1" });
-    await rejects(s2.submit({ text: "攻坚", workMode: "boost" }), "invalid_command");
+    await rejects(s2.submit({ text: "攻坚", workMode: "fugue" }), "invalid_command");
     await s2.close();
 
     const provider = new FakeProvider({ scripts: [textScript("已调查")] });
@@ -821,8 +942,9 @@ describe("/boost（ADR-0076 §6）", () => {
       subagent: { background: true, maxBackground: 2 },
     });
     const s3 = await nonGit.createSession({ model: "fake/fake-1" });
-    await s3.submit({ text: "攻坚", workMode: "boost" });
+    await s3.submit({ text: "攻坚", workMode: "fugue" });
     const body = users(s3)[0]?.payload.workMode?.body ?? "";
+    expect(body).toMatch(/^Fugue mode:/);
     expect(body).toContain("at most 2 background subagents");
     expect(body).toContain("not a git repository");
     expect(body).toContain("use ask_user to ask whether to set that up");
@@ -924,10 +1046,11 @@ describe("/boost（ADR-0076 §6）", () => {
       model: "fake/fake-1",
       permissionPreset: "guarded",
     });
-    await session.submit({ text: "并行实现 A 和 B", workMode: "boost" });
-    const boostBody = users(session)[0]?.payload.workMode?.body ?? "";
-    expect(boostBody).toContain('isolation: "worktree"');
-    expect(boostBody).toContain("apply_subagent_changes");
+    await session.submit({ text: "并行实现 A 和 B", workMode: "fugue" });
+    const fugueBody = users(session)[0]?.payload.workMode?.body ?? "";
+    expect(fugueBody).toMatch(/^Fugue mode:/);
+    expect(fugueBody).toContain('isolation: "worktree"');
+    expect(fugueBody).toContain("apply_subagent_changes");
 
     await vi.waitFor(
       () => {
@@ -1020,7 +1143,7 @@ describe("模式消息来源与重发（ADR-0076 §1）", () => {
       model: "fake/fake-1",
       permissionPreset: "auto-edit",
     });
-    for (const name of ["grill-me", "boost", "plan", "goal"] as const) {
+    for (const name of ["grill-me", "fugue", "plan", "goal"] as const) {
       await session.submit({ text: `任务 ${name}`, workMode: name });
       if (name === "plan") await session.cancelPlan();
       if (name === "goal") await session.stopGoal();

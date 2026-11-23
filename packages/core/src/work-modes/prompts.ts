@@ -5,9 +5,9 @@
 import type { WorkModeName } from "../protocol/index.js";
 
 export interface WorkModeContext {
-  /** 宿主声明的每会话后台子代理上限（/boost） */
+  /** 宿主声明的每会话后台子代理上限（/fugue） */
   maxBackground?: number | undefined;
-  /** 工作区是否在 git 仓库内（/boost 能否用工作树隔离） */
+  /** 工作区是否在 git 仓库内（/fugue 能否用工作树隔离） */
   gitRepository?: boolean | undefined;
 }
 
@@ -37,13 +37,13 @@ const PLAN = [
   "- The user will either comment on the plan or approve it. When they comment, revise the plan and give the complete updated plan again. Implementation starts only after approval.",
 ].join("\n");
 
-function boostBody(context: WorkModeContext): string {
+function fugueBody(context: WorkModeContext): string {
   const max = context.maxBackground ?? 3;
   const git = context.gitRepository !== false;
   const apply =
     'As each writable subagent finishes, review its result and apply its changes with apply_subagent_changes (use mode "clean" first, then "3way" and resolve conflict markers if needed).';
   return [
-    "Boost mode: the user explicitly chose parallel execution for the request above. Decompose it, run independent work in parallel with background subagents, then integrate and run regression checks.",
+    "Fugue mode: the user explicitly chose parallel execution for the request above. Decompose it, run independent work in parallel with background subagents, then integrate and run regression checks.",
     "- Delegate by default: when the request splits into two or more independent slices, give each one to a background subagent, even if you could finish them yourself. If it does not split, do it yourself and say why in one sentence.",
     `- You can run at most ${max} background subagents at the same time in this session. Never poll or sleep waiting for them. After launching a batch, end your turn without starting the integration work; their results will arrive as messages.`,
     git
@@ -83,7 +83,7 @@ const BODIES: Record<WorkModeName, (context: WorkModeContext) => string> = {
   "grill-me": () => GRILL_ME,
   goal: () => GOAL,
   plan: () => PLAN,
-  boost: boostBody,
+  fugue: fugueBody,
   ensemble: ensembleBody,
   cadenza: () => CADENZA,
 };

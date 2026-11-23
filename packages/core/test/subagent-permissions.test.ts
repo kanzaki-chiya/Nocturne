@@ -2180,7 +2180,7 @@ describe("subagent 权限转发：显式超时暂停、并发混排、生命周�
     await sRt.close();
   });
 
-  it("task/web_fetch 工具描述、boost 提示词与交互/非交互子提示词准确区分交互转发与非交互拒绝", async () => {
+  it("task/web_fetch 工具描述、fugue 提示词与交互/非交互子提示词准确区分交互转发与非交互拒绝", async () => {
     const ws = makeTmp("nct-sp-desc-");
     const sessionsDir = makeTmp("nct-sp-desc-s-");
     const basePlatform = {
@@ -2297,10 +2297,10 @@ describe("subagent 权限转发：显式超时暂停、并发混排、生命周�
     const childNi = niCap.seen.find((p) => p.isChild);
     expect(childNi?.systemPrompt).toContain("需要确认的操作会被直接拒绝");
 
-    const boost = workModeBody("boost", { gitRepository: true, maxBackground: 3 });
-    expect(boost).toContain("forward permission requests to the user for confirmation");
-    expect(boost).toContain("In non-interactive sessions");
-    expect(boost).not.toContain(
+    const fugue = workModeBody("fugue", { gitRepository: true, maxBackground: 3 });
+    expect(fugue).toContain("forward permission requests to the user for confirmation");
+    expect(fugue).toContain("In non-interactive sessions");
+    expect(fugue).not.toContain(
       "Subagents are non-interactive and cannot ask the user for approval",
     );
   });

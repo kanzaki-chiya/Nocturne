@@ -3937,9 +3937,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           throw new RuntimeCommandError("invalid_command", "workMode 与 skill、delegate 互斥");
         if (meta.parent !== undefined)
           throw new RuntimeCommandError("invalid_command", "子会话不能使用执行方式");
-        // ADR-0076 §6：/boost 依赖后台子代理
+        // ADR-0076 §6：/fugue 依赖后台子代理
         if (
-          input.workMode === "boost" &&
+          input.workMode === "fugue" &&
           (!subagentEnabled || options.subagent?.background !== true || meta.schedule !== undefined)
         )
           throw new RuntimeCommandError("invalid_command", "当前环境不支持后台子代理");
@@ -4104,7 +4104,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       let workMode: WorkModeSnapshot | undefined;
       if (input.workMode !== undefined) {
         const gitRepository =
-          input.workMode === "boost" || input.workMode === "ensemble"
+          input.workMode === "fugue" || input.workMode === "ensemble"
             ? await inspectWorktreeRepository(currentWorkspaceRoot()).then(
                 () => true,
                 () => false,
