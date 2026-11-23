@@ -6,7 +6,9 @@
  * 到达后按发送顺序替换掉。拒收时丢掉本地条目，由输入框把草稿放回去。
  */
 import type { ComposerSubmit } from "./Composer.js";
+import { toPageCommentsSnapshot } from "./page-comments.js";
 import {
+  pageCommentsLabel,
   userEntryText,
   type ContentBlock,
   type FileAttachment,
@@ -80,7 +82,9 @@ function sameTurn(local: LocalOutgoing, entry: UserEntry): boolean {
   return (
     userEntryText(entry) === local.input.text &&
     (entry.workMode?.name ?? undefined) === local.input.workMode &&
-    (entry.delegate?.agent ?? undefined) === local.input.delegate?.agent
+    (entry.delegate?.agent ?? undefined) === local.input.delegate?.agent &&
+    (entry.pageComments?.page ?? undefined) === local.input.pageComments?.page &&
+    (entry.pageComments?.version ?? undefined) === local.input.pageComments?.version
   );
 }
 
@@ -257,6 +261,9 @@ function toUserEntry(
     ...(files.length > 0 ? { files } : {}),
     ...(local.input.delegate ? { delegate: local.input.delegate } : {}),
     ...(local.input.workMode ? { workMode: { name: local.input.workMode, body: "" } } : {}),
+    ...(local.input.pageComments
+      ? { pageComments: toPageCommentsSnapshot(local.input.pageComments) }
+      : {}),
   };
 }
 
@@ -281,6 +288,16 @@ export function localPendingItems(book: OutgoingBook): PendingInputItem[] {
       createdAt: item.sentAt,
       paused: false,
       ...(item.input.workMode ? { workMode: item.input.workMode } : {}),
+      ...(item.input.pageComments
+        ? {
+            pageComments: {
+              page: item.input.pageComments.page,
+              version: item.input.pageComments.version,
+              title: item.input.pageComments.title,
+              count: item.input.pageComments.comments.length,
+            },
+          }
+        : {}),
     }));
 }
 
@@ -312,6 +329,9 @@ export function outgoingTitle(book: OutgoingBook): string | undefined {
   for (const raw of first.input.text.split("\n")) {
     const line = raw.trim();
     if (line !== "") return line;
+  }
+  if (first.input.pageComments !== undefined) {
+    return pageCommentsLabel(first.input.pageComments);
   }
   return undefined;
 }

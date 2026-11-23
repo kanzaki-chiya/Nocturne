@@ -13,11 +13,13 @@ import {
 } from "react";
 
 import {
+  pageCommentsLabel,
   parseFileRefs,
   parseWorkModeSlash,
   type ImageMimeType,
   type ExternalAgentOverview,
   type McpServerViewState,
+  type PageCommentsInput,
   type PendingInputsSnapshot,
   type SkillOverview,
   type SkillInvocation,
@@ -26,6 +28,7 @@ import {
   type WorkModeName,
   type WorkspaceBranch,
 } from "@nocturne/core/protocol";
+import { toPageCommentsInput, type DraftPageCommentGroup } from "./page-comments";
 
 import { isValidGitBranchName, useBranchMenu } from "./BranchMenu";
 import { completeSlash, parseSlash, type SlashGroup } from "./commands";
@@ -145,6 +148,8 @@ export interface ComposerSubmit {
    */
   draftText?: string;
   attachments: { data: Uint8Array; mimeType: string; label: string; source?: "paste" | "upload" }[];
+  /** 面板页面评论（ADR-0113） */
+  pageComments?: PageCommentsInput;
 }
 
 export interface ComposerProps {
@@ -167,6 +172,10 @@ export interface ComposerProps {
   onInterrupt: () => void | Promise<void>;
   /** 待发输入快照（ADR-0070）；默认空列表 */
   pendingInputs?: PendingInputsSnapshot | undefined;
+  /** 未发送的面板页面评论分组（ADR-0113）；有评论时显示在输入框上方 */
+  pageComments?: readonly DraftPageCommentGroup[] | undefined;
+  /** 点 × 移除某组页面评论 */
+  onRemovePageComments?: ((page: string, version: number) => void) | undefined;
   /** 编辑/切换插话排队 */
   onUpdatePending?:
     ((id: string, patch: { mode?: "steer" | "queue"; text?: string }) => Promise<void>) | undefined;
@@ -281,6 +290,8 @@ export function Composer({
   onSubmit,
   onInterrupt,
   pendingInputs,
+  pageComments,
+  onRemovePageComments,
   onUpdatePending,
   onCancelPending,
   onResumePending,
@@ -809,7 +820,7 @@ export function Composer({
         setEnterHint(usage?.kind === "usage" ? usage.hint : `用法：/${selectedMode} 任务`);
         return;
       }
-      if (attachmentsRef.current.length === 0) return;
+      if (attachmentsRef.current.length === 0 && (pageComments?.length ?? 0) === 0) return;
     }
     const parsed = parseSlash(text, variant, skills, externalAgents);
     if (parsed?.kind === "unknown" || parsed?.kind === "redirect") {
@@ -825,12 +836,16 @@ export function Composer({
       parsed?.kind === "work" ? parsed.workMode : workModeFromTag ? selectedMode : undefined;
     const task = parsed?.kind === "work" ? parsed.text : text;
     const snapshot = attachmentsRef.current.slice();
+    const firstCommentGroup = pageComments?.[0];
     const payload: ComposerSubmit = {
       text: task,
       ...(task !== text ? { draftText: text } : {}),
       ...(effectiveWorkMode !== undefined ? { workMode: effectiveWorkMode } : {}),
       ...(parsed?.kind === "skill" ? { skill: parsed.invocation } : {}),
       ...(parsed?.kind === "agent" ? { delegate: parsed.delegate } : {}),
+      ...(firstCommentGroup !== undefined
+        ? { pageComments: toPageCommentsInput(firstCommentGroup) }
+        : {}),
       attachments: snapshot.map((attachment) => ({
         data: attachment.data,
         mimeType: attachment.mimeType,
@@ -1237,7 +1252,9 @@ export function Composer({
   );
   const slashHint = parsedSlash?.kind === "redirect" ? parsedSlash.hint : enterHint;
   const canSend =
-    workMode !== null ? draft.trim() !== "" : draft.trim() !== "" || attachments.length > 0;
+    workMode !== null
+      ? draft.trim() !== ""
+      : draft.trim() !== "" || attachments.length > 0 || (pageComments?.length ?? 0) > 0;
   const shownError = error ?? controls?.error ?? null;
   const selectedWorkMode = WORK_MODE_ITEMS.find((item) => item.name === (typedMode ?? workMode));
   const mcpEntries = Object.entries(mcpServers ?? {}).sort(([a], [b]) => a.localeCompare(b));
@@ -1592,6 +1609,26 @@ export function Composer({
           }}
           onDrop={onDrop}
         >
+          {pageComments !== undefined && pageComments.length > 0 && (
+            <div className="page-comment-chips">
+              {pageComments.map((group) => (
+                <span key={`${group.page}:${group.version}`} className="page-comment-chip">
+                  <Icon name="chat_1" size={ICON_SM} />
+                  <span className="page-comment-chip-text">{pageCommentsLabel(group)}</span>
+                  <button
+                    type="button"
+                    className="page-comment-chip-remove"
+                    aria-label="移除评论"
+                    onClick={() => {
+                      onRemovePageComments?.(group.page, group.version);
+                    }}
+                  >
+                    <Icon name="close" size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           {attachments.length > 0 && (
             <ImageViewerBoundary>
               <DraftAttachments attachments={attachments} onRemove={removeAttachment} />

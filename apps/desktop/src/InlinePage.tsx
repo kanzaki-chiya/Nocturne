@@ -3,6 +3,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -10,6 +11,7 @@ import {
 import {
   resolveInlinePageId,
   type FileAttachment,
+  type PageCommentScreenshotInput,
   type SessionPage,
   type SessionPageVersion,
 } from "@nocturne/core/protocol";
@@ -22,7 +24,13 @@ import {
 } from "./ImageViewer";
 import { Menu, MenuItem } from "./Menu";
 import { PageModelPermission, PageModelStop, usePageBridge, type PageSession } from "./page-bridge";
-import { ICON_LG, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
+import {
+  clampCommentPopoverPosition,
+  commentCaptureRegion,
+  type CaptureRegion,
+  type DraftPageComment,
+} from "./page-comments";
+import { Button, ICON_LG, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
 import "./inline-page.css";
 
 export const INLINE_PAGE_COLLAPSE_HEIGHT = 420;
@@ -132,6 +140,71 @@ interface CapturedMessage {
   error?: unknown;
 }
 
+interface SandboxCommentPin {
+  id: string;
+  number: number;
+  x: number;
+  y: number;
+  active?: boolean;
+}
+
+interface CommentPickMessage {
+  type: "nocturne:inline-html:comment-pick";
+  id: string;
+  path: string;
+  text: string;
+  x: number;
+  y: number;
+  hasVisibleText: boolean;
+  viewportX: number;
+  viewportY: number;
+}
+
+interface CommentPinClickMessage {
+  type: "nocturne:inline-html:comment-pin-click";
+  id: string;
+  pinId: string;
+  viewportX: number;
+  viewportY: number;
+}
+
+function isCommentPickMessage(data: unknown, expectedId: string): data is CommentPickMessage {
+  if (typeof data !== "object" || data === null) return false;
+  const rec = data as Record<string, unknown>;
+  return (
+    rec.type === "nocturne:inline-html:comment-pick" &&
+    rec.id === expectedId &&
+    typeof rec.path === "string" &&
+    typeof rec.text === "string" &&
+    typeof rec.x === "number" &&
+    Number.isFinite(rec.x) &&
+    typeof rec.y === "number" &&
+    Number.isFinite(rec.y) &&
+    typeof rec.hasVisibleText === "boolean" &&
+    typeof rec.viewportX === "number" &&
+    Number.isFinite(rec.viewportX) &&
+    typeof rec.viewportY === "number" &&
+    Number.isFinite(rec.viewportY)
+  );
+}
+
+function isCommentPinClickMessage(
+  data: unknown,
+  expectedId: string,
+): data is CommentPinClickMessage {
+  if (typeof data !== "object" || data === null) return false;
+  const rec = data as Record<string, unknown>;
+  return (
+    rec.type === "nocturne:inline-html:comment-pin-click" &&
+    rec.id === expectedId &&
+    typeof rec.pinId === "string" &&
+    typeof rec.viewportX === "number" &&
+    Number.isFinite(rec.viewportX) &&
+    typeof rec.viewportY === "number" &&
+    Number.isFinite(rec.viewportY)
+  );
+}
+
 function isCapturedMessage(data: unknown, expectedId: string): data is CapturedMessage {
   if (typeof data !== "object" || data === null) return false;
   const rec = data as Record<string, unknown>;
@@ -206,11 +279,28 @@ function useSandboxedHtmlFrame(opts: {
   fullscreen: boolean;
   session?: PageSession | undefined;
   page?: string | undefined;
+  commentMode?: boolean | undefined;
+  commentPins?: readonly SandboxCommentPin[] | undefined;
+  onCommentPick?: ((pick: CommentPickMessage) => void) | undefined;
+  onCommentPinClick?: ((click: CommentPinClickMessage) => void) | undefined;
   onResize?: ((height: number) => void) | undefined;
   onEscape?: (() => void) | undefined;
   onCaptured?: ((message: CapturedMessage) => void) | undefined;
 }) {
-  const { html, instanceId, fullscreen, onResize, onEscape, onCaptured, page, session } = opts;
+  const {
+    html,
+    instanceId,
+    fullscreen,
+    commentMode,
+    commentPins,
+    onCommentPick,
+    onCommentPinClick,
+    onResize,
+    onEscape,
+    onCaptured,
+    page,
+    session,
+  } = opts;
   const bridge = usePageBridge(session, page, instanceId);
   const onPageMessage = useRef(bridge.onMessage);
   onPageMessage.current = bridge.onMessage;
@@ -221,8 +311,41 @@ function useSandboxedHtmlFrame(opts: {
   onEscapeRef.current = onEscape;
   const onCapturedRef = useRef(onCaptured);
   onCapturedRef.current = onCaptured;
+  const onCommentPickRef = useRef(onCommentPick);
+  onCommentPickRef.current = onCommentPick;
+  const onCommentPinClickRef = useRef(onCommentPinClick);
+  onCommentPinClickRef.current = onCommentPinClick;
+  const commentModeRef = useRef(commentMode);
+  commentModeRef.current = commentMode;
+  const commentPinsRef = useRef(commentPins);
+  commentPinsRef.current = commentPins;
   const htmlRef = useRef(html);
   htmlRef.current = html;
+
+  const postCommentState = useCallback(() => {
+    const win = iframeRef.current?.contentWindow;
+    if (!win || htmlRef.current === undefined) return;
+    if (commentModeRef.current !== undefined) {
+      win.postMessage(
+        {
+          type: "nocturne:inline-html:comment-mode",
+          id: instanceId,
+          enabled: commentModeRef.current,
+        },
+        "*",
+      );
+    }
+    if (commentPinsRef.current !== undefined) {
+      win.postMessage(
+        {
+          type: "nocturne:inline-html:comment-pins",
+          id: instanceId,
+          pins: commentPinsRef.current,
+        },
+        "*",
+      );
+    }
+  }, [instanceId]);
 
   const postRender = useCallback(() => {
     const win = iframeRef.current?.contentWindow;
@@ -242,7 +365,8 @@ function useSandboxedHtmlFrame(opts: {
       },
       "*",
     );
-  }, [bridge.enabled, fullscreen, instanceId]);
+    postCommentState();
+  }, [bridge.enabled, fullscreen, instanceId, postCommentState]);
 
   const postTheme = useCallback(() => {
     const win = iframeRef.current?.contentWindow;
@@ -260,6 +384,11 @@ function useSandboxedHtmlFrame(opts: {
   }, []);
 
   useEffect(() => {
+    if (html === undefined) return;
+    postCommentState();
+  }, [html, commentMode, commentPins, postCommentState]);
+
+  useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const targetWindow = iframeRef.current?.contentWindow ?? null;
       if (targetWindow === null) return;
@@ -275,6 +404,14 @@ function useSandboxedHtmlFrame(opts: {
       }
       if (isCapturedMessage(event.data, instanceId)) {
         onCapturedRef.current?.(event.data);
+        return;
+      }
+      if (isCommentPickMessage(event.data, instanceId)) {
+        onCommentPickRef.current?.(event.data);
+        return;
+      }
+      if (isCommentPinClickMessage(event.data, instanceId)) {
+        onCommentPinClickRef.current?.(event.data);
         return;
       }
       if (isValidResizeMessage(event.data, instanceId)) {
@@ -747,20 +884,81 @@ export function PageEntryRow({
   );
 }
 
+export interface PagePaneCommentsController {
+  /** 返回当前页面某个版本的未发送评论 */
+  itemsForVersion: (version: number) => readonly DraftPageComment[];
+  onAdd: (version: number, title: string, item: DraftPageComment) => void;
+  onUpdate: (version: number, id: string, note: string) => void;
+  onDelete: (version: number, id: string) => void;
+  /** 检查当前模型是否支持图片输入（只在无可见文字元素时调用） */
+  supportsImageInput?: (() => Promise<boolean>) | undefined;
+}
+
 export interface PagePaneProps {
   page: SessionPage | undefined;
   selectedVersion: number | undefined;
   session: PageSession | undefined;
   onSelectVersion: (version: number | undefined) => void;
+  /** 面板页面评论（ADR-0113）；仅桌面面板传入，内嵌页与全屏遮罩不传 */
+  comments?: PagePaneCommentsController | undefined;
 }
 
-export function PagePane({ page, selectedVersion, session, onSelectVersion }: PagePaneProps) {
+type CommentEditorState =
+  | {
+      mode: "new";
+      tempId: string;
+      path: string;
+      text: string;
+      x: number;
+      y: number;
+      viewportX: number;
+      viewportY: number;
+      note: string;
+      screenshotPromise?: Promise<PageCommentScreenshotInput | undefined> | undefined;
+    }
+  | {
+      mode: "edit";
+      id: string;
+      viewportX: number;
+      viewportY: number;
+      note: string;
+    };
+
+let nextDraftCommentId = 1;
+function makeDraftCommentId(): string {
+  nextDraftCommentId += 1;
+  return `pc-${nextDraftCommentId}`;
+}
+
+export function PagePane({
+  page,
+  selectedVersion,
+  session,
+  onSelectVersion,
+  comments,
+}: PagePaneProps) {
   const saveFile = useSaveFile();
   const instanceId = useId();
   const sandboxSrc = resolveSandboxFrameSrc();
   const [downloadError, setDownloadError] = useState<string>();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [commentMode, setCommentMode] = useState(false);
+  const [editor, setEditor] = useState<CommentEditorState | null>(null);
   const downloadBtnRef = useRef<HTMLButtonElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const editorInputRef = useRef<HTMLTextAreaElement>(null);
+  const regionCapturesRef = useRef<
+    Map<
+      string,
+      {
+        resolve: (value: PageCommentScreenshotInput | undefined) => void;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    >
+  >(new Map());
+  const regionCaptureSeqRef = useRef(0);
+  const prevCountRef = useRef(0);
+  const selfDeletingRef = useRef(false);
 
   const cacheRef = useRef<Map<string, LoadedHtml>>(new Map());
   const sessionRef = useRef(session);
@@ -774,8 +972,50 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
   const activeIdx = findVersionIndex(versions, selectedVersion);
   const activeVer = versions[activeIdx];
   const latestVer = versions.at(-1);
+  const activeVersion = activeVer?.version;
   const cacheKey = activeVer ? versionCacheKey(activeVer.file) : undefined;
   const loaded = cacheKey ? cacheRef.current.get(cacheKey) : undefined;
+  const versionComments = useMemo(
+    () =>
+      comments !== undefined && activeVersion !== undefined
+        ? comments.itemsForVersion(activeVersion)
+        : [],
+    [comments, activeVersion],
+  );
+
+  // 切换版本时收起当前弹窗；清理未完成的局部截图
+  useEffect(() => {
+    setEditor(null);
+    const pending = regionCapturesRef.current;
+    for (const entry of pending.values()) {
+      clearTimeout(entry.timer);
+      entry.resolve(undefined);
+    }
+    pending.clear();
+  }, [page?.page, activeVersion]);
+
+  // 外部清空当前版本评论（发送完成或点标签 × 移除）时退出评论模式并关弹窗
+  useEffect(() => {
+    const prev = prevCountRef.current;
+    const curr = versionComments.length;
+    prevCountRef.current = curr;
+    if (prev > 0 && curr === 0) {
+      if (selfDeletingRef.current) {
+        selfDeletingRef.current = false;
+      } else {
+        setEditor(null);
+        setCommentMode(false);
+      }
+    } else {
+      selfDeletingRef.current = false;
+    }
+  }, [versionComments.length]);
+
+  useEffect(() => {
+    if (editor !== null) {
+      editorInputRef.current?.focus();
+    }
+  }, [editor?.mode, editor?.mode === "edit" ? editor.id : editor?.tempId]);
 
   useEffect(() => {
     if (activeVer === undefined || cacheKey === undefined) return;
@@ -801,13 +1041,142 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
     activeVer?.file.label ?? "",
     setDownloadError,
   );
+
+  const requestRegionScreenshot = useCallback(
+    (region: CaptureRegion): Promise<PageCommentScreenshotInput | undefined> => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win) return Promise.resolve(undefined);
+      regionCaptureSeqRef.current += 1;
+      const requestId = `pc-cap-${regionCaptureSeqRef.current}`;
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          regionCapturesRef.current.delete(requestId);
+          resolve(undefined);
+        }, 2500);
+        regionCapturesRef.current.set(requestId, { resolve, timer });
+        win.postMessage(
+          {
+            type: "nocturne:inline-html:capture",
+            id: paneInstanceId,
+            requestId,
+            region,
+          },
+          "*",
+        );
+      });
+    },
+    [paneInstanceId],
+  );
+
+  const handleFrameCaptured = useCallback(
+    (msg: CapturedMessage) => {
+      const pending = regionCapturesRef.current.get(msg.requestId);
+      if (pending !== undefined) {
+        regionCapturesRef.current.delete(msg.requestId);
+        clearTimeout(pending.timer);
+        const bytes = toArrayBufferBytes(msg.png);
+        if (
+          bytes !== null &&
+          bytes.byteLength > 0 &&
+          bytes.byteLength <= INLINE_PAGE_CAPTURE_MAX_BYTES
+        ) {
+          pending.resolve({ data: bytes, mimeType: "image/png" });
+        } else {
+          pending.resolve(undefined);
+        }
+        return;
+      }
+      handleCaptured(msg);
+    },
+    [handleCaptured],
+  );
+
+  const handleCommentPick = useCallback(
+    (pick: CommentPickMessage) => {
+      if (!comments) return;
+      let screenshotPromise: Promise<PageCommentScreenshotInput | undefined> | undefined;
+      if (!pick.hasVisibleText && comments.supportsImageInput !== undefined) {
+        screenshotPromise = comments
+          .supportsImageInput()
+          .then((supported) =>
+            supported ? requestRegionScreenshot(commentCaptureRegion(pick.x, pick.y)) : undefined,
+          )
+          .catch(() => undefined);
+      }
+      setEditor({
+        mode: "new",
+        tempId: makeDraftCommentId(),
+        path: pick.path,
+        text: pick.text,
+        x: pick.x,
+        y: pick.y,
+        viewportX: pick.viewportX,
+        viewportY: pick.viewportY,
+        note: "",
+        screenshotPromise,
+      });
+    },
+    [comments, requestRegionScreenshot],
+  );
+
+  const handleCommentPinClick = useCallback(
+    (click: CommentPinClickMessage) => {
+      const existing = versionComments.find((c) => c.id === click.pinId);
+      if (existing === undefined) return;
+      setEditor({
+        mode: "edit",
+        id: existing.id,
+        viewportX: click.viewportX,
+        viewportY: click.viewportY,
+        note: existing.note,
+      });
+    },
+    [versionComments],
+  );
+
+  const handleFrameEscape = useCallback(() => {
+    if (editor !== null) {
+      setEditor(null);
+      return;
+    }
+    if (commentMode) {
+      setCommentMode(false);
+    }
+  }, [editor, commentMode]);
+
+  const commentPins = useMemo<SandboxCommentPin[] | undefined>(() => {
+    if (comments === undefined) return undefined;
+    const list: SandboxCommentPin[] = versionComments.map((item, idx) => ({
+      id: item.id,
+      number: idx + 1,
+      x: item.x,
+      y: item.y,
+      ...(editor?.mode === "edit" && editor.id === item.id ? { active: true } : {}),
+    }));
+    if (editor?.mode === "new") {
+      list.push({
+        id: editor.tempId,
+        number: list.length + 1,
+        x: editor.x,
+        y: editor.y,
+        active: true,
+      });
+    }
+    return list;
+  }, [comments, versionComments, editor]);
+
   const { iframeRef, handleLoad, bridge } = useSandboxedHtmlFrame({
     html: loaded?.html,
     instanceId: paneInstanceId,
     fullscreen: true,
     session,
     page: page?.page,
-    onCaptured: handleCaptured,
+    commentMode: comments !== undefined ? commentMode : undefined,
+    commentPins,
+    onCommentPick: comments !== undefined ? handleCommentPick : undefined,
+    onCommentPinClick: comments !== undefined ? handleCommentPinClick : undefined,
+    onEscape: comments !== undefined ? handleFrameEscape : undefined,
+    onCaptured: handleFrameCaptured,
   });
 
   if (page === undefined || activeVer === undefined) {
@@ -838,12 +1207,94 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
     });
   };
 
+  const commitEditor = () => {
+    if (!comments || !editor) return;
+    const trimmed = editor.note.trim();
+    if (trimmed === "") return;
+    if (editor.mode === "edit") {
+      comments.onUpdate(activeVer.version, editor.id, trimmed);
+      setEditor(null);
+      return;
+    }
+    const targetVersion = activeVer.version;
+    const targetTitle = activeVer.title;
+    const draft = editor;
+    setEditor(null);
+    if (draft.screenshotPromise !== undefined) {
+      void draft.screenshotPromise.then((screenshot) => {
+        comments.onAdd(targetVersion, targetTitle, {
+          id: draft.tempId,
+          path: draft.path,
+          text: draft.text,
+          x: draft.x,
+          y: draft.y,
+          note: trimmed,
+          ...(screenshot !== undefined ? { screenshot } : {}),
+        });
+      });
+    } else {
+      comments.onAdd(targetVersion, targetTitle, {
+        id: draft.tempId,
+        path: draft.path,
+        text: draft.text,
+        x: draft.x,
+        y: draft.y,
+        note: trimmed,
+      });
+    }
+  };
+
+  const deleteEditingComment = () => {
+    if (!comments || editor?.mode !== "edit") return;
+    if (versionComments.length === 1) selfDeletingRef.current = true;
+    comments.onDelete(activeVer.version, editor.id);
+    setEditor(null);
+  };
+
+  const editorNumber =
+    editor === null
+      ? 0
+      : editor.mode === "new"
+        ? versionComments.length + 1
+        : versionComments.findIndex((c) => c.id === editor.id) + 1;
+
+  const popoverPos =
+    editor !== null
+      ? clampCommentPopoverPosition(
+          editor.viewportX,
+          editor.viewportY,
+          bodyRef.current?.clientWidth ?? 560,
+          bodyRef.current?.clientHeight ?? 480,
+        )
+      : null;
+
   return (
     <div className="page-pane">
       <div className="page-pane-bar">
         <PageVersionNav index={activeIdx} total={versions.length} onChange={handleSelectIndex} />
         <div className="page-pane-actions">
           <PageModelStop bridge={bridge} className="page-pane-action-btn" />
+          {comments !== undefined && (
+            <IconButton
+              className={`page-pane-action-btn page-pane-comment-btn${commentMode ? " is-active" : ""}`}
+              aria-label="评论"
+              aria-pressed={commentMode}
+              title="评论"
+              disabled={loaded === undefined}
+              onClick={() => {
+                setCommentMode((prev) => {
+                  const next = !prev;
+                  if (!next) setEditor(null);
+                  return next;
+                });
+              }}
+            >
+              <Icon name="chat_1" size={ICON_MD} />
+              {versionComments.length > 0 && (
+                <span className="page-pane-comment-count">{versionComments.length}</span>
+              )}
+            </IconButton>
+          )}
           <IconButton
             ref={downloadBtnRef}
             className="page-pane-action-btn"
@@ -882,7 +1333,7 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
         </div>
       </div>
       <PageModelPermission bridge={bridge} />
-      <div className="page-pane-body">
+      <div className="page-pane-body" ref={bodyRef}>
         {loaded !== undefined && (
           <iframe
             key={activeVer.file.file}
@@ -893,6 +1344,72 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
             title={activeVer.title}
             onLoad={handleLoad}
           />
+        )}
+        {editor !== null && popoverPos !== null && (
+          <div
+            className="page-comment-popover"
+            role="dialog"
+            aria-label="评论"
+            style={{ left: `${popoverPos.left}px`, top: `${popoverPos.top}px` }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                setEditor(null);
+              }
+            }}
+          >
+            <div className="page-comment-popover-head">
+              <span className="page-comment-popover-num">{editorNumber}</span>
+              <textarea
+                ref={editorInputRef}
+                className="page-comment-popover-input"
+                rows={2}
+                value={editor.note}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setEditor((prev) => (prev ? { ...prev, note: next } : null));
+                }}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    commitEditor();
+                  }
+                }}
+              />
+            </div>
+            <div className="page-comment-popover-actions">
+              {editor.mode === "edit" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="page-comment-popover-delete"
+                  onClick={deleteEditingComment}
+                >
+                  删除
+                </Button>
+              )}
+              <div className="page-comment-popover-right">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setEditor(null);
+                  }}
+                >
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={editor.note.trim() === ""}
+                  onClick={commitEditor}
+                >
+                  {editor.mode === "new" ? "添加" : "保存"}
+                </Button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

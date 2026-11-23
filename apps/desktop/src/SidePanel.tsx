@@ -30,7 +30,7 @@ import type { DesktopHost } from "./host";
 import type { PrefsStore } from "./prefs";
 import { AgentBrowserPane } from "./AgentBrowserPane";
 import { AppPane } from "./AppPane";
-import { PagePane } from "./InlinePage";
+import { PagePane, type PagePaneCommentsController } from "./InlinePage";
 import type { PageSession } from "./page-bridge";
 import type { McpAppToolDelivery } from "./mcp-app-host";
 import type { BrowserPool } from "./browser-pool";
@@ -211,6 +211,7 @@ export interface PanelPages {
   pages: readonly SessionPage[];
   session: PageSession | undefined;
   onSelectVersion: (tabId: string, version: number | undefined) => void;
+  commentsForPage?: ((page: string) => PagePaneCommentsController | undefined) | undefined;
 }
 
 export interface PanelApps {
@@ -1755,6 +1756,7 @@ export function SidePanel(props: SidePanelProps) {
                     page={props.page?.pages.find((p) => p.page === tab.page)}
                     selectedVersion={tab.version}
                     session={props.page?.session}
+                    comments={props.page?.commentsForPage?.(tab.page)}
                     onSelectVersion={(version) => {
                       props.page?.onSelectVersion(tab.id, version);
                     }}

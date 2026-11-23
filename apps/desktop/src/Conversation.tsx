@@ -79,6 +79,7 @@ import {
   allPendingPermissions,
   inlineFilesOfTool,
   isNotReadToolFailure,
+  pageCommentsLabel,
   resolveInlinePageDisplay,
   resolveInlinePageId,
   parseFileRefs,
@@ -1956,6 +1957,16 @@ function UserMessage({
                   <span className="fsize">{formatBytes(file.bytes)}</span>
                 </button>
               ))}
+              {entry.pageComments !== undefined && (
+                <div className="u-page-comments">
+                  <span className="page-comment-chip">
+                    <Icon name="chat_1" size={ICON_SM} />
+                    <span className="page-comment-chip-text">
+                      {pageCommentsLabel(entry.pageComments)}
+                    </span>
+                  </span>
+                </div>
+              )}
               {(body !== "" || entry.delegate !== undefined || snapshot !== undefined) && (
                 <div className="u-text">{segments}</div>
               )}
