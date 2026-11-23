@@ -363,6 +363,89 @@ export function PageVersionNav({
   );
 }
 
+function usePageImageDownload(filename: string, setDownloadError: (error?: string) => void) {
+  const saveFile = useSaveFile();
+  const [capturing, setCapturing] = useState(false);
+  const pendingCaptureRef = useRef<{ requestId: string; timer: number } | null>(null);
+  const captureSeqRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      if (pendingCaptureRef.current !== null) {
+        window.clearTimeout(pendingCaptureRef.current.timer);
+        pendingCaptureRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleCaptured = useCallback(
+    (message: CapturedMessage) => {
+      const pending = pendingCaptureRef.current;
+      if (pending?.requestId !== message.requestId) return;
+      window.clearTimeout(pending.timer);
+      pendingCaptureRef.current = null;
+      setCapturing(false);
+      if (typeof message.error === "string") {
+        setDownloadError(IMAGE_EXPORT_FAILED);
+        return;
+      }
+      const pngBytes = toArrayBufferBytes(message.png);
+      if (
+        pngBytes === null ||
+        pngBytes.byteLength > INLINE_PAGE_CAPTURE_MAX_BYTES ||
+        !hasPngSignature(pngBytes)
+      ) {
+        setDownloadError(IMAGE_EXPORT_FAILED);
+        return;
+      }
+      triggerBytesDownload({
+        filename: toPngFilename(filename),
+        mimeType: "image/png",
+        bytes: pngBytes,
+        saveFile,
+        onError: setDownloadError,
+      });
+    },
+    [filename, saveFile, setDownloadError],
+  );
+
+  const capture = (win: Window | null | undefined, instanceId: string) => {
+    if (pendingCaptureRef.current !== null) return;
+    if (!win) {
+      setDownloadError(IMAGE_EXPORT_FAILED);
+      return;
+    }
+    setDownloadError(undefined);
+    setCapturing(true);
+    captureSeqRef.current += 1;
+    const requestId = `${instanceId}:capture:${captureSeqRef.current}`;
+    const timer = window.setTimeout(() => {
+      if (pendingCaptureRef.current?.requestId !== requestId) return;
+      pendingCaptureRef.current = null;
+      setCapturing(false);
+      setDownloadError(IMAGE_EXPORT_FAILED);
+    }, INLINE_PAGE_CAPTURE_TIMEOUT_MS);
+    pendingCaptureRef.current = { requestId, timer };
+    try {
+      win.postMessage(
+        {
+          type: "nocturne:inline-html:capture",
+          id: instanceId,
+          requestId,
+        },
+        "*",
+      );
+    } catch {
+      window.clearTimeout(timer);
+      pendingCaptureRef.current = null;
+      setCapturing(false);
+      setDownloadError(IMAGE_EXPORT_FAILED);
+    }
+  };
+
+  return { capturing, capture, handleCaptured };
+}
+
 export interface InlinePageFullscreenProps {
   title: string;
   filename: string;
@@ -374,7 +457,6 @@ export interface InlinePageFullscreenProps {
   pageId?: string | undefined;
   remote?: boolean | undefined;
   initialLoaded?: { file: string; sha256: string; html: string; bytes: Uint8Array } | undefined;
-  onVersionChange?: ((version: number) => void) | undefined;
   opener: HTMLElement | null;
   onClose: () => void;
 }
@@ -390,7 +472,6 @@ export function InlinePageFullscreen({
   pageId,
   remote,
   initialLoaded,
-  onVersionChange,
   opener,
   onClose,
 }: InlinePageFullscreenProps) {
@@ -400,11 +481,8 @@ export function InlinePageFullscreen({
   const saveFile = useSaveFile();
   const [downloadError, setDownloadError] = useState<string>();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [capturing, setCapturing] = useState(false);
   const menuOpenRef = useRef(menuOpen);
   menuOpenRef.current = menuOpen;
-  const pendingCaptureRef = useRef<{ requestId: string; timer: number } | null>(null);
-  const captureSeqRef = useRef(0);
   const instanceId = useId();
   const sandboxSrc = resolveSandboxFrameSrc();
 
@@ -455,15 +533,10 @@ export function InlinePageFullscreen({
   }, [activeVer, activeCacheKey, session, loadedMapVersion]);
 
   const fullInstanceId = `full:${instanceId}:${activeVer?.file.file ?? "single"}`;
-
-  useEffect(() => {
-    return () => {
-      if (pendingCaptureRef.current !== null) {
-        window.clearTimeout(pendingCaptureRef.current.timer);
-        pendingCaptureRef.current = null;
-      }
-    };
-  }, []);
+  const { capturing, capture, handleCaptured } = usePageImageDownload(
+    activeFilename,
+    setDownloadError,
+  );
 
   const handleEscape = useCallback(() => {
     if (menuOpenRef.current) {
@@ -473,37 +546,6 @@ export function InlinePageFullscreen({
     }
     onClose();
   }, [onClose]);
-
-  const handleCaptured = useCallback(
-    (message: CapturedMessage) => {
-      const pending = pendingCaptureRef.current;
-      if (pending?.requestId !== message.requestId) return;
-      window.clearTimeout(pending.timer);
-      pendingCaptureRef.current = null;
-      setCapturing(false);
-      if (typeof message.error === "string") {
-        setDownloadError(IMAGE_EXPORT_FAILED);
-        return;
-      }
-      const pngBytes = toArrayBufferBytes(message.png);
-      if (
-        pngBytes === null ||
-        pngBytes.byteLength > INLINE_PAGE_CAPTURE_MAX_BYTES ||
-        !hasPngSignature(pngBytes)
-      ) {
-        setDownloadError(IMAGE_EXPORT_FAILED);
-        return;
-      }
-      triggerBytesDownload({
-        filename: toPngFilename(activeFilename),
-        mimeType: "image/png",
-        bytes: pngBytes,
-        saveFile,
-        onError: setDownloadError,
-      });
-    },
-    [activeFilename, saveFile],
-  );
 
   useFullscreenDialogTrap({ rootRef, opener, onClose: handleEscape });
 
@@ -528,42 +570,6 @@ export function InlinePageFullscreen({
       saveFile,
       onError: setDownloadError,
     });
-  };
-
-  const handleDownloadImage = () => {
-    setMenuOpen(false);
-    if (pendingCaptureRef.current !== null) return;
-    const win = iframeRef.current?.contentWindow;
-    if (!win) {
-      setDownloadError(IMAGE_EXPORT_FAILED);
-      return;
-    }
-    setDownloadError(undefined);
-    setCapturing(true);
-    captureSeqRef.current += 1;
-    const requestId = `${fullInstanceId}:capture:${captureSeqRef.current}`;
-    const timer = window.setTimeout(() => {
-      if (pendingCaptureRef.current?.requestId !== requestId) return;
-      pendingCaptureRef.current = null;
-      setCapturing(false);
-      setDownloadError(IMAGE_EXPORT_FAILED);
-    }, INLINE_PAGE_CAPTURE_TIMEOUT_MS);
-    pendingCaptureRef.current = { requestId, timer };
-    try {
-      win.postMessage(
-        {
-          type: "nocturne:inline-html:capture",
-          id: fullInstanceId,
-          requestId,
-        },
-        "*",
-      );
-    } catch {
-      window.clearTimeout(timer);
-      pendingCaptureRef.current = null;
-      setCapturing(false);
-      setDownloadError(IMAGE_EXPORT_FAILED);
-    }
   };
 
   const hasVersionNav = versionList !== undefined && versionList.length > 1;
@@ -618,8 +624,6 @@ export function InlinePageFullscreen({
                 onChange={(nextIdx) => {
                   setActiveIdx(nextIdx);
                   setDownloadError(undefined);
-                  const nextVer = versionList[nextIdx];
-                  if (nextVer !== undefined) onVersionChange?.(nextVer.version);
                 }}
               />
             ) : null}
@@ -654,7 +658,13 @@ export function InlinePageFullscreen({
           }}
         >
           <MenuItem label="下载为 HTML" onSelect={handleDownloadHtml} />
-          <MenuItem label="下载为图片" onSelect={handleDownloadImage} />
+          <MenuItem
+            label="下载为图片"
+            onSelect={() => {
+              setMenuOpen(false);
+              capture(iframeRef.current?.contentWindow, fullInstanceId);
+            }}
+          />
         </Menu>
       )}
     </div>
@@ -745,12 +755,12 @@ export interface PagePaneProps {
 }
 
 export function PagePane({ page, selectedVersion, session, onSelectVersion }: PagePaneProps) {
-  const fullBtnRef = useRef<HTMLButtonElement | null>(null);
   const saveFile = useSaveFile();
-  const openOverlay = usePageOverlay(session);
   const instanceId = useId();
   const sandboxSrc = resolveSandboxFrameSrc();
   const [downloadError, setDownloadError] = useState<string>();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const downloadBtnRef = useRef<HTMLButtonElement>(null);
 
   const cacheRef = useRef<Map<string, LoadedHtml>>(new Map());
   const sessionRef = useRef(session);
@@ -787,12 +797,17 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
   }, [activeVer, cacheKey, session, loadedTick]);
 
   const paneInstanceId = `pane:${instanceId}:${activeVer?.file.file ?? "empty"}`;
+  const { capturing, capture, handleCaptured } = usePageImageDownload(
+    activeVer?.file.label ?? "",
+    setDownloadError,
+  );
   const { iframeRef, handleLoad, bridge } = useSandboxedHtmlFrame({
     html: loaded?.html,
     instanceId: paneInstanceId,
     fullscreen: true,
     session,
     page: page?.page,
+    onCaptured: handleCaptured,
   });
 
   if (page === undefined || activeVer === undefined) {
@@ -811,6 +826,7 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
   };
 
   const handleDownload = () => {
+    setMenuOpen(false);
     if (!loaded) return;
     setDownloadError(undefined);
     triggerBytesDownload({
@@ -822,39 +838,6 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
     });
   };
 
-  const handleFullscreen = () => {
-    if (!loaded) return;
-    const opener = fullBtnRef.current;
-    openOverlay(
-      (onClose) => (
-        <InlinePageFullscreen
-          title={activeVer.title}
-          filename={activeVer.file.label}
-          versions={versions}
-          initialVersion={activeVer.version}
-          session={session}
-          pageId={page.page}
-          initialLoaded={{
-            file: activeVer.file.file,
-            sha256: activeVer.file.sha256,
-            html: loaded.html,
-            bytes: loaded.bytes,
-          }}
-          onVersionChange={(v) => {
-            if (v === latestVer?.version) {
-              onSelectVersion(undefined);
-            } else {
-              onSelectVersion(v);
-            }
-          }}
-          opener={opener}
-          onClose={onClose}
-        />
-      ),
-      opener,
-    );
-  };
-
   return (
     <div className="page-pane">
       <div className="page-pane-bar">
@@ -862,24 +845,40 @@ export function PagePane({ page, selectedVersion, session, onSelectVersion }: Pa
         <div className="page-pane-actions">
           <PageModelStop bridge={bridge} className="page-pane-action-btn" />
           <IconButton
+            ref={downloadBtnRef}
             className="page-pane-action-btn"
             aria-label="下载"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
             title={downloadError ?? "下载"}
-            disabled={loaded === undefined}
-            onClick={handleDownload}
+            disabled={capturing || loaded === undefined}
+            onClick={() => {
+              setMenuOpen((open) => !open);
+            }}
           >
             <Icon name="download_2" size={ICON_MD} />
           </IconButton>
-          <IconButton
-            ref={fullBtnRef}
-            className="page-pane-action-btn"
-            aria-label="全屏"
-            title="全屏"
-            disabled={loaded === undefined}
-            onClick={handleFullscreen}
-          >
-            <Icon name="fullscreen" size={ICON_MD} />
-          </IconButton>
+          {menuOpen && (
+            <Menu
+              anchor={downloadBtnRef.current}
+              align="right"
+              placement="below"
+              className="more-menu inline-page-dl-menu"
+              label="下载"
+              onClose={() => {
+                setMenuOpen(false);
+              }}
+            >
+              <MenuItem label="下载为 HTML" onSelect={handleDownload} />
+              <MenuItem
+                label="下载为图片"
+                onSelect={() => {
+                  setMenuOpen(false);
+                  capture(iframeRef.current?.contentWindow, paneInstanceId);
+                }}
+              />
+            </Menu>
+          )}
         </div>
       </div>
       <PageModelPermission bridge={bridge} />
@@ -906,8 +905,6 @@ export interface InlinePageProps {
   remote?: boolean | undefined;
   renderFallback: (errorMessage?: string) => ReactNode;
   onCollapseAboveViewport?: ((container: HTMLElement) => void) | undefined;
-  /** 桌面端传入：在右侧面板打开该页面并定位到本版本；手机端不传 */
-  onOpenInPanel?: (() => void) | undefined;
   /** 本页面所有版本，供全屏遮罩切换版本 */
   versions?: readonly SessionPageVersion[] | undefined;
   /** 本次渲染对应的版本号 */
@@ -923,7 +920,6 @@ export function InlinePage({
   remote,
   renderFallback,
   onCollapseAboveViewport,
-  onOpenInPanel,
   versions,
   version,
   searchHit = false,
@@ -1091,16 +1087,6 @@ export function InlinePage({
       {loaded !== null && !phoneFullscreen && (
         <div className={`inline-page-tools${bridge.busy ? " is-busy" : ""}`}>
           <PageModelStop bridge={bridge} className="inline-page-tool-btn" />
-          {onOpenInPanel !== undefined && (
-            <IconButton
-              className="inline-page-tool-btn"
-              aria-label="在面板打开"
-              title="在面板打开"
-              onClick={onOpenInPanel}
-            >
-              <Icon name="layout_right" size={ICON_MD} />
-            </IconButton>
-          )}
           <IconButton
             ref={fullBtnRef}
             className="inline-page-tool-btn"

@@ -308,6 +308,7 @@ describe("桌面端页面版本与右侧面板（ADR-0109）", () => {
     fireEvent.click(firstEntry);
     expect(container.querySelector(".side-panel")?.hasAttribute("hidden")).toBe(false);
     expect(screen.getByRole("tab", { name: /每周提交看板/ })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /^全屏$/ })).toBeNull();
     expect(container.querySelector(".page-ver-count")?.textContent).toBe("1 / 2");
     expect(screen.getByRole("button", { name: "上一版本" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "下一版本" }).hasAttribute("disabled")).toBe(false);
@@ -320,6 +321,7 @@ describe("桌面端页面版本与右侧面板（ADR-0109）", () => {
       expect(screen.getByRole("button", { name: "下载" }).hasAttribute("disabled")).toBe(false);
     });
     fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "下载为 HTML" }));
     await waitFor(() => {
       expect(saveFile).toHaveBeenCalledTimes(1);
     });
@@ -338,6 +340,7 @@ describe("桌面端页面版本与右侧面板（ADR-0109）", () => {
       expect(container.querySelector<HTMLIFrameElement>(".page-pane-frame")).not.toBeNull();
     });
     fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "下载为 HTML" }));
     await waitFor(() => {
       expect(saveFile).toHaveBeenCalledTimes(2);
     });
@@ -355,7 +358,7 @@ describe("桌面端页面版本与右侧面板（ADR-0109）", () => {
     expect(savedFirst.page).toBe("page-1");
   });
 
-  it("内嵌页面照旧原地渲染，右上角「在面板打开」打开对应版本，且不自动打开面板", async () => {
+  it("桌面内嵌页面原地渲染，浮动工具栏只提供全屏", async () => {
     const storage = memoryStorage();
     const prefs = createPrefsStore(storage);
     prefs.update({ panelSessionsMigrated: true });
@@ -392,12 +395,41 @@ describe("桌面端页面版本与右侧面板（ADR-0109）", () => {
       expect(container.querySelector(".inline-page iframe")).not.toBeNull();
     });
 
-    // 右上角有「在面板打开」按钮，点击打开右侧面板该版本
-    const openBtn = screen.getByRole("button", { name: "在面板打开" });
-    fireEvent.click(openBtn);
-    expect(container.querySelector(".side-panel")?.hasAttribute("hidden")).toBe(false);
-    expect(screen.getByRole("tab", { name: /对比表/ })).toBeDefined();
-    expect(container.querySelector(".page-ver-count")?.textContent).toBe("1 / 1");
+    const toolbar = container.querySelector(".inline-page-tools");
+    expect(
+      [...(toolbar?.querySelectorAll("button") ?? [])].map((btn) => btn.getAttribute("aria-label")),
+    ).toEqual(["全屏"]);
+  });
+
+  it("恢复会话时移除旧版存下的内嵌页面标签", async () => {
+    const prefs = createPrefsStore(memoryStorage());
+    prefs.update({
+      panelSessionsMigrated: true,
+      panelSessions: {
+        "sess-1": {
+          open: true,
+          activeTab: "old-tab",
+          tabs: [{ id: "old-tab", kind: "page", page: "page-1" }],
+        },
+      },
+    });
+    const inline = makeHtmlAttachment({
+      file: "file-1.html",
+      title: "对比表",
+      page: "page-1",
+      version: 1,
+      display: "inline",
+    });
+    const { container } = render(
+      <DesktopHarness
+        initialView={buildView([inline])}
+        htmlMap={{ "file-1.html": "<h1>对比表</h1>" }}
+        prefs={prefs}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector(".inline-page iframe")).not.toBeNull());
+    expect(screen.queryByRole("tab", { name: /对比表/ })).toBeNull();
+    expect(screen.getByRole("tab", { name: "新标签页" })).toBeDefined();
   });
 
   it("面板页面实时新版本自动打开；停在旧版本时不跳转且 N 加一", async () => {
@@ -494,7 +526,7 @@ describe("手机端页面入口行与全屏遮罩版本切换（ADR-0109）", ()
       title: "手机看板",
       page: "page-1",
       version: 1,
-      display: "inline",
+      display: "panel",
     });
     const f2 = makeHtmlAttachment({
       file: "file-2.html",

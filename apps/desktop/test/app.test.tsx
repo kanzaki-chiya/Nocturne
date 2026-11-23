@@ -1718,7 +1718,7 @@ it("崩溃恢复：模型不可用的会话不阻塞其余会话，点开是换�
   await waitFor(() => expect(screen.queryByText(/后台已退出/)).toBeNull());
 });
 
-it("内嵌页面实时转面板时替换旧版本并打开最新版，切换会话回放时只显示入口行", async () => {
+it("0.62.0 内嵌页面的更新保留内嵌，实时和回放都不打开面板", async () => {
   const pageVersion = (version: number, display: "inline" | "panel") => ({
     type: "tool.completed",
     payload: {
@@ -1761,17 +1761,55 @@ it("内嵌页面实时转面板时替换旧版本并打开最新版，切换会�
   expect(panelButton().getAttribute("aria-pressed")).toBe("false");
 
   await act(async () => host.emitEvent(backend.backendId, "alpha", second));
-  expect(messages.querySelector(".inline-page")).toBeNull();
-  expect(messages.querySelectorAll(".page-entry-row")).toHaveLength(2);
-  expect(panelButton().getAttribute("aria-pressed")).toBe("true");
-  expect(container.querySelector(".page-ver-count")?.textContent).toBe("2 / 2");
+  expect(messages.querySelectorAll(".inline-page")).toHaveLength(2);
+  expect(messages.querySelectorAll(".page-entry-row")).toHaveLength(0);
+  expect(panelButton().getAttribute("aria-pressed")).toBe("false");
+  expect(container.querySelector(".page-ver-count")).toBeNull();
 
   fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
   const historical = await screen.findByRole("region", { name: "会话消息" });
   await within(historical).findByText("gamma 正文");
-  expect(historical.querySelector(".inline-page")).toBeNull();
-  expect(historical.querySelectorAll(".page-entry-row")).toHaveLength(2);
+  expect(historical.querySelectorAll(".inline-page")).toHaveLength(2);
+  expect(historical.querySelectorAll(".page-entry-row")).toHaveLength(0);
   expect(panelButton().getAttribute("aria-pressed")).toBe("false");
+});
+
+it("面板最大化可还原，关闭面板和切换会话都会重置", async () => {
+  const { container } = render(<App host={replayHost()} />);
+  const select = async (name: "alpha" | "beta") => {
+    fireEvent.click(
+      await screen.findByRole("button", { name: new RegExp(`^${name} (?:会话|正文)`) }),
+    );
+    await within(await screen.findByRole("region", { name: "会话消息" })).findByText(
+      `${name} 正文`,
+    );
+  };
+  const togglePanel = () => fireEvent.click(screen.getByRole("button", { name: "右侧面板" }));
+  const maximize = () => fireEvent.click(screen.getByRole("button", { name: "最大化面板" }));
+  const isMaximized = () => container.querySelector(".body")?.classList.contains("panel-maximized");
+  await select("alpha");
+  togglePanel();
+  maximize();
+  expect(isMaximized()).toBe(true);
+  expect(container.querySelector(".main")?.hasAttribute("hidden")).toBe(true);
+  expect(screen.getByRole("tab", { name: "新标签页" })).toBeDefined();
+  expect(screen.queryByRole("separator", { name: "调整面板宽度" })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "还原面板" }));
+  expect(isMaximized()).toBe(false);
+  expect(container.querySelector(".main")?.hasAttribute("hidden")).toBe(false);
+  expect(screen.getByRole("separator", { name: "调整面板宽度" })).toBeDefined();
+
+  maximize();
+  fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+  await waitFor(() => expect(isMaximized()).toBe(false));
+  togglePanel();
+  maximize();
+  await select("beta");
+  expect(isMaximized()).toBe(false);
+  await select("alpha");
+  expect(screen.getByRole("button", { name: "最大化面板" })).toBeDefined();
+  expect(isMaximized()).toBe(false);
 });
 
 // ── 项目手动排序 ──────────────────────────────────────────────

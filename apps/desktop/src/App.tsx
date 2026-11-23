@@ -2183,7 +2183,7 @@ export function App({ host }: { host: DesktopHost }) {
             setPage(null);
           }}
         />
-        <div className={`main${sidePanel.mainClass}`}>
+        <div className={`main${sidePanel.mainClass}`} hidden={sidePanel.maximized}>
           {sidePanel.mainOverlays}
           {(backendExit !== null || startupError !== null) && (
             <div className="banner">

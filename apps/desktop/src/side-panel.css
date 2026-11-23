@@ -7,6 +7,13 @@
 .body.panel-docked {
   grid-template-columns: var(--w-sidebar) minmax(0, 1fr) auto;
 }
+.body.panel-maximized > .main {
+  display: none;
+}
+.body.panel-maximized > .sp-rail,
+.body.panel-maximized > .qopen-backdrop {
+  grid-column: 2;
+}
 
 /* The rail is the only moving width. Its child keeps its final layout throughout, so
    CodeMirror/xterm do not reflow (or fit) for every frame of an open/close. */
@@ -205,6 +212,10 @@
 .sp-newtab:hover {
   background: var(--a-raised);
   color: var(--a-text);
+}
+.sp-maximize {
+  flex: none;
+  margin-inline-start: auto;
 }
 
 .sp-content {

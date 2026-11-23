@@ -150,6 +150,8 @@ export interface SidePanelProps {
   activeId: string;
   overlay: boolean;
   width: number;
+  maximized?: boolean;
+  onToggleMaximized?: () => void;
   onActivate: (id: string) => void;
   onCloseTab: (id: string) => void;
   onMoveTab: (fromId: string, toId: string) => void;
@@ -570,6 +572,16 @@ function TabBar(props: SidePanelProps) {
       >
         <Glyph kind="plus" />
       </button>
+      {props.onToggleMaximized !== undefined && (
+        <IconButton
+          className="sp-maximize"
+          aria-label={props.maximized ? "还原面板" : "最大化面板"}
+          title={props.maximized ? "还原面板" : "最大化面板"}
+          onClick={props.onToggleMaximized}
+        >
+          <Icon name={props.maximized ? "fullscreen_exit" : "fullscreen"} size={ICON_MD} />
+        </IconButton>
+      )}
     </div>
   );
 }
@@ -1473,7 +1485,8 @@ function FileDiffView({
 }
 
 export function SidePanel(props: SidePanelProps) {
-  const { tabs, activeId, overlay, width, onResize, changes, hidden = false } = props;
+  const { tabs, activeId, overlay, width, onResize, changes, hidden = false, maximized } = props;
+  const layoutWidth = maximized ? "100%" : width;
   const panes = props.panes ?? tabs;
   const current = new Set(tabs.map((tab) => tab.id));
   const drag = useRef<{ startX: number; startWidth: number; width: number } | null>(null);
@@ -1509,7 +1522,7 @@ export function SidePanel(props: SidePanelProps) {
     <ImageViewerBoundary>
       <div
         className={`sp-rail${overlay ? " overlay" : ""}${props.motion ? ` sp-${props.motion}` : ""}`}
-        style={{ width }}
+        style={{ width: layoutWidth }}
         hidden={hidden}
         onAnimationEnd={(event) => {
           if (event.target === event.currentTarget) props.onMotionEnd?.();
@@ -1517,25 +1530,27 @@ export function SidePanel(props: SidePanelProps) {
       >
         <aside
           className="side-panel thin-scroll"
-          style={{ width }}
+          style={{ width: layoutWidth }}
           aria-label="右侧面板"
           hidden={hidden}
           inert={props.motion === "closing"}
           aria-hidden={props.motion === "closing" || undefined}
         >
-          <div
-            className="sp-splitter"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="调整面板宽度"
-            aria-valuenow={width}
-            tabIndex={0}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
-            onKeyDown={onSplitterKey}
-          />
+          {!maximized && (
+            <div
+              className="sp-splitter"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整面板宽度"
+              aria-valuenow={width}
+              tabIndex={0}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+              onKeyDown={onSplitterKey}
+            />
+          )}
           <TabBar {...props} />
           <div className="sp-content">
             {panes.map((tab) => (

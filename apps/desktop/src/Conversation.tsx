@@ -3404,14 +3404,14 @@ function ToolEntryView({
             sessionPage?.versions.find((v) => v.file.file === file.file)?.version ??
             file.inline?.version ??
             1;
-          const onOpenPage = pageRow?.onOpenPage;
-          const openInPanel =
-            onOpenPage !== undefined
-              ? () => {
-                  onOpenPage(pageId, version);
-                }
-              : undefined;
           if (display === "panel") {
+            const onOpenPage = pageRow?.onOpenPage;
+            const openInPanel =
+              onOpenPage !== undefined
+                ? () => {
+                    onOpenPage(pageId, version);
+                  }
+                : undefined;
             const activePage = pageRow?.activePage;
             const isActive = activePage?.page === pageId && activePage.version === version;
             return (
@@ -3438,7 +3438,6 @@ function ToolEntryView({
               remote={pageRow?.remote}
               versions={sessionPage?.versions}
               version={version}
-              onOpenInPanel={openInPanel}
               searchHit={searchHit && idx === 0}
               sessionSeq={idx === 0 ? entry.seq : undefined}
               completedSeq={idx === 0 ? entry.completedSeq : undefined}

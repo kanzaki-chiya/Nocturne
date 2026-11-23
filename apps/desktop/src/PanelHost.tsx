@@ -15,6 +15,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import type {
   ApplicationTarget,
   BackgroundShellTask,
@@ -191,6 +192,7 @@ export interface SidePanelController {
   subagentLinks: SubagentLinks | undefined;
   bodyClass: string;
   mainClass: string;
+  maximized: boolean;
   /** .body 上的 ref：量宽度决定并排还是覆盖 */
   bodyRef: (node: HTMLDivElement | null) => void;
   /** 放在 .body 末尾：面板本身 */
@@ -354,6 +356,11 @@ export function useSidePanel({
   /** 会话面板记录里的开关；显示与否还要看 hasPanel */
   const open = current?.open === true;
   const shown = open && hasPanel;
+  const [maximizedSessionId, setMaximizedSessionId] = useState<string>();
+  const maximized = shown && maximizedSessionId === sessionId;
+  useLayoutEffect(() => {
+    if (!open || maximizedSessionId !== sessionId) setMaximizedSessionId(undefined);
+  }, [open, sessionId, maximizedSessionId]);
   // Only a change within the same conversation is an interactive open/close. Restoring a
   // conversation or entering/leaving settings must not replay the panel animation.
   const previousPanel = useRef({ sessionId, settingsOpen, shown });
@@ -373,6 +380,7 @@ export function useSidePanel({
   const canAnimate =
     sessionId !== null &&
     !settingsOpen &&
+    maximizedSessionId !== sessionId &&
     motionAllowed() &&
     (!nativeBrowser || (motionTab.agent === undefined && panelSnapshot?.tabId === motionTab.id));
   const previous = previousPanel.current;
@@ -416,6 +424,27 @@ export function useSidePanel({
     },
     [sessionId, panelFor],
   );
+
+  // 旧版可能记录了内嵌页面的面板标签。会话内容到齐后按第一版的显示方式清理。
+  const pages = active?.view.pages;
+  useLayoutEffect(() => {
+    if (pages === undefined || current === undefined) return;
+    const inline = new Set(
+      pages.filter((page) => page.display === "inline").map((page) => page.page),
+    );
+    const keep = (tab: PanelTab) => tab.kind !== "page" || !inline.has(tab.page);
+    if (current.tabs.every(keep)) return;
+    update((panel) => {
+      const tabs = panel.tabs.filter(keep);
+      const first = tabs[0];
+      if (first === undefined) {
+        const id = newTabId();
+        return { ...panel, tabs: [{ id, kind: "new" }], activeId: id };
+      }
+      const activeId = tabs.find((tab) => tab.id === panel.activeId)?.id ?? first.id;
+      return { ...panel, tabs, activeId };
+    });
+  }, [pages, current, update]);
 
   // ── agent 标签合进面板：当前会话按外壳状态增删改，别的会话里残留的清掉 ──
   useEffect(() => {
@@ -615,8 +644,9 @@ export function useSidePanel({
   }, [body]);
   const available = bodySize.width > 0 ? bodySize.width - bodySize.sidebar : undefined;
   const shownWidth = clampPanelWidth(width, available);
-  const overlay = bodySize.width > 0 && panelOverlays(bodySize.width, bodySize.sidebar, shownWidth);
-  const docked = panelVisible && !overlay;
+  const overlay =
+    !maximized && bodySize.width > 0 && panelOverlays(bodySize.width, bodySize.sidebar, shownWidth);
+  const docked = panelVisible && !overlay && !maximized;
   // 标题栏：并排时窗口按钮让到面板上方
   useEffect(() => {
     const root = document.documentElement;
@@ -1930,6 +1960,10 @@ export function useSidePanel({
       activeId={activeId}
       overlay={overlay}
       width={shownWidth}
+      maximized={maximized}
+      onToggleMaximized={() => {
+        if (sessionId !== null) setMaximizedSessionId(maximized ? undefined : sessionId);
+      }}
       onActivate={activate}
       onCloseTab={closeTab}
       onMoveTab={(from, to) => {
@@ -2098,6 +2132,25 @@ export function useSidePanel({
     />
   );
 
+  const quickOpenDialog =
+    quickOpen && loadIndex !== undefined && active !== undefined && workspace !== undefined ? (
+      <QuickOpen
+        project={project}
+        load={loadIndex}
+        recent={(current?.recent ?? []).flatMap((path) => {
+          const rel = relativeTo(workspace, path);
+          return rel === undefined ? [] : [rel.replaceAll("\\", "/")];
+        })}
+        onClose={() => {
+          setQuickOpen(false);
+        }}
+        onPick={(relativePath) => {
+          setQuickOpen(false);
+          openFileTab({ workspace, absolutePath: joinWorkspace(workspace, relativePath) });
+        }}
+      />
+    ) : null;
+
   const mainOverlays = (
     <>
       <TitlebarButtons
@@ -2169,27 +2222,7 @@ export function useSidePanel({
           }}
         />
       )}
-      {quickOpen && loadIndex !== undefined && active !== undefined && workspace !== undefined && (
-        <QuickOpen
-          project={project}
-          load={loadIndex}
-          recent={(current?.recent ?? []).flatMap((path) => {
-            const rel = relativeTo(workspace, path);
-            // fileIndex 的相对路径用 / 分隔
-            return rel === undefined ? [] : [rel.replaceAll("\\", "/")];
-          })}
-          onClose={() => {
-            setQuickOpen(false);
-          }}
-          onPick={(relativePath) => {
-            setQuickOpen(false);
-            openFileTab({
-              workspace,
-              absolutePath: joinWorkspace(workspace, relativePath),
-            });
-          }}
-        />
-      )}
+      {maximized && body !== null ? createPortal(quickOpenDialog, body) : quickOpenDialog}
     </>
   );
 
@@ -2208,8 +2241,9 @@ export function useSidePanel({
     activePage,
     onToolCompletedUi,
     subagentLinks,
-    bodyClass: docked ? " panel-docked" : "",
+    bodyClass: maximized ? " panel-maximized" : docked ? " panel-docked" : "",
     mainClass: overviewVisible && !shown ? " ov-open" : "",
+    maximized,
     bodyRef: setBody,
     panel,
     mainOverlays,

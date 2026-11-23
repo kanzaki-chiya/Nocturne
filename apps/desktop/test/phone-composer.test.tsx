@@ -555,6 +555,10 @@ it("手机斜杠菜单的命令和技能说明都左对齐并单行省略", asyn
   if (!field) throw new Error("缺少输入框");
   act(() => fireEvent.change(field, { target: { value: "/" } }));
   const summaries = [...container.querySelectorAll(".phone-slash-row > span")];
+  const panel = [...container.querySelectorAll(".phone-slash-row")].find((row) =>
+    row.textContent?.includes("/panel"),
+  );
+  expect(panel?.textContent).toContain("面板页面");
   expect(summaries.map((summary) => summary.textContent)).toContain("压缩当前上下文");
   expect(summaries.map((summary) => summary.textContent)).toContain(description);
   for (const summary of summaries) {
