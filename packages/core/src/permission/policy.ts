@@ -266,6 +266,7 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       nocturneHome: options.presetContext?.nocturneHome,
       skillRoots: options.presetContext?.skillRoots,
       skillFiles: options.presetContext?.skillFiles,
+      projectPageFiles: options.presetContext?.projectPageFiles,
     });
   const preset = presetRulesList.map((rule, i) => ({
     rule,

@@ -123,6 +123,8 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
 
   it("手机可操作绑定页面，项目级批准被拦且请求仍可单次批准，agent 无页面权限", async () => {
     const pageMethods = [
+      "runtime.listPages",
+      "runtime.listPageProjects",
       "session.getPageData",
       "session.setPageData",
       "session.deletePageData",

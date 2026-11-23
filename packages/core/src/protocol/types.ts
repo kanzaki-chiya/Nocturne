@@ -277,11 +277,18 @@ export interface AttachmentInput {
 
 export type InlinePageDisplay = "inline" | "panel";
 
+/** 跨会话接着改时记录被指页面（ADR-0114 §6） */
+export interface InlinePageFrom {
+  session: string;
+  page: string;
+}
+
 export interface InlinePageMeta {
   title: string;
   page?: string | undefined;
   version?: number | undefined;
   display?: InlinePageDisplay | undefined;
+  from?: InlinePageFrom | undefined;
 }
 
 export interface FileAttachment {

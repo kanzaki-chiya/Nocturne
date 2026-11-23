@@ -2,9 +2,7 @@
  * 长期记忆范围目录解析与项目键计算（ADR-0098 §1）。
  * 只依赖 protocol 与 platform，不依赖 agent / tools / session。
  */
-import { createHash } from "node:crypto";
-
-import { gitMainRepository, type Platform } from "../platform/index.js";
+import { computeProjectKey, isDefaultWorkspace, type Platform } from "../platform/index.js";
 import type { MemoryScope } from "../protocol/index.js";
 
 const SAFE_SCOPE_KEY_RE = /^[a-zA-Z0-9._-]+$(?![\s\S])/;
@@ -36,48 +34,23 @@ export function suitesMemoryRoot(platform: Pick<Platform, "paths">, nocturneHome
  * 判断工作区是否为默认普通对话目录 `<NOCTURNE_HOME>/workspace`。
  * 默认工作区没有项目记忆范围，只有全局（ADR-0098 §1）。
  */
-export async function isDefaultMemoryWorkspace(
+export function isDefaultMemoryWorkspace(
   platform: Platform,
   nocturneHome: string,
   workspaceRoot: string,
 ): Promise<boolean> {
-  const defaultWs = platform.paths.join(nocturneHome, "workspace");
-  if (
-    platform.paths.equals(
-      platform.paths.resolve(".", workspaceRoot),
-      platform.paths.resolve(".", defaultWs),
-    )
-  ) {
-    return true;
-  }
-  const [realWs, realDefault] = await Promise.all([
-    platform.resolveReal(workspaceRoot),
-    platform.resolveReal(defaultWs),
-  ]);
-  return platform.paths.equals(realWs, realDefault);
+  return isDefaultWorkspace(platform, nocturneHome, workspaceRoot);
 }
 
 /**
  * 计算工作区对应的项目记忆键与用于记入 workspace.json 的主路径：
- * 在 git 仓库（含工作树）里取主仓库根目录，否则取工作区真实根目录；
- * 规范化真实路径后取 SHA-256 前 8 位拼接目录名。
+ * 委托共用项目键实现（ADR-0098 §1、ADR-0114 §2）。
  */
-export async function projectMemoryKey(
+export function projectMemoryKey(
   platform: Platform,
   workspaceRoot: string,
 ): Promise<{ key: string; repoRoot: string }> {
-  const realWs = await platform.resolveReal(workspaceRoot);
-  const mainRepo = await gitMainRepository(realWs);
-  const repoRoot = mainRepo !== null ? await platform.resolveReal(mainRepo) : realWs;
-  const canonical = platform.paths.canonicalize(repoRoot);
-  const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 8);
-  const base = platform.paths.basename(repoRoot);
-  const slug = base
-    .replaceAll(/[^a-zA-Z0-9._-]+/g, "_")
-    .replaceAll(/^_+|_+$/g, "")
-    .slice(0, 40);
-  const prefix = slug && slug !== "." && slug !== ".." ? slug : "root";
-  return { key: `${prefix}-${hash}`, repoRoot };
+  return computeProjectKey(platform, workspaceRoot);
 }
 
 export interface ResolvedMemoryDir {

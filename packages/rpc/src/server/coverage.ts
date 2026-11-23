@@ -63,6 +63,8 @@ export const RUNTIME_METHODS: Record<
   readSessionAttachment: "session.observeAttachment",
   listSessions: "runtime.listSessions",
   searchSessions: "runtime.searchSessions",
+  listPages: "runtime.listPages",
+  listPageProjects: "runtime.listPageProjects",
   usageStats: "runtime.usageStats",
   listModels: "runtime.listModels",
   defaultModel: "runtime.defaultModel",

@@ -685,6 +685,7 @@ export function createToolExecutor(
         ...(scope.schedule !== undefined ? { schedule: scope.schedule } : {}),
         ...(scope.notes !== undefined ? { notes: scope.notes } : {}),
         ...(scope.pages !== undefined ? { pages: scope.pages } : {}),
+        ...(scope.projectPages !== undefined ? { projectPages: scope.projectPages } : {}),
         pauseTimeouts,
         ...(scope.attachmentsDir !== undefined
           ? (() => {

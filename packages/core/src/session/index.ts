@@ -11,3 +11,4 @@ export * from "./attachment-read.js";
 export * from "./readonly-log.js";
 export * from "./subagent-registry.js";
 export * from "./subagent-observe.js";
+export * from "./page-library.js";

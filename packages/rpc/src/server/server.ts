@@ -224,6 +224,8 @@ export const REMOTE_METHODS = [
   "initialize",
   "remote.lanEndpoints",
   "runtime.listSessions",
+  "runtime.listPages",
+  "runtime.listPageProjects",
   "runtime.usageStats",
   "runtime.createSession",
   "runtime.resumeSession",
@@ -1646,6 +1648,20 @@ class Connection implements HubPeer {
           controller.signal.removeEventListener("abort", clear);
           if (this.sessionSearch === controller) this.sessionSearch = undefined;
         }
+      },
+      "runtime.listPages": async (p) => {
+        const projectKey = optString(p, "projectKey");
+        const workspaceRoot = optString(p, "workspaceRoot");
+        return this.runtime().listPages({
+          ...(projectKey !== undefined ? { projectKey } : {}),
+          ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+        });
+      },
+      "runtime.listPageProjects": async (p) => {
+        const workspaceRoot = optString(p, "workspaceRoot");
+        return this.runtime().listPageProjects({
+          ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+        });
       },
       "runtime.usageStats": (p) => {
         const days = p.days;

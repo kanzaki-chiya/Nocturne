@@ -52,6 +52,43 @@ export async function prunePageData(
   }
 }
 
+/**
+ * 跨会话接着改时复制单个页面的数据文件（ADR-0111、ADR-0114 §5）：
+ * 源页面无数据文件时静默返回；有数据时原子写入目标页面文件，之后两边各写各的。
+ */
+export async function copyPageDataFile(
+  platform: Platform,
+  sessionsDir: string,
+  fromSessionId: string,
+  fromPage: string,
+  toSessionId: string,
+  toPage: string,
+): Promise<void> {
+  if (!SAFE_PAGE_ID.test(fromPage) || !SAFE_PAGE_ID.test(toPage)) {
+    throw new SessionError("page_storage_failed", "页面标识无效");
+  }
+  const srcDir = pageDataDir(platform, sessionsDir, fromSessionId);
+  if (!(await existingPageDataDir(platform, srcDir))) return;
+  const srcFile = platform.paths.join(srcDir, `${fromPage}.json`);
+  const stat = await statIfPresent(platform, srcFile);
+  if (!stat) return;
+  if (stat.type !== "file" || stat.size > MAX_PAGE_DATA_BYTES) {
+    throw new SessionError("page_storage_failed", "源页面数据文件无效");
+  }
+  const bytes = await platform.fs.readFile(srcFile);
+  const dstDir = pageDataDir(platform, sessionsDir, toSessionId);
+  await platform.fs.mkdir(dstDir);
+  const dstFile = platform.paths.join(dstDir, `${toPage}.json`);
+  const temp = `${dstFile}.tmp-${randomUUID()}`;
+  try {
+    await platform.fs.createExclusive(temp, bytes);
+    await platform.fs.rename(temp, dstFile);
+  } catch (error) {
+    await platform.fs.unlink(temp).catch(() => undefined);
+    throw error;
+  }
+}
+
 function validateKey(key: string): void {
   if (typeof key !== "string" || key === "" || Array.from(key).length > 200) {
     throw new SessionError("invalid_command", "页面数据键必须包含 1 至 200 个字符");

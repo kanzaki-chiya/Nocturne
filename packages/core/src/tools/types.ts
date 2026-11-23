@@ -5,6 +5,7 @@ import type {
   InlinePageMeta,
   ExternalAgentProbeResult,
   McpProbeResult,
+  PageOrigin,
   SessionPage,
   ToolCompletedUi,
 } from "../protocol/index.js";
@@ -199,6 +200,38 @@ export interface ReadStateStore {
   get(path: string): ReadStateRecord | undefined;
 }
 
+/** 项目页面库中的面板页面条目（ADR-0114 §5；供 list_pages 使用） */
+export interface ProjectPageEntry {
+  ref: string;
+  origin: PageOrigin;
+  sessionId: string;
+  sessionTitle: string;
+  page: string;
+  title: string;
+  version: number;
+  updatedAt: string;
+  path: string;
+}
+
+/** 跨会话解析出的目标面板页面（ADR-0114 §5；供 render_html 接着改使用） */
+export interface ProjectPageTarget {
+  ref: string;
+  sessionId: string;
+  page: string;
+  title: string;
+  version: number;
+  origin: PageOrigin;
+  path: string;
+  readHtml(): Promise<Uint8Array | undefined>;
+  copyPageDataTo(targetSessionId: string, targetPage: string): Promise<void>;
+}
+
+/** 项目页面库访问能力（ADR-0114 §5）：由 Runtime 注入，tools 不依赖 session */
+export interface ProjectPagesAccess {
+  listPages(): Promise<ProjectPageEntry[]>;
+  resolvePage(ref: string): Promise<ProjectPageTarget | undefined>;
+}
+
 /** 执行时可用的能力（tool-api.md 第 2 节） */
 export interface ToolContext extends ToolScope {
   sessionId: string;
@@ -238,6 +271,8 @@ export interface ToolContext extends ToolScope {
   notes?: (() => readonly NoteItem[]) | undefined;
   /** 读取当前会话有效历史中的页面列表（ADR-0109） */
   pages?: (() => readonly SessionPage[]) | undefined;
+  /** 访问当前项目的面板页面库（ADR-0114 §5）；仅主会话注入 */
+  projectPages?: ProjectPagesAccess | undefined;
   /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
   pauseTimeouts?: (() => () => void) | undefined;
   /**
@@ -564,6 +599,8 @@ export interface ExecutionScope extends ToolScope {
   notes?: (() => readonly NoteItem[]) | undefined;
   /** 读取当前会话有效历史中的页面列表（ADR-0109） */
   pages?: (() => readonly SessionPage[]) | undefined;
+  /** 访问当前项目的面板页面库（ADR-0114 §5）；仅主会话注入 */
+  projectPages?: ProjectPagesAccess | undefined;
   /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
   pauseTimeouts?: (() => () => void) | undefined;
   /**
@@ -617,6 +654,8 @@ export interface ExecutionEnvironment {
   notes?: (() => readonly NoteItem[]) | undefined;
   /** 读取当前会话有效历史中的页面列表（ADR-0109） */
   pages?: (() => readonly SessionPage[]) | undefined;
+  /** 访问当前项目的面板页面库（ADR-0114 §5）；仅主会话注入 */
+  projectPages?: ProjectPagesAccess | undefined;
   /** 等待用户权限确认期间暂停外层显式超时计时（支持嵌套计数）；返回成对恢复函数 */
   pauseTimeouts?: (() => () => void) | undefined;
 }

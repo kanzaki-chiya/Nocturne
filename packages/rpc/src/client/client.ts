@@ -401,6 +401,10 @@ export interface RpcRuntime {
   searchSessions(
     input: RpcParams<"runtime.searchSessions">,
   ): Promise<RpcResult<"runtime.searchSessions">>;
+  listPages(input?: RpcParams<"runtime.listPages">): Promise<RpcResult<"runtime.listPages">>;
+  listPageProjects(
+    input?: RpcParams<"runtime.listPageProjects">,
+  ): Promise<RpcResult<"runtime.listPageProjects">>;
   workspaceBranches: Runtime["workspaceBranches"];
   switchBranch: Runtime["switchBranch"];
   usageStats(input: { days?: number }): Promise<UsageStats>;
@@ -1203,6 +1207,8 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     },
     listSessions: (filter) => call("runtime.listSessions", filter ?? {}),
     searchSessions: (input) => call("runtime.searchSessions", input),
+    listPages: (input) => call("runtime.listPages", input ?? {}),
+    listPageProjects: (input) => call("runtime.listPageProjects", input ?? {}),
     workspaceBranches: (input) => call("workspace.branches", input),
     switchBranch: async (input) => {
       await call("workspace.switchBranch", input);

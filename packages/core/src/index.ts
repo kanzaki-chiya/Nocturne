@@ -332,6 +332,8 @@ import {
   type GoalStatus,
   type PageCommentsInput,
   type PageCommentsSnapshot,
+  type PageLibraryListResult,
+  type PageLibraryProjectsResult,
   type PlanConfig,
   type WorkModeName,
   type WorkModeSnapshot,
@@ -346,6 +348,7 @@ import {
   workModeBody,
 } from "./work-modes/index.js";
 import {
+  createPageLibrary,
   createSessionStore,
   createSubagentObservation,
   createSubagentRegistry,
@@ -1085,6 +1088,15 @@ export interface Runtime {
   }): Promise<SessionSummary[]>;
   /** 无索引地搜索本机会话标题与有效正文；默认排除子会话与已归档会话。 */
   searchSessions(query: string, options?: SessionSearchOptions): Promise<SessionSearchResult[]>;
+  /** 按项目列出顶层会话（含已归档）中的面板页面，按来源合并为最近副本（ADR-0114）。 */
+  listPages(input?: {
+    projectKey?: string | undefined;
+    workspaceRoot?: string | undefined;
+  }): Promise<PageLibraryListResult>;
+  /** 列出包含面板页面的项目，以及当前工作区对应的项目信息（ADR-0114）。 */
+  listPageProjects(input?: {
+    workspaceRoot?: string | undefined;
+  }): Promise<PageLibraryProjectsResult>;
   /** 已配置 Provider 声明的模型清单（含已加载的可信项目层）；input.workspaceRoot 见上 */
   listModels(input?: {
     workspaceRoot?: string | undefined;
@@ -1478,6 +1490,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     applyFailed(scope: string, error: unknown): void;
   }
   const openSessions = new Map<string, OpenSessionHooks>();
+  const pageLibrary = createPageLibrary({
+    platform,
+    store,
+    sessionsDir,
+    nocturneHome,
+    defaultWorkspaceRoot: workspaceRoot,
+    getOpenSessionEvents: (id) => openSessions.get(id)?.durableEvents(),
+  });
   const branchSwitches = new Set<string>();
   const directoryKey = (path: string) => platform.paths.canonicalize(path);
   const switching = (path: string) =>
@@ -2021,6 +2041,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const externalResolved = await Promise.all(
       externalPaths.map((path) => platform.resolveReal(path)),
     );
+    const attachmentsRootReal = await platform.resolveReal(paths.join(sessionsDir, "attachments"));
+    const ownAttachmentsReal = paths.join(attachmentsRootReal, session.id);
+    let projectPageFiles: string[] = await pageLibrary.listProjectPanelPageFiles({
+      workspaceRoot: currentWorkspaceRoot(),
+      excludeSessionId: session.id,
+    });
+    const refreshProjectPageFiles = async (): Promise<void> => {
+      projectPageFiles = await pageLibrary.listProjectPanelPageFiles({
+        workspaceRoot: currentWorkspaceRoot(),
+        excludeSessionId: session.id,
+      });
+    };
     // presetContext.sessionId 参数化：子会话重建策略时换自己的 id
     // （attachments 目录等规则绑定子会话自己的落盘位置，subagent.md 7.2）
     const buildPolicy = (
@@ -2042,6 +2074,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           skillFiles: skillDiscovery.skills
             .filter((s) => s.layout === "file")
             .map((s) => s.realPath),
+          projectPageFiles,
           sessionsDir,
           sessionId: policySessionId,
           nocturneHome,
@@ -2324,6 +2357,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         saveAppPermissions,
         hooks: hookRunner,
         worktrees: activeWorktrees,
+        beforeEvaluate: async (subjects) => {
+          const needsRefresh = subjects.some((s) => {
+            if (s.kind !== "read") return false;
+            const candidate = s.resolved ?? s.target;
+            return (
+              paths.isWithin(candidate, attachmentsRootReal) &&
+              !paths.isWithin(candidate, ownAttachmentsReal)
+            );
+          });
+          if (needsRefresh) {
+            await refreshProjectPageFiles();
+          }
+        },
         ...(residentChild?.permissions !== undefined
           ? {
               onPendingSettled: (requestId: string) => {
@@ -2886,6 +2932,35 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       notes: () => session.state().notes,
       // ADR-0109：读取当前会话有效历史页面列表
       pages: () => session.state().pages,
+      // ADR-0114：主会话访问同项目面板页面库（供 list_pages 与 render_html 跨会话接着改）
+      ...(residentChild === undefined
+        ? {
+            projectPages: {
+              listPages: async () => {
+                const items = await pageLibrary.listPagesWithPaths({
+                  workspaceRoot: currentWorkspaceRoot(),
+                });
+                await refreshProjectPageFiles();
+                return items.map((item) => ({
+                  ref: item.ref,
+                  origin: item.origin,
+                  sessionId: item.sessionId,
+                  sessionTitle: item.sessionTitle,
+                  page: item.page,
+                  title: item.title,
+                  version: item.version,
+                  updatedAt: item.updatedAt,
+                  path: item.path,
+                }));
+              },
+              resolvePage: (ref: string) =>
+                pageLibrary.resolveCrossSessionPage({
+                  workspaceRoot: currentWorkspaceRoot(),
+                  ref,
+                }),
+            },
+          }
+        : {}),
     };
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
@@ -7805,6 +7880,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     listSessions: (filter) => store.list(filter),
     searchSessions: (query, options) =>
       searchSessions(platform, store, sessionsDir, query, options),
+    listPages: (input) => pageLibrary.listPages(input),
+    listPageProjects: (input) => pageLibrary.listProjects(input),
     cancelSubagent(input) {
       if (!backgroundSubagents.cancel(input.parentSessionId, input.childSessionId))
         return Promise.reject(new RuntimeCommandError("invalid_command", "没有运行中的后台子代理"));

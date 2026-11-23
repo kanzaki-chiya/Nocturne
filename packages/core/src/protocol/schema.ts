@@ -156,11 +156,17 @@ const fileAttachmentSchema = z.object({
   source: z.enum(["paste", "upload", "answer"]),
 });
 
+const inlinePageFromSchema = z.object({
+  session: z.string().min(1),
+  page: z.string().min(1),
+});
+
 const inlinePageMetaSchema = z.object({
   title: z.string(),
   page: z.string().min(1).optional(),
   version: z.number().int().positive().optional(),
   display: z.enum(["inline", "panel"]).optional(),
+  from: inlinePageFromSchema.optional(),
 });
 
 const toolResultFileAttachmentSchema = fileAttachmentSchema.extend({

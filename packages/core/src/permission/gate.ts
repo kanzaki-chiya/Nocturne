@@ -96,6 +96,8 @@ export interface PolicyGateOptions extends ReviewInputSources {
   pauseTimeouts?: (() => () => void) | undefined;
   /** 请求从等待池移除（respond 结算、cancelAll 或信号中止）时的同步通知 */
   onPendingSettled?: ((requestId: string) => void) | undefined;
+  /** 求值前的可选异步刷新（例如刷新同项目面板页面放行清单） */
+  beforeEvaluate?: ((subjects: readonly PermissionSubject[]) => Promise<void> | void) | undefined;
 }
 
 /** 完整的确认选项集（permissions.md 第 7 节） */
@@ -349,6 +351,9 @@ export function createPolicyGate(
     // Hook 强制 ask（PreToolUse decision:"ask"）：跳过 Grant 与 autoApproveAsk
     // 求值——Hook 要求的确认不能被既有授权或 --yes 自动放行（permissions.md 5.5）
     const forceAsk = hookCtx?.forceAsk === true;
+    if (options.beforeEvaluate !== undefined) {
+      await options.beforeEvaluate(subjects);
+    }
     const evaluation = policy.evaluate(subjects, {
       ...(forceAsk ? { skipApprovals: true } : {}),
       session: {

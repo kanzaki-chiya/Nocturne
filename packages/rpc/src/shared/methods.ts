@@ -17,7 +17,12 @@ import type {
   SuiteRecord,
   UpdateSuiteInput,
 } from "@nocturne/core";
-import type { PageModelInput, PagePermissionReply } from "@nocturne/core/protocol";
+import type {
+  PageLibraryListResult,
+  PageLibraryProjectsResult,
+  PageModelInput,
+  PagePermissionReply,
+} from "@nocturne/core/protocol";
 /**
  * 方法表：每个 RPC 方法的参数与结果类型（ADR-0044 第 4 节、docs/protocols/rpc.md）。
  * 服务端按它做类型检查地实现，客户端按它生成类型化调用；对 @nocturne/core 只有类型导入。
@@ -545,6 +550,14 @@ export interface RpcMethods {
   "runtime.searchSessions": {
     params: { query: string; searchId?: string; includeArchived?: boolean };
     result: SessionSearchResult[];
+  };
+  "runtime.listPages": {
+    params: { projectKey?: string | undefined; workspaceRoot?: string | undefined };
+    result: PageLibraryListResult;
+  };
+  "runtime.listPageProjects": {
+    params: { workspaceRoot?: string | undefined };
+    result: PageLibraryProjectsResult;
   };
   "runtime.usageStats": { params: { days?: number }; result: UsageStats };
   /**
@@ -1148,6 +1161,8 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.shutdown": true,
   "runtime.listSessions": true,
   "runtime.searchSessions": true,
+  "runtime.listPages": true,
+  "runtime.listPageProjects": true,
   "runtime.usageStats": true,
   "runtime.createSession": true,
   "runtime.resumeSession": true,

@@ -32,11 +32,14 @@ export interface PresetContext {
   skillRoots?: readonly string[] | undefined;
   /** 已发现命令文件技能的真实文件路径：只放行该文件本身，不放行整个目录 */
   skillFiles?: readonly string[] | undefined;
+  /** 同项目其他会话面板页面的版本 HTML 真实文件路径：只读放行（ADR-0114 §5） */
+  projectPageFiles?: readonly string[] | undefined;
 }
 
 const PROTECTED_LABEL = "受保护路径";
 const AUTH_DATA_LABEL = "修改 Nocturne 授权配置";
 const ATTACHMENTS_LABEL = "本会话落盘目录";
+const PROJECT_PAGES_LABEL = "同项目面板页面";
 
 interface BroadRule {
   kind?: PermissionRule["kind"];
@@ -167,6 +170,11 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
       ctx.caseSensitive,
     );
     rules.push({ kind: "read", pattern: `${dir}/**`, action: "allow", label: ATTACHMENTS_LABEL });
+  }
+  // 同项目其他会话的面板页面版本 HTML 只读放行（ADR-0114 §5）：按文件精确放行，不放行整个目录
+  for (const file of ctx.projectPageFiles ?? []) {
+    const filePath = normalizePathText(file, ctx.caseSensitive);
+    rules.push({ kind: "read", pattern: filePath, action: "allow", label: PROJECT_PAGES_LABEL });
   }
 
   for (const root of ctx.skillRoots ?? []) {

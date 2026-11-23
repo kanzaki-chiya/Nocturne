@@ -844,8 +844,17 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
       const inlineFiles = p.status === "ok" ? filterInlinePageFiles(p.files) : [];
       if (inlineFiles.length > 0) {
         entry.inlineFiles = inlineFiles;
+        const createdEv = b.events[0];
+        const sessionId =
+          createdEv?.type === "session.created" ? createdEv.sessionId : event.sessionId;
+        const forkedFrom =
+          createdEv?.type === "session.created" ? createdEv.payload.forkedFrom : undefined;
         for (const file of inlineFiles) {
-          appendSessionPageFromFile(view.pages, file, event.seq);
+          appendSessionPageFromFile(view.pages, file, event.seq, {
+            sessionId,
+            eventSessionId: event.sessionId,
+            forkedFrom,
+          });
         }
       } else {
         delete entry.inlineFiles;

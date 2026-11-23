@@ -138,6 +138,7 @@ describe("ToolRegistry", () => {
       "edit",
       "glob",
       "grep",
+      "list_pages",
       "note_write",
       "read",
       "render_html",

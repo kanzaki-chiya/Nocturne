@@ -51,6 +51,12 @@ export { shellTool } from "./builtin/shell.js";
 export { todoWriteTool } from "./builtin/todo-write.js";
 export { noteWriteTool } from "./builtin/note-write.js";
 export {
+  listPagesTool,
+  type ListPagesInput,
+  type ListPagesItem,
+  type ListPagesOutput,
+} from "./builtin/list-pages.js";
+export {
   renderHtmlTool,
   MAX_INLINE_HTML_BYTES,
   MAX_INLINE_HTML_IMAGES,
@@ -105,6 +111,7 @@ import { applyPatchTool } from "./builtin/apply-patch.js";
 import { shellTool } from "./builtin/shell.js";
 import { todoWriteTool } from "./builtin/todo-write.js";
 import { noteWriteTool } from "./builtin/note-write.js";
+import { listPagesTool } from "./builtin/list-pages.js";
 import { renderHtmlTool } from "./builtin/render-html.js";
 import { askUserTool } from "./builtin/ask-user.js";
 import { scheduleTool } from "./builtin/schedule.js";
@@ -124,6 +131,7 @@ export function builtinTools(): ToolDefinition[] {
     shellTool,
     todoWriteTool,
     noteWriteTool,
+    listPagesTool,
     renderHtmlTool,
     askUserTool,
     scheduleTool,

@@ -286,7 +286,11 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         notes = noteItemsFromCompletion(p) ?? notes;
         if (p.status === "ok") {
           for (const file of filterInlinePageFiles(p.files)) {
-            appendSessionPageFromFile(pages, file, event.seq);
+            appendSessionPageFromFile(pages, file, event.seq, {
+              sessionId: meta?.id ?? event.sessionId,
+              eventSessionId: event.sessionId,
+              forkedFrom: meta?.forkedFrom,
+            });
           }
         }
         history.push({

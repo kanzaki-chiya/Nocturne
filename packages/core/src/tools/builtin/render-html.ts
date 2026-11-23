@@ -1,11 +1,19 @@
 import {
   nextSessionPageId,
   type InlinePageDisplay,
+  type InlinePageFrom,
   type SessionPage,
   type SubjectRequest,
 } from "../../protocol/index.js";
 import { sniffImageMime } from "../image.js";
-import type { ToolContext, ToolDefinition, ToolResult, ToolScope } from "../types.js";
+import type {
+  ProjectPageEntry,
+  ProjectPageTarget,
+  ToolContext,
+  ToolDefinition,
+  ToolResult,
+  ToolScope,
+} from "../types.js";
 
 export const MAX_INLINE_HTML_TITLE_CHARS = 80;
 export const MAX_INLINE_HTML_BYTES = 256 * 1024;
@@ -176,6 +184,14 @@ function formatExistingPages(pages: readonly SessionPage[]): string {
   return `当前会话已有页面：\n${lines.join("\n")}`;
 }
 
+function formatAvailableProjectRefs(entries: readonly ProjectPageEntry[]): string {
+  if (entries.length === 0) {
+    return "当前项目暂无可用的面板页面。";
+  }
+  const lines = entries.map((p) => `- ${p.ref}: ${p.title} (v${p.version})`);
+  return `可用的页面 ref：\n${lines.join("\n")}`;
+}
+
 /** 逐个读取 images 并内联进 html；任一失败整次调用失败 */
 async function inlineImages(
   baseHtml: string,
@@ -244,7 +260,7 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
   description:
     "新建或更新单文件 HTML 页面，在隔离沙箱中渲染。仅在图表、对比表、示意图、界面草图、交互小工具、看板或独立文档明显优于文字时，或用户明确要求时使用；普通说明与代码直接用 Markdown。" +
     '\nWhen creating a page, use display: "inline" by default. Use display: "panel" only on explicit request, such as when the user has used /cadenza, asks to put the page in the panel or sidebar, or asks for an artifact. If the user simply asks to show, draw, or compare something, use "inline". Updates keep the display of the first version and ignore the supplied display. Set the page background on body.' +
-    "\n更新传已有 page id，配 edits（小改动优先，按序唯一精确替换）或 html（整份重写），省去 title 沿用原题；需看全文用 read 读结果里的文件路径。沙箱允许内联脚本与样式，阻止跳转/表单/弹窗/下载。本地图片列进 images 并在 html 属性或 url() 写同串即自动内联。需响应式（内嵌桌面约 720px、手机约 360px，高过 420px 自动折叠可展开或全屏）。正文勿复述页面内容。自动注入随深浅色切换的主题 CSS 变量：--bg、--raised、--text、--secondary、--muted、--border、--accent、--ok、--warn、--bad、--sans、--mono。" +
+    '\n更新传已有 page id，配 edits（小改动优先，按序唯一精确替换）或 html（整份重写），省去 title 沿用原题；需看全文用 read 读结果里的文件路径。接着改别的会话里的页面时，先用 list_pages 找到 ref，再传 page: "<ref>"。沙箱允许内联脚本与样式，阻止跳转/表单/弹窗/下载。本地图片列进 images 并在 html 属性或 url() 写同串即自动内联。需响应式（内嵌桌面约 720px、手机约 360px，高过 420px 自动折叠可展开或全屏）。正文勿复述页面内容。自动注入随深浅色切换的主题 CSS 变量：--bg、--raised、--text、--secondary、--muted、--border、--accent、--ok、--warn、--bad、--sans、--mono。' +
     '\nThe only allowed external host is https://cdnjs.cloudflare.com. Use /ajax/libs/<lib>/<exact version>/<file> URLs and pin exact versions. Use UMD or global builds, or import ES modules from that same host with <script type="module">. Write the parts that do not depend on libraries inline first and show a brief message in the page if a library fails to load. The page cannot use fetch, XMLHttpRequest, or WebSocket with any address.' +
     "\nUse window.nocturne.storage to save page data and window.nocturne.ask to call a model. Check for window.nocturne first and render normally when it is unavailable, without saving or calling a model. Model calls may require user approval. Handle rejected and aborted calls.",
   inputSchema: {
@@ -262,7 +278,8 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
       page: {
         type: "string",
         minLength: 1,
-        description: "要更新的已有页面 id（如 page-1）",
+        description:
+          "要更新的已有页面 id（如 page-1），或同项目其他会话的页面 ref（<sessionId>/<page>）",
       },
       edits: {
         type: "array",
@@ -387,50 +404,152 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
     let display: InlinePageDisplay;
     let title: string;
     let baseHtml: string;
+    let fromMeta: InlinePageFrom | undefined;
+    let crossSessionTarget: ProjectPageTarget | undefined;
     let reservedId: string | undefined;
     const inFlight = getInFlightSet(ctx.pages);
 
     if (input.page !== undefined) {
       const requestedPage = input.page.trim();
-      const existing = pages.find((p) => p.page === requestedPage);
-      if (existing === undefined) {
-        return failure(
-          "invalid_input",
-          `页面 "${requestedPage}" 不存在。${formatExistingPages(pages)}`,
-        );
-      }
-      pageId = existing.page;
-      const latest = existing.versions.at(-1);
-      version = (latest?.version ?? existing.versions.length) + 1;
-      display = existing.display;
-      title = input.title !== undefined ? input.title.trim() : existing.title;
-
-      if (input.edits !== undefined) {
-        if (!ctx.loadFileAttachment || latest === undefined) {
-          return failure("attachment_unavailable", "附件存储不可用，无法读取上一版页面内容");
-        }
-        const prevBytes = await ctx.loadFileAttachment(latest.file);
-        if (prevBytes === undefined) {
+      const isCrossRef = requestedPage.includes("/");
+      if (isCrossRef) {
+        const parts = requestedPage.split("/");
+        const [refSessionId, refPageId] = parts;
+        const formatInvalidRef = async (): Promise<ToolResult<RenderHtmlOutput>> => {
+          const available = ctx.projectPages ? await ctx.projectPages.listPages() : [];
           return failure(
-            "io_error",
-            `无法读取页面 "${pageId}" 上一版（v${latest.version}，${latest.file.file}）的 HTML 内容`,
+            "invalid_input",
+            `页面 "${requestedPage}" 不存在或不属于当前项目。${formatAvailableProjectRefs(available)}`,
+          );
+        };
+        if (parts.length !== 2 || !refSessionId || !refPageId) {
+          return formatInvalidRef();
+        }
+        if (refSessionId === ctx.sessionId) {
+          const existing = pages.find((p) => p.page === refPageId && p.display === "panel");
+          if (existing === undefined) {
+            return formatInvalidRef();
+          }
+          pageId = existing.page;
+          const latest = existing.versions.at(-1);
+          version = (latest?.version ?? existing.versions.length) + 1;
+          display = existing.display;
+          title = input.title !== undefined ? input.title.trim() : existing.title;
+          if (input.edits !== undefined) {
+            if (!ctx.loadFileAttachment || latest === undefined) {
+              return failure("attachment_unavailable", "附件存储不可用，无法读取上一版页面内容");
+            }
+            const prevBytes = await ctx.loadFileAttachment(latest.file);
+            if (prevBytes === undefined) {
+              return failure(
+                "io_error",
+                `无法读取页面 "${pageId}" 上一版（v${latest.version}，${latest.file.file}）的 HTML 内容`,
+              );
+            }
+            const prevHtml = new TextDecoder("utf-8").decode(prevBytes);
+            const applied = applyHtmlEdits(prevHtml, input.edits);
+            if (!applied.ok) {
+              return failure("invalid_input", applied.error);
+            }
+            const htmlErr = validateHtmlText(applied.html);
+            if (htmlErr !== undefined) {
+              return failure("invalid_input", htmlErr);
+            }
+            baseHtml = applied.html;
+          } else {
+            if (input.html === undefined) {
+              return failure("invalid_input", "更新页面时请提供 html 或 edits");
+            }
+            baseHtml = input.html;
+          }
+        } else {
+          const resolved = ctx.projectPages
+            ? await ctx.projectPages.resolvePage(requestedPage)
+            : undefined;
+          if (resolved === undefined) {
+            return formatInvalidRef();
+          }
+          crossSessionTarget = resolved;
+          pageId = nextSessionPageId(pages, inFlight);
+          if (inFlight !== undefined) {
+            inFlight.add(pageId);
+            reservedId = pageId;
+          }
+          version = resolved.version + 1;
+          display = "panel";
+          title = input.title !== undefined ? input.title.trim() : resolved.title;
+          fromMeta = { session: resolved.sessionId, page: resolved.page };
+
+          if (input.edits !== undefined) {
+            const prevBytes = await resolved.readHtml();
+            if (prevBytes === undefined) {
+              if (reservedId !== undefined) inFlight?.delete(reservedId);
+              return failure(
+                "io_error",
+                `无法读取页面 "${requestedPage}" 最新版（v${resolved.version}）的 HTML 内容`,
+              );
+            }
+            const prevHtml = new TextDecoder("utf-8").decode(prevBytes);
+            const applied = applyHtmlEdits(prevHtml, input.edits);
+            if (!applied.ok) {
+              if (reservedId !== undefined) inFlight?.delete(reservedId);
+              return failure("invalid_input", applied.error);
+            }
+            const htmlErr = validateHtmlText(applied.html);
+            if (htmlErr !== undefined) {
+              if (reservedId !== undefined) inFlight?.delete(reservedId);
+              return failure("invalid_input", htmlErr);
+            }
+            baseHtml = applied.html;
+          } else {
+            if (input.html === undefined) {
+              if (reservedId !== undefined) inFlight?.delete(reservedId);
+              return failure("invalid_input", "更新页面时请提供 html 或 edits");
+            }
+            baseHtml = input.html;
+          }
+        }
+      } else {
+        const existing = pages.find((p) => p.page === requestedPage);
+        if (existing === undefined) {
+          return failure(
+            "invalid_input",
+            `页面 "${requestedPage}" 不存在。${formatExistingPages(pages)}`,
           );
         }
-        const prevHtml = new TextDecoder("utf-8").decode(prevBytes);
-        const applied = applyHtmlEdits(prevHtml, input.edits);
-        if (!applied.ok) {
-          return failure("invalid_input", applied.error);
+        pageId = existing.page;
+        const latest = existing.versions.at(-1);
+        version = (latest?.version ?? existing.versions.length) + 1;
+        display = existing.display;
+        title = input.title !== undefined ? input.title.trim() : existing.title;
+
+        if (input.edits !== undefined) {
+          if (!ctx.loadFileAttachment || latest === undefined) {
+            return failure("attachment_unavailable", "附件存储不可用，无法读取上一版页面内容");
+          }
+          const prevBytes = await ctx.loadFileAttachment(latest.file);
+          if (prevBytes === undefined) {
+            return failure(
+              "io_error",
+              `无法读取页面 "${pageId}" 上一版（v${latest.version}，${latest.file.file}）的 HTML 内容`,
+            );
+          }
+          const prevHtml = new TextDecoder("utf-8").decode(prevBytes);
+          const applied = applyHtmlEdits(prevHtml, input.edits);
+          if (!applied.ok) {
+            return failure("invalid_input", applied.error);
+          }
+          const htmlErr = validateHtmlText(applied.html);
+          if (htmlErr !== undefined) {
+            return failure("invalid_input", htmlErr);
+          }
+          baseHtml = applied.html;
+        } else {
+          if (input.html === undefined) {
+            return failure("invalid_input", "更新页面时请提供 html 或 edits");
+          }
+          baseHtml = input.html;
         }
-        const htmlErr = validateHtmlText(applied.html);
-        if (htmlErr !== undefined) {
-          return failure("invalid_input", htmlErr);
-        }
-        baseHtml = applied.html;
-      } else {
-        if (input.html === undefined) {
-          return failure("invalid_input", "更新页面时请提供 html 或 edits");
-        }
-        baseHtml = input.html;
       }
     } else {
       if (input.title === undefined || input.html === undefined) {
@@ -456,8 +575,17 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
         data,
         mimeType: "text/html",
         label,
-        inline: { title, page: pageId, version, display },
+        inline: {
+          title,
+          page: pageId,
+          version,
+          display,
+          ...(fromMeta !== undefined ? { from: fromMeta } : {}),
+        },
       });
+      if (crossSessionTarget !== undefined) {
+        await crossSessionTarget.copyPageDataTo(ctx.sessionId, pageId);
+      }
       const filePath = ctx.attachmentPath ? ctx.attachmentPath(saved.file) : saved.file;
       return {
         status: "ok",

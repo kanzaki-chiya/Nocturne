@@ -1333,12 +1333,14 @@ describe("render_html 工具与内嵌页面标记", () => {
         page: legacyInlinePageId("file-1.html"),
         title: "旧图表",
         display: "inline",
+        origin: { sessionId: "s-legacy", page: legacyInlinePageId("file-1.html") },
         versions: [{ version: 1, file: legacyFile, title: "旧图表", seq: 2 }],
       });
       expect(view.pages[1]).toEqual({
         page: "page-1",
         title: "新面板",
         display: "panel",
+        origin: { sessionId: "s-legacy", page: "page-1" },
         versions: [{ version: 1, file: newFile, title: "新面板", seq: 3 }],
       });
       expect(view.pages[0]?.page).not.toBe(view.pages[1]?.page);
