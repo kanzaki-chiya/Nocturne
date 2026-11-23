@@ -477,15 +477,20 @@ export function SessionScreen({
         }
         {...(ensembleMember === undefined && suiteThread === undefined
           ? {
-              onResubmit: async (targetSeq, text, mode, workMode) => {
-                // 同桌面 resubmit：先回退再按普通发送；重发只带文本与用户提交的执行方式
+              onResubmit: async (targetSeq, text, mode, workMode, quotes) => {
+                // 同桌面 resubmit：先回退再按普通发送；重发带文本、用户提交的执行方式与引用
                 setBusy(true);
                 try {
                   await sessions.rewind(entry, targetSeq, mode);
                 } finally {
                   setBusy(false);
                 }
-                await submit({ text, attachments: [], ...(workMode ? { workMode } : {}) });
+                await submit({
+                  text,
+                  attachments: [],
+                  ...(workMode ? { workMode } : {}),
+                  ...(quotes?.length ? { quotes } : {}),
+                });
               },
               onApprovePlan: approvePlan,
               ...(view.suite === undefined

@@ -8,12 +8,14 @@
 import type { ComposerSubmit } from "./Composer.js";
 import { toPageCommentsSnapshot } from "./page-comments.js";
 import {
+  formatQuotesBlock,
   pageCommentsLabel,
   userEntryText,
   type ContentBlock,
   type FileAttachment,
   type ImageAttachment,
   type ImageMimeType,
+  type MessageQuote,
   type PendingInputItem,
   type PendingInputsSnapshot,
   type UserEntry,
@@ -76,6 +78,19 @@ function humanUser(entry: ViewEntry): entry is UserEntry {
   );
 }
 
+function sameQuotes(
+  a: readonly MessageQuote[] | undefined,
+  b: readonly MessageQuote[] | undefined,
+): boolean {
+  const la = a?.length ?? 0;
+  const lb = b?.length ?? 0;
+  if (la !== lb) return false;
+  for (let i = 0; i < la; i += 1) {
+    if (a?.[i]?.text !== b?.[i]?.text || a?.[i]?.seq !== b?.[i]?.seq) return false;
+  }
+  return true;
+}
+
 function sameTurn(local: LocalOutgoing, entry: UserEntry): boolean {
   // 接受后新出现的第一条非插话用户条目就是这次发送（Core 对同一会话串行处理）
   if (local.accepted === true) return entry.steer !== true;
@@ -84,7 +99,8 @@ function sameTurn(local: LocalOutgoing, entry: UserEntry): boolean {
     (entry.workMode?.name ?? undefined) === local.input.workMode &&
     (entry.delegate?.agent ?? undefined) === local.input.delegate?.agent &&
     (entry.pageComments?.page ?? undefined) === local.input.pageComments?.page &&
-    (entry.pageComments?.version ?? undefined) === local.input.pageComments?.version
+    (entry.pageComments?.version ?? undefined) === local.input.pageComments?.version &&
+    sameQuotes(entry.quotes, local.input.quotes)
   );
 }
 
@@ -95,6 +111,7 @@ function samePending(local: LocalOutgoing, item: PendingInputItem): boolean {
   if (item.mode !== mode) return false;
   if (item.text !== local.input.text) return false;
   if ((item.workMode ?? undefined) !== local.input.workMode) return false;
+  if (!sameQuotes(item.quotes, local.input.quotes)) return false;
   const sent = Date.parse(local.sentAt);
   const created = Date.parse(item.createdAt);
   // 服务端时钟略慢时仍算同一条；明显更早的是发送前就在队列里的
@@ -250,7 +267,11 @@ function toUserEntry(
       source: attachment.source === "paste" ? "paste" : "upload",
     });
   });
-  const content: ContentBlock[] = [{ type: "text", text: local.input.text }];
+  const quotes = local.input.quotes?.length ? local.input.quotes : undefined;
+  const content: ContentBlock[] = [
+    ...(quotes ? [{ type: "text" as const, text: formatQuotesBlock(quotes) }] : []),
+    { type: "text", text: local.input.text },
+  ];
   return {
     kind: "user",
     key: local.id,
@@ -264,6 +285,7 @@ function toUserEntry(
     ...(local.input.pageComments
       ? { pageComments: toPageCommentsSnapshot(local.input.pageComments) }
       : {}),
+    ...(quotes ? { quotes } : {}),
   };
 }
 
@@ -298,6 +320,7 @@ export function localPendingItems(book: OutgoingBook): PendingInputItem[] {
             },
           }
         : {}),
+      ...(item.input.quotes?.length ? { quotes: item.input.quotes } : {}),
     }));
 }
 
@@ -333,5 +356,10 @@ export function outgoingTitle(book: OutgoingBook): string | undefined {
   if (first.input.pageComments !== undefined) {
     return pageCommentsLabel(first.input.pageComments);
   }
+  const firstQuoteLine = first.input.quotes?.[0]?.text
+    .split("\n")
+    .find((line) => line.trim() !== "")
+    ?.trim();
+  if (firstQuoteLine) return firstQuoteLine;
   return undefined;
 }

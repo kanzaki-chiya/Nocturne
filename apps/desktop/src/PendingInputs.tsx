@@ -145,6 +145,10 @@ export function PendingInputs({
         const isEnsemblePost = unwrappedEnsemble !== item.text;
         const commentLabel =
           item.pageComments === undefined ? undefined : pageCommentsLabel(item.pageComments);
+        const firstQuoteLine = item.quotes?.[0]?.text
+          .split("\n")
+          .find((line) => line.trim() !== "")
+          ?.trim();
         const rowText = isShell
           ? `后台任务 · ${item.shellName ?? ""} · 等待送达`
           : isSubagent
@@ -152,7 +156,9 @@ export function PendingInputs({
             : isEnsemblePost
               ? unwrappedEnsemble
               : item.text === "" && item.workMode === undefined && commentLabel === undefined
-                ? "（仅图片）"
+                ? firstQuoteLine !== undefined
+                  ? `> ${firstQuoteLine}`
+                  : "（仅图片）"
                 : item.text;
         return (
           <div key={item.id} className={`pi-row pi-${item.mode}`}>

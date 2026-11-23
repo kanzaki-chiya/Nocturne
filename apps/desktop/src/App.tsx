@@ -11,6 +11,7 @@ import {
 import type {
   ApplicationTarget,
   ExternalAgentOverview,
+  MessageQuote,
   ModelRef,
   PageLibraryItem,
   PendingInputsSnapshot,
@@ -35,6 +36,7 @@ import {
 } from "@nocturne/core/protocol";
 
 import { applyAppearance, applyContentWidth, applyReduceMotion, watchTheme } from "./appearance";
+import { addDraftQuote, removeDraftQuote } from "./quote-reply";
 import { runThemeTransition } from "./motion";
 import { subscribeThemeSettings } from "./theme-sync";
 import { PRESETS, type CustomTheme } from "./theme-presets";
@@ -1263,8 +1265,11 @@ export function App({ host }: { host: DesktopHost }) {
       },
       targetSeq,
       (id, workspace) => selectSession(id, workspace),
-      (id, text) => {
-        setForkDraft({ id, text });
+      (id, text, quotes) => {
+        if (text !== "") setForkDraft({ id, text });
+        if (quotes !== undefined && quotes.length > 0) {
+          setDraftQuotesBySession((prev) => new Map(prev).set(id, quotes));
+        }
       },
     );
   };
@@ -1514,12 +1519,51 @@ export function App({ host }: { host: DesktopHost }) {
     setDraftPageComments((prev) => removeDraftPageCommentsByPage(prev, pageId));
   }, []);
 
+  // 未发送的引用回复草稿（ADR-0116）：按会话保留，切换会话时不丢弃，发送后清空
+  const [draftQuotesBySession, setDraftQuotesBySession] = useState<
+    ReadonlyMap<string, readonly MessageQuote[]>
+  >(() => new Map());
+  const [quoteFocusNonce, setQuoteFocusNonce] = useState(0);
+  const handleAddQuote = useCallback((sessionId: string, quote: MessageQuote) => {
+    setDraftQuotesBySession((prev) => {
+      const current = prev.get(sessionId) ?? [];
+      const next = addDraftQuote(current, quote);
+      if (next.length === current.length) return prev;
+      return new Map(prev).set(sessionId, next);
+    });
+    setQuoteFocusNonce((n) => n + 1);
+  }, []);
+  const handleRemoveQuote = useCallback((sessionId: string, index: number) => {
+    setDraftQuotesBySession((prev) => {
+      const current = prev.get(sessionId);
+      if (current === undefined) return prev;
+      const next = removeDraftQuote(current, index);
+      const copy = new Map(prev);
+      if (next.length === 0) copy.delete(sessionId);
+      else copy.set(sessionId, next);
+      return copy;
+    });
+  }, []);
+
   // 发送消息：输入框在调用前已清空。缩略图由本地预览登记，不在这里等哈希。
   const submitInput = async (
     input: ComposerSubmit,
     mode?: "steer" | "queue",
     create?: CreateSessionChoice,
   ): Promise<boolean> => {
+    const activeSessionId = conversations.selectedId;
+    const sentQuotes =
+      activeSessionId !== null && input.quotes !== undefined && input.quotes.length > 0
+        ? input.quotes
+        : undefined;
+    if (activeSessionId !== null && sentQuotes !== undefined) {
+      setDraftQuotesBySession((prev) => {
+        if (!prev.has(activeSessionId)) return prev;
+        const next = new Map(prev);
+        next.delete(activeSessionId);
+        return next;
+      });
+    }
     const inputPageComments = input.pageComments;
     const sentCommentGroup =
       inputPageComments !== undefined
@@ -1544,6 +1588,13 @@ export function App({ host }: { host: DesktopHost }) {
       await refresh();
       return true;
     } catch (error) {
+      if (activeSessionId !== null && sentQuotes !== undefined) {
+        setDraftQuotesBySession((prev) => {
+          const existing = prev.get(activeSessionId);
+          if (existing !== undefined && existing.length > 0) return prev;
+          return new Map(prev).set(activeSessionId, sentQuotes);
+        });
+      }
       if (sentCommentGroup !== undefined) {
         setDraftPageComments((prev) =>
           prev.some(
@@ -1609,8 +1660,9 @@ export function App({ host }: { host: DesktopHost }) {
     text: string,
     mode: RewindMode,
     workMode?: WorkModeName,
+    quotes?: MessageQuote[],
   ): Promise<void> => {
-    await conversations.resubmit(targetSeq, text, mode, workMode);
+    await conversations.resubmit(targetSeq, text, mode, workMode, quotes);
     selectedIdRef.current = conversations.selectedId;
     setSelectedId(conversations.selectedId);
     await refresh();
@@ -2836,6 +2888,14 @@ export function App({ host }: { host: DesktopHost }) {
                   onSubmit={(input, mode) => submitInput(input, mode)}
                   pageComments={draftPageComments}
                   onRemovePageComments={handleRemovePageCommentGroup}
+                  quotes={draftQuotesBySession.get(active.session.id)}
+                  onQuote={(quote) => {
+                    handleAddQuote(active.session.id, quote);
+                  }}
+                  onRemoveQuote={(index) => {
+                    handleRemoveQuote(active.session.id, index);
+                  }}
+                  quoteFocusNonce={quoteFocusNonce}
                   onInterrupt={() => {
                     conversations.interrupt();
                   }}
@@ -3208,6 +3268,7 @@ interface SessionPaneProps {
     text: string,
     mode: RewindMode,
     workMode?: WorkModeName,
+    quotes?: MessageQuote[],
   ) => Promise<void>;
   onFork: (targetSeq: number) => Promise<void>;
   /** 分叉后填进输入框的原消息，或拒收后放回的草稿（Composer 首次挂载时取用） */
@@ -3264,6 +3325,10 @@ interface SessionPaneProps {
   activePage?: { page: string; version: number } | undefined;
   pageComments?: readonly DraftPageCommentGroup[] | undefined;
   onRemovePageComments?: ((page: string, version: number) => void) | undefined;
+  quotes?: readonly MessageQuote[] | undefined;
+  onQuote?: ((quote: MessageQuote) => void) | undefined;
+  onRemoveQuote?: ((index: number) => void) | undefined;
+  quoteFocusNonce?: number | undefined;
   onShellKindChange?: ((sessionId: string, kind: string | undefined) => void) | undefined;
 }
 
@@ -3342,6 +3407,10 @@ function SessionPane({
   activePage,
   pageComments,
   onRemovePageComments,
+  quotes,
+  onQuote,
+  onRemoveQuote,
+  quoteFocusNonce,
   onShellKindChange,
   ruleEligibleCalls,
 }: SessionPaneProps) {
@@ -3435,6 +3504,7 @@ function SessionPane({
         enableFind
         enableTurnNav
         onResubmit={onResubmit}
+        onQuote={onQuote}
         onFork={view.suite !== undefined ? undefined : onFork}
         onApprovePlan={onApprovePlan}
         turnChanges={turnChanges}
@@ -3526,6 +3596,9 @@ function SessionPane({
         onSubmit={onSubmit}
         pageComments={pageComments}
         onRemovePageComments={onRemovePageComments}
+        quotes={quotes}
+        onRemoveQuote={onRemoveQuote}
+        focusNonce={quoteFocusNonce}
         onInterrupt={onInterrupt}
         pendingInputs={pendingInputs}
         onUpdatePending={onUpdatePending}

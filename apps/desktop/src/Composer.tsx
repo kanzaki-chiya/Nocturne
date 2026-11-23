@@ -19,6 +19,7 @@ import {
   type ImageMimeType,
   type ExternalAgentOverview,
   type McpServerViewState,
+  type MessageQuote,
   type PageCommentsInput,
   type PendingInputsSnapshot,
   type SkillOverview,
@@ -150,6 +151,8 @@ export interface ComposerSubmit {
   attachments: { data: Uint8Array; mimeType: string; label: string; source?: "paste" | "upload" }[];
   /** 面板页面评论（ADR-0113） */
   pageComments?: PageCommentsInput;
+  /** 引用回复片段（ADR-0116） */
+  quotes?: MessageQuote[];
 }
 
 export interface ComposerProps {
@@ -176,6 +179,12 @@ export interface ComposerProps {
   pageComments?: readonly DraftPageCommentGroup[] | undefined;
   /** 点 × 移除某组页面评论 */
   onRemovePageComments?: ((page: string, version: number) => void) | undefined;
+  /** 草稿里的引用回复片段（ADR-0116）；显示在输入框顶部 */
+  quotes?: readonly MessageQuote[] | undefined;
+  /** 点 × 移除某段引用 */
+  onRemoveQuote?: ((index: number) => void) | undefined;
+  /** 递增时将光标移入输入框（如点「回复」后） */
+  focusNonce?: number | undefined;
   /** 编辑/切换插话排队 */
   onUpdatePending?:
     ((id: string, patch: { mode?: "steer" | "queue"; text?: string }) => Promise<void>) | undefined;
@@ -292,6 +301,9 @@ export function Composer({
   pendingInputs,
   pageComments,
   onRemovePageComments,
+  quotes,
+  onRemoveQuote,
+  focusNonce,
   onUpdatePending,
   onCancelPending,
   onResumePending,
@@ -363,6 +375,12 @@ export function Composer({
     }
     wasHidden.current = hidden;
   }, [hidden]);
+  const lastFocusNonce = useRef(focusNonce ?? 0);
+  useEffect(() => {
+    if (focusNonce === undefined || focusNonce === lastFocusNonce.current) return;
+    lastFocusNonce.current = focusNonce;
+    if (!hidden) textarea.current?.focus();
+  }, [focusNonce, hidden]);
   const [dragOver, setDragOver] = useState(false);
   const [vision, setVision] = useState<string | undefined>(undefined);
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -820,7 +838,12 @@ export function Composer({
         setEnterHint(usage?.kind === "usage" ? usage.hint : `用法：/${selectedMode} 任务`);
         return;
       }
-      if (attachmentsRef.current.length === 0 && (pageComments?.length ?? 0) === 0) return;
+      if (
+        attachmentsRef.current.length === 0 &&
+        (pageComments?.length ?? 0) === 0 &&
+        (quotes?.length ?? 0) === 0
+      )
+        return;
     }
     const parsed = parseSlash(text, variant, skills, externalAgents);
     if (parsed?.kind === "unknown" || parsed?.kind === "redirect") {
@@ -837,6 +860,7 @@ export function Composer({
     const task = parsed?.kind === "work" ? parsed.text : text;
     const snapshot = attachmentsRef.current.slice();
     const firstCommentGroup = pageComments?.[0];
+    const quoteSnapshot = quotes !== undefined && quotes.length > 0 ? quotes.slice() : undefined;
     const payload: ComposerSubmit = {
       text: task,
       ...(task !== text ? { draftText: text } : {}),
@@ -846,6 +870,7 @@ export function Composer({
       ...(firstCommentGroup !== undefined
         ? { pageComments: toPageCommentsInput(firstCommentGroup) }
         : {}),
+      ...(quoteSnapshot !== undefined ? { quotes: quoteSnapshot } : {}),
       attachments: snapshot.map((attachment) => ({
         data: attachment.data,
         mimeType: attachment.mimeType,
@@ -1254,7 +1279,10 @@ export function Composer({
   const canSend =
     workMode !== null
       ? draft.trim() !== ""
-      : draft.trim() !== "" || attachments.length > 0 || (pageComments?.length ?? 0) > 0;
+      : draft.trim() !== "" ||
+        attachments.length > 0 ||
+        (pageComments?.length ?? 0) > 0 ||
+        (quotes?.length ?? 0) > 0;
   const shownError = error ?? controls?.error ?? null;
   const selectedWorkMode = WORK_MODE_ITEMS.find((item) => item.name === (typedMode ?? workMode));
   const mcpEntries = Object.entries(mcpServers ?? {}).sort(([a], [b]) => a.localeCompare(b));
@@ -1609,6 +1637,28 @@ export function Composer({
           }}
           onDrop={onDrop}
         >
+          {quotes !== undefined && quotes.length > 0 && (
+            <div className="composer-quotes">
+              {quotes.map((quote, index) => (
+                <div key={`${quote.seq ?? ""}:${quote.text}`} className="composer-quote">
+                  <span className="composer-quote-text" title={quote.text}>
+                    {quote.text}
+                  </span>
+                  <button
+                    type="button"
+                    className="composer-quote-remove"
+                    aria-label="移除引用"
+                    title="移除引用"
+                    onClick={() => {
+                      onRemoveQuote?.(index);
+                    }}
+                  >
+                    <Icon name="close" size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {pageComments !== undefined && pageComments.length > 0 && (
             <div className="page-comment-chips">
               {pageComments.map((group) => (

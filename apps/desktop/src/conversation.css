@@ -2184,3 +2184,109 @@ button.fcard:hover {
 .turn-row:focus-visible {
   box-shadow: var(--shadow-focus);
 }
+
+/* ── 选中对话文字引用回复（ADR-0116） ── */
+.quote-reply-btn {
+  position: absolute;
+  z-index: 35;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 28px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-2);
+  background: var(--a-text);
+  color: var(--a-bg);
+  font: var(--fs-1)/1 var(--sans);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  box-shadow: var(--shadow-popover);
+  cursor: pointer;
+}
+
+.quote-reply-btn:hover {
+  opacity: 0.92;
+}
+
+.quote-reply-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus), var(--shadow-popover);
+}
+
+.quote-reply-icon {
+  transform: scaleY(-1);
+}
+
+.conversation .u-quotes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.conversation .u-quotes:last-child {
+  margin-bottom: 0;
+}
+
+.conversation .u-quote {
+  display: flex;
+  width: 100%;
+  padding: 0 0 0 var(--space-2);
+  border: 0;
+  border-left: 2px solid var(--a-border-strong);
+  background: transparent;
+  color: var(--a-muted);
+  font: var(--fs-1)/1.5 var(--sans);
+  text-align: left;
+  cursor: default;
+}
+
+.conversation .u-quote[data-jumpable="true"] {
+  cursor: pointer;
+}
+
+.conversation .u-quote[data-jumpable="true"]:hover {
+  color: var(--a-secondary);
+  border-left-color: var(--a-accent);
+}
+
+.conversation .u-quote:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  border-radius: var(--radius-1);
+}
+
+.conversation .u-quote-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+::highlight(quote-flash) {
+  background-color: var(--cm-selection);
+}
+
+::highlight(quote-flash-fading) {
+  background-color: var(--cm-target-line);
+}
+
+@keyframes quote-flash-fade {
+  0% {
+    background-color: var(--cm-target-line);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.conversation .a.quote-flash,
+.conversation .u.quote-flash .u-bubble {
+  border-radius: var(--radius-3);
+  animation: quote-flash-fade 1s ease-out;
+}

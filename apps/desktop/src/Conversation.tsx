@@ -26,6 +26,15 @@ import "./grants.css";
 import "./code-colors.css";
 import { diffRows } from "./code-lines";
 import { useCodeHighlight } from "./use-code-highlight";
+import {
+  QUOTE_FLASH_DURATION_MS,
+  QUOTE_FLASH_FADE_AT_MS,
+  applyQuoteFlashHighlight,
+  clearQuoteFlashHighlight,
+  findQuoteRangesInElement,
+  readQuoteSelection,
+  type QuoteSelectionAnchor,
+} from "./quote-reply";
 import { shellResultSummary, shellResultText, shellToolStatus } from "./background-shell";
 import { useMotionAllowed } from "./motion";
 import { hasPrimaryModOrMetaOnOther, isMacOS } from "./platform";
@@ -100,6 +109,7 @@ import {
   type SkillOverview,
   thinkingPhrase,
   type FileAttachment,
+  type MessageQuote,
   type WorkModeName,
   type PendingPermission,
   type ImageAttachment,
@@ -259,8 +269,11 @@ export interface ConversationProps {
         text: string,
         mode: RewindMode,
         workMode?: WorkModeName,
+        quotes?: MessageQuote[],
       ) => Promise<void>)
     | undefined;
+  /** 选中消息文字点「回复」时回调（ADR-0116；仅桌面端主会话传入） */
+  onQuote?: ((quote: MessageQuote) => void) | undefined;
   /** 批准当前计划（ADR-0076 §5、§7）：在计划模式且空闲时显示在最后一条助手消息下方 */
   onApprovePlan?: (() => void) | undefined;
   /**
@@ -368,6 +381,7 @@ export type ReadOnlyConversationProps = Omit<
   ConversationProps,
   | "session"
   | "onResubmit"
+  | "onQuote"
   | "onApprovePlan"
   | "onFork"
   | "turnChanges"
@@ -725,12 +739,14 @@ export function Markdown({
   session,
   fileLinks,
   mentions,
+  quoteSourceSeq,
 }: {
   text: string;
   openUrl: OpenUrl;
   session?: RpcSession | undefined;
   fileLinks?: FileLinkHooks | undefined;
   mentions?: readonly string[] | undefined;
+  quoteSourceSeq?: string | undefined;
 }) {
   const [refs, setRefs] = useState<Map<string, ResolvedCodeRef> | null>(null);
   useEffect(() => {
@@ -817,7 +833,7 @@ export function Markdown({
     };
   }, [refs, fileLinks]);
   return (
-    <div className="conversation-markdown">
+    <div className="conversation-markdown" data-quote-source-seq={quoteSourceSeq}>
       <FileLinksContext.Provider value={lookup}>
         {markdownNodes(marked.lexer(markdown, MARKED_OPTIONS), openUrl, mentions)}
       </FileLinksContext.Provider>
@@ -1622,6 +1638,11 @@ function UserMessage({
   onFork,
   scheduleSource,
   fileLinks,
+  quoteFlash = false,
+  quoteFlashMode,
+  availableSeqs,
+  onJumpQuote,
+  quotable = false,
 }: {
   fileLinks?: FileLinkHooks | undefined;
   entry: UserEntry;
@@ -1635,6 +1656,11 @@ function UserMessage({
   onResubmit: ConversationProps["onResubmit"];
   onFork?: ConversationProps["onFork"];
   scheduleSource?: ConversationProps["scheduleSource"];
+  quoteFlash?: boolean;
+  quoteFlashMode?: "message" | "text" | undefined;
+  availableSeqs?: ReadonlySet<number> | undefined;
+  onJumpQuote?: ((quote: MessageQuote) => void) | undefined;
+  quotable?: boolean;
 }) {
   const bubble = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -1757,13 +1783,15 @@ function UserMessage({
     if (!onResubmit) return;
     setError(undefined);
     setPending(true);
-    void onResubmit(entry.seq, content, rewindMode, userWorkMode(entry.workMode)).catch(
-      (reason: unknown) => {
-        // 回退/发送失败：编辑内容保留（编辑框仍打开时错误显示在框内）
-        setError(`重发失败：${reasonText(reason)}`);
-        setPending(false);
-      },
-    );
+    const call =
+      entry.quotes && entry.quotes.length > 0
+        ? onResubmit(entry.seq, content, rewindMode, userWorkMode(entry.workMode), entry.quotes)
+        : onResubmit(entry.seq, content, rewindMode, userWorkMode(entry.workMode));
+    void call.catch((reason: unknown) => {
+      // 回退/发送失败：编辑内容保留（编辑框仍打开时错误显示在框内）
+      setError(`重发失败：${reasonText(reason)}`);
+      setPending(false);
+    });
   };
   // ADR-0076：Runtime 写入的模式消息（目标核对、继续目标、批准计划）不能重发
   const resubmittable = onResubmit !== undefined && !isRuntimeWorkMode(entry.workMode);
@@ -1771,8 +1799,9 @@ function UserMessage({
   const restorable = target?.files.filter((file) => file.action !== "untracked") ?? [];
   return (
     <article
-      className={`u${editing ? " editing" : ""}${searchHit ? " search-hit" : ""}`}
+      className={`u${editing ? " editing" : ""}${searchHit ? " search-hit" : ""}${quoteFlash && quoteFlashMode === "message" ? " quote-flash" : ""}`}
       data-session-seq={entry.seq}
+      data-quote-flash={quoteFlash ? (quoteFlashMode ?? "message") : undefined}
       aria-label="用户消息"
     >
       {scheduleSource !== undefined && (
@@ -1848,7 +1877,7 @@ function UserMessage({
             <div className="u-edit-actions">
               <Button
                 variant="primary"
-                disabled={pending || draft.trim() === ""}
+                disabled={pending || (draft.trim() === "" && (entry.quotes?.length ?? 0) === 0)}
                 onClick={() => {
                   sendResubmit(draft, mode);
                 }}
@@ -1967,8 +1996,40 @@ function UserMessage({
                   </span>
                 </div>
               )}
+              {entry.quotes !== undefined && entry.quotes.length > 0 && (
+                <div className="u-quotes">
+                  {entry.quotes.map((quote, index) => {
+                    const jumpable =
+                      quote.seq !== undefined &&
+                      availableSeqs !== undefined &&
+                      availableSeqs.has(quote.seq) &&
+                      onJumpQuote !== undefined;
+                    return (
+                      <button
+                        key={`${quote.seq ?? ""}:${index}:${quote.text}`}
+                        type="button"
+                        className="u-quote"
+                        data-jumpable={jumpable ? "true" : undefined}
+                        title={quote.text}
+                        onClick={() => {
+                          if (jumpable) onJumpQuote(quote);
+                        }}
+                      >
+                        <span className="u-quote-text">{quote.text}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {(body !== "" || entry.delegate !== undefined || snapshot !== undefined) && (
-                <div className="u-text">{segments}</div>
+                <div
+                  className="u-text"
+                  data-quote-source-seq={
+                    quotable ? (entry.seq > 0 ? String(entry.seq) : "") : undefined
+                  }
+                >
+                  {segments}
+                </div>
               )}
               {snapshot && modeOpen && <pre className="mode-body">{snapshot.body}</pre>}
             </div>
@@ -3528,6 +3589,11 @@ function EntryView({
   ensembleRecipientLabel,
   viewSuite,
   onOpenSuiteThread,
+  quoteFlash = false,
+  quoteFlashMode,
+  availableSeqs,
+  onJumpQuote,
+  quotable = false,
 }: {
   entry: ViewEntry;
   searchHit?: boolean;
@@ -3557,6 +3623,11 @@ function EntryView({
   ensembleRecipientLabel?: string | undefined;
   viewSuite?: SuiteView | undefined;
   onOpenSuiteThread?: ((threadId: string) => void) | undefined;
+  quoteFlash?: boolean;
+  quoteFlashMode?: "message" | "text" | undefined;
+  availableSeqs?: ReadonlySet<number> | undefined;
+  onJumpQuote?: ((quote: MessageQuote) => void) | undefined;
+  quotable?: boolean;
 }) {
   const subagentLinks = useContext(SubagentLinksContext);
   const backgroundView = useContext(BackgroundViewContext);
@@ -3720,6 +3791,11 @@ function EntryView({
           onResubmit={onResubmit}
           onFork={onFork}
           scheduleSource={scheduleSource}
+          quoteFlash={quoteFlash}
+          quoteFlashMode={quoteFlashMode}
+          availableSeqs={availableSeqs}
+          onJumpQuote={onJumpQuote}
+          quotable={quotable}
         />
       );
     case "assistant":
@@ -3735,8 +3811,9 @@ function EntryView({
       }
       return (
         <article
-          className={`a${searchHit ? " search-hit" : ""}`}
+          className={`a${searchHit ? " search-hit" : ""}${quoteFlash && quoteFlashMode === "message" ? " quote-flash" : ""}`}
           data-session-seq={entry.seq}
+          data-quote-flash={quoteFlash ? (quoteFlashMode ?? "message") : undefined}
           aria-label="助手消息"
         >
           <Think messageId={entry.messageId} text={entry.reasoning} parts={parts} now={now} />
@@ -3745,6 +3822,7 @@ function EntryView({
             openUrl={openUrl}
             session={isLiveSession(session) ? session : undefined}
             fileLinks={fileLinks}
+            quoteSourceSeq={quotable ? String(entry.seq) : undefined}
           />
           {entry.finishReason === "aborted" ? (
             <p className="conversation-review">回复已中断</p>
@@ -5044,6 +5122,7 @@ function ConversationContent({
   images,
   busy,
   onResubmit,
+  onQuote,
   onApprovePlan,
   onFork,
   fileLinks,
@@ -5074,6 +5153,17 @@ function ConversationContent({
   const previousTop = useRef(0);
   const [following, setFollowing] = useState(true);
   const [highlightedSeq, setHighlightedSeq] = useState<number | undefined>();
+  const [quoteSelection, setQuoteSelection] = useState<QuoteSelectionAnchor | null>(null);
+  const quoteBtnRef = useRef<HTMLButtonElement>(null);
+  const quoteDismissedRef = useRef(false);
+  const [quoteFlash, setQuoteFlash] = useState<{
+    seq: number;
+    text: string;
+    nonce: number;
+    mode: "message" | "text";
+  } | null>(null);
+  const quoteFlashNonceRef = useRef(0);
+  const quotable = onQuote !== undefined && readOnly === undefined;
   const { parts, now } = useReasoning(subscribeEvents);
   const liveRuleEligibleRef = useRef<Map<string, boolean>>(new Map());
   useEffect(() => {
@@ -5382,6 +5472,128 @@ function ConversationContent({
     virtualize,
     captureAnchor,
   ]);
+
+  const availableSeqs = useMemo(() => {
+    const set = new Set<number>();
+    for (const entry of view.entries) set.add(entry.seq);
+    return set;
+  }, [view.entries, entriesVersion]);
+
+  const handleJumpQuote = useCallback(
+    (quote: MessageQuote) => {
+      if (quote.seq === undefined || !availableSeqs.has(quote.seq)) return;
+      jumpToSeq(quote.seq);
+      quoteFlashNonceRef.current += 1;
+      setQuoteFlash({
+        seq: quote.seq,
+        text: quote.text,
+        nonce: quoteFlashNonceRef.current,
+        mode: "message",
+      });
+    },
+    [availableSeqs, jumpToSeq],
+  );
+
+  const appliedQuoteFlashNonce = useRef<number | undefined>(undefined);
+  const quoteFlashTimers = useRef<{ fade?: number; clear?: number }>({});
+  useEffect(() => {
+    return () => {
+      if (quoteFlashTimers.current.fade !== undefined) {
+        window.clearTimeout(quoteFlashTimers.current.fade);
+      }
+      if (quoteFlashTimers.current.clear !== undefined) {
+        window.clearTimeout(quoteFlashTimers.current.clear);
+      }
+      clearQuoteFlashHighlight();
+    };
+  }, []);
+  useEffect(() => {
+    if (quoteFlash === null || appliedQuoteFlashNonce.current === quoteFlash.nonce) return;
+    const anchor = content.current?.querySelector<HTMLElement>(
+      `[data-session-seq="${quoteFlash.seq}"]`,
+    );
+    if (anchor === null || anchor === undefined) return;
+    appliedQuoteFlashNonce.current = quoteFlash.nonce;
+    if (quoteFlashTimers.current.fade !== undefined) {
+      window.clearTimeout(quoteFlashTimers.current.fade);
+    }
+    if (quoteFlashTimers.current.clear !== undefined) {
+      window.clearTimeout(quoteFlashTimers.current.clear);
+    }
+    clearQuoteFlashHighlight();
+
+    const bodyContainer =
+      anchor.querySelector<HTMLElement>(":scope > .conversation-markdown, .u-text") ?? anchor;
+    const ranges = findQuoteRangesInElement(bodyContainer, quoteFlash.text);
+    const highlightedText = ranges.length > 0 && applyQuoteFlashHighlight(ranges, false);
+    if (highlightedText) {
+      setQuoteFlash((prev) =>
+        prev?.nonce === quoteFlash.nonce ? { ...prev, mode: "text" } : prev,
+      );
+      quoteFlashTimers.current.fade = window.setTimeout(() => {
+        applyQuoteFlashHighlight(ranges, true);
+      }, QUOTE_FLASH_FADE_AT_MS);
+    }
+    const activeNonce = quoteFlash.nonce;
+    quoteFlashTimers.current.clear = window.setTimeout(() => {
+      clearQuoteFlashHighlight();
+      setQuoteFlash((prev) => (prev?.nonce === activeNonce ? null : prev));
+    }, QUOTE_FLASH_DURATION_MS);
+  }, [quoteFlash, entriesVersion, effectiveRange.start, effectiveRange.end]);
+
+  useEffect(() => {
+    if (!quotable) {
+      setQuoteSelection(null);
+      return;
+    }
+    const syncSelection = () => {
+      if (quoteDismissedRef.current) return;
+      const next = readQuoteSelection(window.getSelection(), rootRef.current, scroll.current);
+      setQuoteSelection(next);
+    };
+    const onSelectionChange = () => {
+      quoteDismissedRef.current = false;
+      syncSelection();
+    };
+    const onMouseUp = () => {
+      syncSelection();
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === "Escape") return;
+      syncSelection();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && quoteBtnRef.current?.contains(target) === true) return;
+      setQuoteSelection(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        quoteDismissedRef.current = true;
+        setQuoteSelection(null);
+      }
+    };
+    const onScrollOrResize = () => {
+      syncSelection();
+    };
+    const scrollEl = scroll.current;
+    document.addEventListener("selectionchange", onSelectionChange);
+    document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("keyup", onKeyUp);
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    scrollEl?.addEventListener("scroll", onScrollOrResize, { passive: true });
+    window.addEventListener("resize", onScrollOrResize);
+    return () => {
+      document.removeEventListener("selectionchange", onSelectionChange);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("keyup", onKeyUp);
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      scrollEl?.removeEventListener("scroll", onScrollOrResize);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, [quotable]);
 
   // ── 会话内搜索（Ctrl+F，ADR-0107） ──
   const [findOpen, setFindOpen] = useState(false);
@@ -5891,6 +6103,28 @@ function ConversationContent({
           onJump={jumpToTurn}
         />
       ) : null}
+      {quotable && quoteSelection !== null ? (
+        <button
+          ref={quoteBtnRef}
+          type="button"
+          className="quote-reply-btn"
+          aria-label="回复"
+          title="回复"
+          style={{ left: `${quoteSelection.left}px`, top: `${quoteSelection.top}px` }}
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
+          onClick={() => {
+            const picked = quoteSelection.quote;
+            setQuoteSelection(null);
+            window.getSelection()?.removeAllRanges();
+            onQuote(picked);
+          }}
+        >
+          <Icon name="corner_down_left" size={ICON_SM} className="quote-reply-icon" />
+          回复
+        </button>
+      ) : null}
       <div
         className="stream conversation-stream conversation-scroll"
         ref={scroll}
@@ -6019,6 +6253,11 @@ function ConversationContent({
                     onResubmit={onResubmit}
                     onFork={onFork}
                     fileLinks={fileLinks}
+                    quoteFlash={quoteFlash?.seq === entry.seq}
+                    quoteFlashMode={quoteFlash?.seq === entry.seq ? quoteFlash.mode : undefined}
+                    availableSeqs={availableSeqs}
+                    onJumpQuote={handleJumpQuote}
+                    quotable={quotable}
                     showReplyActions={replyActionKeys.has(entry.key)}
                     onApprovePlan={
                       canApprovePlan && entry.key === latestReplyKey ? onApprovePlan : undefined
@@ -6144,6 +6383,8 @@ function ConversationContent({
                           onResubmit={undefined}
                           onFork={undefined}
                           fileLinks={fileLinks}
+                          availableSeqs={availableSeqs}
+                          onJumpQuote={handleJumpQuote}
                           showReplyActions={false}
                           changesCard={null}
                         />

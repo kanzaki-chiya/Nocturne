@@ -1,5 +1,6 @@
 import {
   createSessionView,
+  type MessageQuote,
   type ModelRef,
   type PendingInputsSnapshot,
   type ReasoningEffort,
@@ -944,11 +945,17 @@ export class Conversations {
     text: string,
     mode: RewindMode,
     workMode?: WorkModeName,
+    quotes?: MessageQuote[],
   ): Promise<void> {
     const entry = this.selected;
     if (entry === undefined) throw new Error("请先打开会话");
     await this.rewindEntry(entry, targetSeq, mode);
-    await this.send({ text, attachments: [], ...(workMode ? { workMode } : {}) });
+    await this.send({
+      text,
+      attachments: [],
+      ...(workMode ? { workMode } : {}),
+      ...(quotes?.length ? { quotes } : {}),
+    });
   }
 
   /** Files-only rewind shares the serialized busy boundary, never the submit path. */
