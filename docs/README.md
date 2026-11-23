@@ -105,7 +105,7 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 运行中插话与输入排队（安全点消费、待发列表不写日志、`done` 后逐条接续）见 [ADR-0070](decisions/ADR-0070-steer-and-queue-input.md)，主文档是 [agent-loop.md](architecture/agent-loop.md) §2 与 [events.md](protocols/events.md)。
 
-任意文件附件、大段粘贴转附件和提问回答附文件见 [ADR-0072](decisions/ADR-0072-file-attachments.md)。图片自动缩小与长图切段（50 MB / 64,000,000 像素硬上限、WebAssembly worker 后台处理与分段投影）见 [ADR-0090](decisions/ADR-0090-image-downscale-tiles.md)。回复内嵌页面（`render_html` 工具、隔离空壳沙箱与 `FileAttachment.inline` 标记）见 [ADR-0088](decisions/ADR-0088-inline-html.md)。页面数据与模型调用见 [ADR-0111](decisions/ADR-0111-page-storage-and-model.md)，从 cdnjs 加载资源见 [ADR-0112](decisions/ADR-0112-page-cdn.md)，面板页面直接评论见 [ADR-0113](decisions/ADR-0113-page-comments.md)，项目页面库与跨会话接着改见 [ADR-0114](decisions/ADR-0114-project-page-library.md)。
+任意文件附件、大段粘贴转附件和提问回答附文件见 [ADR-0072](decisions/ADR-0072-file-attachments.md)。图片自动缩小与长图切段（50 MB / 64,000,000 像素硬上限、WebAssembly worker 后台处理与分段投影）见 [ADR-0090](decisions/ADR-0090-image-downscale-tiles.md)。回复内嵌页面（`render_html` 工具、隔离空壳沙箱与 `FileAttachment.inline` 标记）见 [ADR-0088](decisions/ADR-0088-inline-html.md)。页面数据与模型调用见 [ADR-0111](decisions/ADR-0111-page-storage-and-model.md)，从 cdnjs 加载资源见 [ADR-0112](decisions/ADR-0112-page-cdn.md)，面板页面直接评论见 [ADR-0113](decisions/ADR-0113-page-comments.md)，项目页面库与跨会话接着改见 [ADR-0114](decisions/ADR-0114-project-page-library.md)，评论即时发送与讨论串见 [ADR-0115](decisions/ADR-0115-page-comment-threads.md)。
 
 后台工作树隔离、快照、并回与清理见 [ADR-0075](decisions/ADR-0075-worktree-isolation.md)。
 

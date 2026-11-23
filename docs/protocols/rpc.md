@@ -106,11 +106,14 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `callPageModel` | `{ page, prompt, system?, maxTokens? }` → `string`；请求挂到完成、拒绝或停止。|
 | `respondPagePermission` | `{ page, requestId, reply: { action: "allow" \| "deny", remember?: "project" } }` → `null`；远程连接携带 `remember: "project"` 时按第 7 节拒绝，请求继续等待。|
 | `stopPageModel` | `{ page }` → `null`；中止该页当前调用并清空队列。|
+| `resolvePageComment` | `{ page, comment }` → `null`。解决本会话面板页的一条讨论，写入独立于 Turn 的持久事件。目标不存在或已解决时返回 `invalid_command`。见 [ADR-0115](../decisions/ADR-0115-page-comment-threads.md)。 |
 | `close` | → `null`；释放本连接对会话的引用与订阅，最后引用且空闲时才刷盘、释放会话锁，其余会话不受影响 |
 
 `submit` / `enqueueInput` 的 `attachments` 是 `[{ data: base64, mimeType: string, label?, source?: "paste" | "upload" | "answer" }]`，任意 MIME 接受；合格图片沿用图片通道，其余包括不合格图片存为 `files`（[ADR-0072](../decisions/ADR-0072-file-attachments.md)）。单个 20 MiB、合计至多 10 个，Core 超限报 `invalid_command`。`respondQuestion.reply.answers[i].attachments` 形状相同，仅自由回答可附文件，可只附文件；不合规报 `invalid_reply`。一组回答合计限额同提交。远程三个入口统一检查附件原始字节合计不超过 `remoteAttachmentLimit`（`floor(REMOTE_MESSAGE_LIMIT * 3 / 4) - 1024`），超限报 `attachment_too_large`。
 
 解码后交给 Core，大小与格式校验仍在 Core（[ADR-0023](../decisions/ADR-0023-image-input.md)）。`data` 不是合法 base64 报 `invalid_params`，不进 Runtime。
+
+`submit` / `enqueueInput` 的 `pageComments.comments[]` 可传原评论 `{ path, text, x, y, note, screenshot? }` 或续回 `{ replyTo, note }`。Core 写入用户消息时分配 `id`。待发快照含去掉截图数据后的 `items`，用于显示排队中的讨论。详见 [ADR-0115](../decisions/ADR-0115-page-comment-threads.md)。
 
 `submit.delegate` 为 `{ agent: string, task: string }`，与 `skill` 互斥。RPC 保留任务原文，Core 校验 agent 已启用并生成明确的 `task.agent` 委派指令，将委派快照写入 `message.user`；它不绕过入口权限确认，也不是直接启动外部进程。见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)。
 
@@ -542,7 +545,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 |---|---|
 | `initialize` | 仅连接握手，不创建 Runtime |
 | `runtime.listSessions`、`runtime.usageStats` | 允许（只读）；`listSessions` 的 `cwd` 只是过滤条件，远程即使传 `includeArchived: true` 仍强制排除归档 |
-| `runtime.listPages`、`runtime.listPageProjects` | 允许（只读，[ADR-0114](../decisions/ADR-0114-project-page-library.md)）：返回面板页面与项目摘要（不含本机绝对路径）；不加入外部 agent 白名单 |
+| `runtime.listPages`、`runtime.listPageProjects` | 允许（只读，[ADR-0114](../decisions/ADR-0114-project-page-library.md)）：返回面板页面与项目摘要（不含本机绝对路径）；不加入外部 agent 白名单。页面项可带 `hasUnresolvedComments: true`（[ADR-0115](../decisions/ADR-0115-page-comment-threads.md)）。 |
 | `runtime.listModels`、`runtime.defaultModel`、`runtime.listRecentModels`、`runtime.describeSettings`、`runtime.describeModelRoles`、`runtime.listShells` | 允许（只读），`workspaceRoot` 不受限（含读取 `appearance.themePreset` 与 `appearance.customThemes`，ADR-0093、ADR-0094） |
 | `skills.describeSkills` | 允许（只读），`workspaceRoot` 必填，并按 `runtime.createSession` 的目录存在性和工作区信任规则校验。用于手机新建会话和查看历史会话时的技能补全 |
 | `runtime.createSession` | 允许除 `branch` 外的选项（携带 `branch` 报 `remote_not_allowed`，ADR-0085）。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是非子代理会话（包含已归档会话）用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
@@ -560,7 +563,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `subagent.cancel` | 允许（ADR-0073）：取消本会话的后台子代理是会话内操作；手机只在后台子代理子视图提供取消 |
 | `subagent.list`、`subagent.subscribe`、`subagent.unsubscribe` | 允许（ADR-0084）：只读、限本连接已打开父会话的直接子会话。总览据 list 区分同步与后台运行项，subscribe / unsubscribe 复用连接内观察和清理机制，不开放子会话交互或工作树操作 |
 | `session.respondPermission`、`session.respondSubagentPermission` | `reply.remember === "project"`、`"pattern"` 或 `"always"` 拒绝（`-32004 / remote_not_allowed`）并保持待处理；`"session"` 或省略允许（其中 `respondSubagentPermission` 的 `"session"` 写入树共享 `sessionGrants`） |
-| `session.getPageData` / `session.setPageData` / `session.deletePageData` / `session.listPageDataKeys` / `session.callPageModel` / `session.stopPageModel` | 允许，用本连接打开的会话与该会话有效页面 |
+| `session.getPageData` / `session.setPageData` / `session.deletePageData` / `session.listPageDataKeys` / `session.callPageModel` / `session.stopPageModel` / `session.resolvePageComment` | 允许，用本连接打开的会话与该会话有效页面。`session.resolvePageComment` 不加入外部 agent 白名单。 |
 | `session.respondPagePermission` | 单次允许或拒绝可用。项目级 `remember` 返回 `remote_not_allowed`，请求仍待处理 |
 | `session.respondQuestion` | 允许 |
 | `session.setModel`、`session.setReasoningEffort`、`session.setPermissionPreset`、`session.compact`、`session.rewind`、`session.rewindTargets`、`session.turnChanges`、`session.turnChangeDiff` | 允许（会话内，随会话结束） |

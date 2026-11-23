@@ -64,7 +64,7 @@ interface SessionView {
   todos: TodoItem[];
   /** 当前会话笔记（ADR-0095）；不归档，由模型显式删除 */
   notes: NoteItem[];
-  /** 当前会话有效页面及版本列表（ADR-0109）：按成功 tool.completed 带有效 inline 标记的附件派生，不按工具名硬编码 */
+  /** 有效页面及版本（ADR-0109），面板页可含有效评论与讨论串（ADR-0115） */
   pages: SessionPage[];
   backgroundShells: BackgroundShellTask[]; // 包含已结束条目，客户端按结束五分钟后过滤（ADR-0083）
   /** Ensemble 派生视图（ADR-0089）：持久骨架由 ensemble.* 事件归约，成员运行态由临时事件 ensemble.member_updated 更新 */
@@ -84,6 +84,8 @@ interface SessionView {
   lastSeq: number;
 }
 ```
+
+页面讨论串由 `message.user.pageComments`、成功的 `reply_page_comment` 和 `page.comment_resolved` 共同派生。`SessionPage.comments` 的原评论与回复均带 `seq` 和事件时间。已写入的评论在模型回复前为 `pending`，用户续回后再次进入 `pending`。待发列表的 `pageComments.items` 可投影为临时圆点和等待中的回复，回放只使用持久事件。详见 [ADR-0115](../decisions/ADR-0115-page-comment-threads.md)。
 
 ### 持久条目（entries）
 
