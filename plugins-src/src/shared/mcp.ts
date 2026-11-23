@@ -32,7 +32,7 @@ export interface PluginServerSpec {
   readonly close: () => Promise<void>;
 }
 
-export const PLUGIN_SERVER_VERSION = "0.61.0";
+export const PLUGIN_SERVER_VERSION = "0.61.1";
 
 export function jsonTextResult(data: unknown): CallToolResult {
   return {
