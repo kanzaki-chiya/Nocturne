@@ -28,7 +28,7 @@ interface Harness {
   document: Document;
   posted: Record<string, unknown>[];
   sendFromParent(data: Record<string, unknown>): void;
-  renderPage(html: string, id?: string): void;
+  renderPage(html: string, id?: string, fullscreen?: boolean): void;
 }
 
 function must<T>(value: T | null | undefined, label: string): T {
@@ -48,6 +48,13 @@ function createSandboxHarness(): Harness {
     runScripts: "dangerously",
     beforeParse(win) {
       Object.defineProperty(win, "parent", { value: fakeParent, configurable: true });
+      Object.defineProperty(win, "requestAnimationFrame", {
+        value: (cb: FrameRequestCallback) => {
+          cb(0);
+          return 1;
+        },
+        configurable: true,
+      });
     },
   });
   const win = dom.window as unknown as Window & typeof globalThis;
@@ -60,12 +67,12 @@ function createSandboxHarness(): Harness {
     win.dispatchEvent(ev);
   }
 
-  function renderPage(html: string, id = "inst-1") {
+  function renderPage(html: string, id = "inst-1", fullscreen = true) {
     sendFromParent({
       type: "nocturne:inline-html:render",
       id,
       html,
-      fullscreen: true,
+      fullscreen,
     });
   }
 
@@ -334,6 +341,109 @@ describe("sandbox.html 评论层（ADR-0113）", () => {
     expect(capturedSvg).not.toContain("__nct_comment_layer__");
     expect(capturedSvg).not.toContain("data-nct-comment-mode");
     expect(capturedSvg).toContain('viewBox="');
+    h.dom.window.close();
+  });
+});
+
+function dispatchTouch(
+  win: Window & typeof globalThis,
+  target: EventTarget,
+  type: "touchstart" | "touchmove" | "touchend" | "touchcancel",
+  points: readonly { clientX: number; clientY: number }[],
+): Event {
+  const ev = new win.Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "touches", { value: points, configurable: true });
+  target.dispatchEvent(ev);
+  return ev;
+}
+
+describe("sandbox.html 全屏双指缩放", () => {
+  it("全屏模式下双指外扩缩放页面并在缩回 1x 时清理样式与属性", () => {
+    const h = createSandboxHarness();
+    h.renderPage(
+      `<!doctype html><html><body><div id="box">内容</div></body></html>`,
+      "inst-z",
+      true,
+    );
+
+    const start = dispatchTouch(h.window, h.document, "touchstart", [
+      { clientX: 100, clientY: 200 },
+      { clientX: 200, clientY: 200 },
+    ]);
+    expect(start.defaultPrevented).toBe(true);
+
+    // 间距由 100 扩到 200 -> 2x
+    const move = dispatchTouch(h.window, h.document, "touchmove", [
+      { clientX: 50, clientY: 200 },
+      { clientX: 250, clientY: 200 },
+    ]);
+    expect(move.defaultPrevented).toBe(true);
+    expect(h.document.body.style.transform).toBe("scale(2)");
+    expect(h.document.body.style.transformOrigin).toBe("0 0");
+    expect(h.document.documentElement.getAttribute("data-nct-zoomed")).toBe("true");
+
+    // 上限夹紧到 4x
+    dispatchTouch(h.window, h.document, "touchmove", [
+      { clientX: 0, clientY: 200 },
+      { clientX: 600, clientY: 200 },
+    ]);
+    expect(h.document.body.style.transform).toBe("scale(4)");
+
+    // 缩回接近 1x 时自动归位并移除属性
+    dispatchTouch(h.window, h.document, "touchmove", [
+      { clientX: 100, clientY: 200 },
+      { clientX: 201, clientY: 200 },
+    ]);
+    expect(h.document.body.style.transform).toBe("");
+    expect(h.document.documentElement.hasAttribute("data-nct-zoomed")).toBe(false);
+
+    dispatchTouch(h.window, h.document, "touchend", []);
+    h.dom.window.close();
+  });
+
+  it("非全屏内嵌卡片忽略双指缩放", () => {
+    const h = createSandboxHarness();
+    h.renderPage(
+      `<!doctype html><html><body><div id="box">卡片</div></body></html>`,
+      "inst-inline",
+      false,
+    );
+
+    const start = dispatchTouch(h.window, h.document, "touchstart", [
+      { clientX: 100, clientY: 200 },
+      { clientX: 200, clientY: 200 },
+    ]);
+    dispatchTouch(h.window, h.document, "touchmove", [
+      { clientX: 50, clientY: 200 },
+      { clientX: 250, clientY: 200 },
+    ]);
+    expect(start.defaultPrevented).toBe(false);
+    expect(h.document.body.style.transform).toBe("");
+    expect(h.document.documentElement.hasAttribute("data-nct-zoomed")).toBe(false);
+    h.dom.window.close();
+  });
+
+  it("进入评论模式时重置双指缩放", () => {
+    const h = createSandboxHarness();
+    h.renderPage(
+      `<!doctype html><html><body><div id="box">内容</div></body></html>`,
+      "inst-c",
+      true,
+    );
+
+    dispatchTouch(h.window, h.document, "touchstart", [
+      { clientX: 100, clientY: 200 },
+      { clientX: 200, clientY: 200 },
+    ]);
+    dispatchTouch(h.window, h.document, "touchmove", [
+      { clientX: 50, clientY: 200 },
+      { clientX: 250, clientY: 200 },
+    ]);
+    expect(h.document.body.style.transform).toBe("scale(2)");
+
+    h.sendFromParent({ type: "nocturne:inline-html:comment-mode", id: "inst-c", enabled: true });
+    expect(h.document.body.style.transform).toBe("");
+    expect(h.document.documentElement.hasAttribute("data-nct-zoomed")).toBe(false);
     h.dom.window.close();
   });
 });

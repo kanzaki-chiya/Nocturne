@@ -13,9 +13,13 @@
         font-family: var(--sans);
         font-size: var(--nct-fs, 14px);
         line-height: 1.5;
+        touch-action: pan-x pan-y;
       }
       :where(:root:not([data-nct-fullscreen="true"])) {
         overflow-y: hidden;
+      }
+      :root[data-nct-zoomed="true"] {
+        overflow: auto !important;
       }
       :where(*, *::before, *::after) {
         box-sizing: border-box;
@@ -890,6 +894,8 @@
         }
 
         async function handleCapture(requestId, region) {
+          const prevScale = pinchScale;
+          if (prevScale !== 1) applyPinchScale(1);
           try {
             const png = await captureDocument(region);
             window.parent.postMessage(
@@ -907,8 +913,105 @@
               },
               "*",
             );
+          } finally {
+            if (prevScale !== 1) applyPinchScale(prevScale);
           }
         }
+
+        // ---- 全屏遮罩内双指缩放（仅 fullscreen 模式生效，不放大宿主界面） ----
+        const PINCH_MIN_SCALE = 1;
+        const PINCH_MAX_SCALE = 4;
+        const PINCH_SNAP_ONE = 1.02;
+        let pinchScale = 1;
+        let pinchState = null;
+        let savedBodyTransform = "";
+        let savedBodyOrigin = "";
+        let hasSavedBodyStyle = false;
+
+        function applyPinchScale(rawScale) {
+          const clamped = Math.max(PINCH_MIN_SCALE, Math.min(PINCH_MAX_SCALE, rawScale));
+          const next = clamped <= PINCH_SNAP_ONE ? 1 : clamped;
+          pinchScale = next;
+          const body = document.body;
+          if (!body) return next;
+          if (next === 1) {
+            if (hasSavedBodyStyle) {
+              body.style.transform = savedBodyTransform;
+              body.style.transformOrigin = savedBodyOrigin;
+              hasSavedBodyStyle = false;
+            }
+            document.documentElement.removeAttribute("data-nct-zoomed");
+          } else {
+            if (!hasSavedBodyStyle) {
+              savedBodyTransform = body.style.transform;
+              savedBodyOrigin = body.style.transformOrigin;
+              hasSavedBodyStyle = true;
+            }
+            body.style.transformOrigin = "0 0";
+            body.style.transform = `scale(${next})`;
+            document.documentElement.setAttribute("data-nct-zoomed", "true");
+          }
+          return next;
+        }
+
+        function touchPair(touches) {
+          const t0 = touches[0];
+          const t1 = touches[1];
+          const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+          const midX = (t0.clientX + t1.clientX) / 2;
+          const midY = (t0.clientY + t1.clientY) / 2;
+          return { dist, midX, midY };
+        }
+
+        document.addEventListener(
+          "touchstart",
+          (event) => {
+            if (!fullscreen || commentMode || !document.body) return;
+            if (event.touches.length !== 2) return;
+            const { dist, midX, midY } = touchPair(event.touches);
+            if (!(dist >= 4)) return;
+            event.preventDefault();
+            const scroller = document.scrollingElement || document.documentElement;
+            pinchState = {
+              startDist: dist,
+              startScale: pinchScale,
+              anchorX: (scroller.scrollLeft + midX) / pinchScale,
+              anchorY: (scroller.scrollTop + midY) / pinchScale,
+            };
+          },
+          { passive: false },
+        );
+
+        document.addEventListener(
+          "touchmove",
+          (event) => {
+            if (!fullscreen || commentMode || pinchState === null || event.touches.length !== 2) {
+              return;
+            }
+            const { dist, midX, midY } = touchPair(event.touches);
+            if (!(dist >= 4)) return;
+            event.preventDefault();
+            const next = applyPinchScale(pinchState.startScale * (dist / pinchState.startDist));
+            const scroller = document.scrollingElement || document.documentElement;
+            scroller.scrollLeft = Math.max(0, pinchState.anchorX * next - midX);
+            scroller.scrollTop = Math.max(0, pinchState.anchorY * next - midY);
+          },
+          { passive: false },
+        );
+
+        const endPinch = (event) => {
+          if (!event.touches || event.touches.length < 2) {
+            pinchState = null;
+          }
+        };
+        document.addEventListener("touchend", endPinch, { passive: true });
+        document.addEventListener("touchcancel", endPinch, { passive: true });
+
+        const blockNativeGesture = (event) => {
+          if (fullscreen && !commentMode) event.preventDefault();
+        };
+        document.addEventListener("gesturestart", blockNativeGesture, { passive: false });
+        document.addEventListener("gesturechange", blockNativeGesture, { passive: false });
 
         // ---- 面板页面评论层（ADR-0113） ----
         const COMMENT_UI_ATTR = "data-nct-comment-ui";
@@ -1026,6 +1129,8 @@
         function setCommentMode(enabled) {
           commentMode = Boolean(enabled);
           if (commentMode) {
+            pinchState = null;
+            if (pinchScale !== 1) applyPinchScale(1);
             ensureCommentUi();
             document.documentElement.setAttribute("data-nct-comment-mode", "true");
           } else {
