@@ -2111,7 +2111,7 @@ export function App({ host }: { host: DesktopHost }) {
     panelRef.current?.openPage(item.page, undefined, item.sessionId);
     void selectSession(item.sessionId, summary?.cwd ?? effectiveWorkspace ?? "");
   };
-  const pinnedPageOriginKeys = useMemo(() => new Set(p.pinnedPages ?? []), [p.pinnedPages]);
+  const pinnedPageOriginKeys = new Set(p.pinnedPages ?? []);
 
   const projects = tree.projects.map((project) => ({
     key: project.key,
