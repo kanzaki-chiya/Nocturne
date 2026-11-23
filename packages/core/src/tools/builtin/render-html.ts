@@ -258,11 +258,12 @@ async function inlineImages(
 export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> = {
   name: "render_html",
   description:
-    "新建或更新单文件 HTML 页面，在隔离沙箱中渲染。仅在图表、对比表、示意图、界面草图、交互小工具、看板或独立文档明显优于文字时，或用户明确要求时使用；普通说明与代码直接用 Markdown。" +
-    '\nWhen creating a page, use display: "inline" by default. Use display: "panel" only on explicit request, such as when the user has used /cadenza, asks to put the page in the panel or sidebar, or asks for an artifact. If the user simply asks to show, draw, or compare something, use "inline". Updates keep the display of the first version and ignore the supplied display. Set the page background on body.' +
-    '\n更新传已有 page id，配 edits（小改动优先，按序唯一精确替换）或 html（整份重写），省去 title 沿用原题；需看全文用 read 读结果里的文件路径。接着改别的会话里的页面时，先用 list_pages 找到 ref，再传 page: "<ref>"。沙箱允许内联脚本与样式，阻止跳转/表单/弹窗/下载。本地图片列进 images 并在 html 属性或 url() 写同串即自动内联。需响应式（内嵌桌面约 720px、手机约 360px，高过 420px 自动折叠可展开或全屏）。正文勿复述页面内容。自动注入随深浅色切换的主题 CSS 变量：--bg、--raised、--text、--secondary、--muted、--border、--accent、--ok、--warn、--bad、--sans、--mono。' +
-    '\nThe only allowed external host is https://cdnjs.cloudflare.com. Use /ajax/libs/<lib>/<exact version>/<file> URLs and pin exact versions. Use UMD or global builds, or import ES modules from that same host with <script type="module">. Write the parts that do not depend on libraries inline first and show a brief message in the page if a library fails to load. The page cannot use fetch, XMLHttpRequest, or WebSocket with any address.' +
-    "\nUse window.nocturne.storage to save page data and window.nocturne.ask to call a model. Check for window.nocturne first and render normally when it is unavailable, without saving or calling a model. Model calls may require user approval. Handle rejected and aborted calls.",
+    "Render a self-contained HTML page in a sandbox. Use for charts, comparisons, diagrams, UI sketches, interactive widgets, dashboards or standalone documents when they improve on prose, or on request. Use Markdown for ordinary prose and code. Do not repeat the page in the reply.\n" +
+    'Default to display: "inline", including requests to show, draw or compare. Use "panel" for /cadenza or explicit requests for a panel, sidebar or artifact. Updates keep the original display and title unless a new title is supplied. Set the background on body.\n' +
+    'Update with page plus edits (ordered, exact, unique matches) or replacement html. Use read on the returned path for the full source. To continue another session’s page, find its ref with list_pages and pass page: "<ref>".\n' +
+    "Inline scripts and styles are allowed. Navigation, forms, popups and downloads are blocked. List local image paths in images and use the same strings in attributes or url(). Make pages responsive at about 720px and 360px. Inline pages above 420px collapse. Theme CSS variables: --bg, --raised, --text, --secondary, --muted, --border, --accent, --ok, --warn, --bad, --sans, --mono.\n" +
+    'Only https://cdnjs.cloudflare.com/ajax/libs/<lib>/<exact version>/<file> may load externally. Use UMD/global builds or ES module imports with <script type="module">. Render independent content first and show a brief loading error on failure. fetch, XMLHttpRequest and WebSocket are blocked.\n' +
+    "Check for window.nocturne before using .storage or .ask. Render normally without it. Model calls may require approval. Handle rejection and cancellation.",
   inputSchema: {
     type: "object",
     additionalProperties: false,

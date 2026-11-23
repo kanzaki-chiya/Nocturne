@@ -22,7 +22,7 @@ export interface ListPagesOutput {
 export const listPagesTool: ToolDefinition<ListPagesInput, ListPagesOutput> = {
   name: "list_pages",
   description:
-    '列出当前项目已有的面板页面（按最近更新倒序），返回每项的 ref（<sessionId>/<page>）、标题、最新版本号、更新时间与最新 HTML 绝对路径。接着改别的会话里的页面时，先用此工具拿到 ref，再调用 render_html 传入 page: "<ref>"。',
+    "List this project's panel pages by most recent update, with ref, title, version, timestamp and absolute HTML path. Use the ref as render_html's page to continue editing.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
