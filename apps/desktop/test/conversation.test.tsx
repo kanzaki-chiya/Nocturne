@@ -2299,6 +2299,84 @@ describe("Markdown 换行", () => {
       /overflow-wrap:\s*anywhere/,
     );
   });
+
+  it("文字类与无语言代码块自动换行，大小写不敏感，CSS 规则在桌面与手机生效", () => {
+    const wrappedLangs = [
+      "markdown",
+      "md",
+      "text",
+      "txt",
+      "plaintext",
+      "MARKDOWN",
+      "MD",
+      "Text",
+      "TXT",
+      "PlainText",
+      "markdown title=pr",
+      "",
+    ];
+    for (const lang of wrappedLangs) {
+      const view = createSessionView();
+      view.entries = [
+        assistant({
+          text: `\`\`\`${lang}\n  缩进行\n\nhttps://example.com/${"long-segment-".repeat(8)}\n\`\`\``,
+        }),
+      ];
+      const { container, unmount } = mount(view);
+      const block = container.querySelector(".conversation-code");
+      expect(block?.classList.contains("wrap"), `lang=${JSON.stringify(lang)}`).toBe(true);
+      unmount();
+    }
+
+    // 缩进代码块（marked 产出的 code.lang 为 undefined）同样换行
+    const indentedView = createSessionView();
+    indentedView.entries = [assistant({ text: "    第一行\n    第二行" })];
+    const indented = mount(indentedView);
+    expect(indented.container.querySelector(".conversation-code")?.classList.contains("wrap")).toBe(
+      true,
+    );
+    indented.unmount();
+
+    const here = dirname(fileURLToPath(import.meta.url));
+    const css = readFileSync(join(here, "..", "src", "conversation.css"), "utf8");
+    const phoneCss = readFileSync(join(here, "..", "src", "web", "phone.css"), "utf8");
+    const rule = (source: string, selector: string) => {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+      return new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`).exec(source)?.[1] ?? "";
+    };
+    expect(rule(css, ".conversation-code pre")).toMatch(/white-space:\s*pre\b/);
+    expect(rule(css, ".conversation-code pre")).toMatch(/overflow:\s*auto/);
+    expect(rule(css, ".conversation-code.wrap pre")).toMatch(/white-space:\s*pre-wrap/);
+    expect(rule(css, ".conversation-code.wrap pre")).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(rule(phoneCss, ".phone .conversation-code pre")).not.toMatch(/white-space:/);
+  });
+
+  it("非文字类语言代码块不带 wrap 类，保持横向滚动", () => {
+    for (const lang of ["ts", "bash", "json", "python", "rust", "TS", "JSON"]) {
+      const view = createSessionView();
+      view.entries = [assistant({ text: `\`\`\`${lang}\nconst value = 1;\n\`\`\`` })];
+      const { container, unmount } = mount(view);
+      const block = container.querySelector(".conversation-code");
+      expect(block, `lang=${lang}`).not.toBeNull();
+      expect(block?.classList.contains("wrap"), `lang=${lang}`).toBe(false);
+      unmount();
+    }
+  });
+
+  it("换行代码块的复制按钮复制原文，保留缩进与空行", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const raw =
+      "## Summary\n\n  - indented item with https://example.com/" +
+      "segment/".repeat(12) +
+      "\n\nFinal line.";
+    const view = createSessionView();
+    view.entries = [assistant({ text: `\`\`\`markdown\n${raw}\n\`\`\`` })];
+    const { container } = mount(view);
+    expect(container.querySelector(".conversation-code")?.classList.contains("wrap")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "复制代码" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(raw));
+  });
 });
 
 describe("Conversation 工具行三个阶段同一结构", () => {

@@ -585,6 +585,10 @@
   padding: 12px;
   margin: 0;
 }
+.conversation-code.wrap pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 /* 回答里的表格：装不下时只在 .tbl-wrap 里横向滚动，滚到头不带动页面或触发返回手势 */
 .conversation-markdown .tbl-wrap {
   margin: var(--space-2) 0;

@@ -499,6 +499,14 @@ export function isClosedCodeFence(code: Tokens.Code): boolean {
   return new RegExp(`^ {0,3}${fence}[~` + "`" + `]* *$`).test(lastLine);
 }
 
+const WRAP_CODE_LANGUAGES = new Set(["", "markdown", "md", "text", "txt", "plaintext"]);
+
+/** 文字类或未写语言的代码块自动换行，其余代码语言保持横向滚动。 */
+export function shouldWrapCodeBlock(lang: string): boolean {
+  const token = lang.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  return WRAP_CODE_LANGUAGES.has(token);
+}
+
 const MarkdownCodeBlock = memo(function MarkdownCodeBlock({
   lang,
   text: codeText,
@@ -512,8 +520,9 @@ const MarkdownCodeBlock = memo(function MarkdownCodeBlock({
     language: lang,
     enabled: closed,
   });
+  const wrap = shouldWrapCodeBlock(lang);
   return (
-    <div className="conversation-code">
+    <div className={wrap ? "conversation-code wrap" : "conversation-code"}>
       <div className="conversation-code-language">
         <span>{lang}</span>
         <CopyButton text={codeText} label="复制代码" />
