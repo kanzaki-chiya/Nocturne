@@ -52,7 +52,7 @@ import {
 import { StdioPipeTransport } from "./transport.js";
 
 const CLIENT_NAME = "nocturne";
-const CLIENT_VERSION = "0.63.0";
+const CLIENT_VERSION = "0.64.0";
 const MCP_APPS_EXTENSION_ID = "io.modelcontextprotocol/ui";
 const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 /** 页面 HTML UTF-8 解码上限：8 MiB，与 ADR-0088 MAX_INLINE_HTML_SAVED_BYTES 对齐（ADR-0101 第 2 节） */
