@@ -34,7 +34,7 @@ const callTool = (id: string, name: string, input: unknown): FakeScript[number] 
   input,
 });
 
-it("在 TUI 发送 /panel 并显示一行页面版本", async () => {
+it("在 TUI 发送 /page 并显示一行页面版本", async () => {
   const provider = new FakeProvider({
     scripts: [
       [
@@ -55,14 +55,14 @@ it("在 TUI 发送 /panel 并显示一行页面版本", async () => {
   );
   try {
     await settle(() => ui.lastFrame()?.includes("fake-1") === true);
-    ui.stdin.write("/panel 做周报");
+    ui.stdin.write("/page 做周报");
     await flush();
     ui.stdin.write("\r");
     await settle(() => ui.lastFrame()?.includes("已生成周报") === true);
     expect(ui.lastFrame()).toContain("▣ 周报 v1");
     expect(
       session.durableEvents().find((event) => event.type === "message.user")?.payload,
-    ).toMatchObject({ workMode: { name: "panel" } });
+    ).toMatchObject({ workMode: { name: "page" } });
   } finally {
     ui.unmount();
     await session.close();

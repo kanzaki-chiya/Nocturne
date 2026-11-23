@@ -188,10 +188,10 @@ describe("completeSlash", () => {
       "/boost",
       // 执行方式补全来自 Core 的 WORK_MODE_COMMANDS（ADR-0089 修订：对外显示 /ensemble）
       "/ensemble",
-      "/panel",
+      "/page",
     ]);
     expect(groups[0]?.items.find((item) => item.label === "/ensemble")?.summary).toBe("合奏协作");
-    expect(groups[0]?.items.find((item) => item.label === "/panel")?.summary).toBe("面板页面");
+    expect(groups[0]?.items.find((item) => item.label === "/page")?.summary).toBe("面板页面");
     expect(completeSlash("/sw")).toEqual([]);
   });
 

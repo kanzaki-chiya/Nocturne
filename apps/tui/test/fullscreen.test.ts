@@ -170,7 +170,7 @@ describe("补全", () => {
   it("前缀优先于包含，/help 与补全共用命令表", () => {
     const hits = completeSlash("/p", ctx);
     const inserts = hits.map((h) => h.insert);
-    expect(inserts.slice(0, 4)).toEqual(["/preset", "/plan ", "/panel ", "/provider"]);
+    expect(inserts.slice(0, 4)).toEqual(["/preset", "/plan ", "/page ", "/provider"]);
     expect(hits[2]?.label).toContain("面板页面");
     expect(hits[3]?.label).toContain("管理服务商");
     const help = helpLines().join("\n");

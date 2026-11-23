@@ -164,4 +164,4 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 
 ## 修订（2026-11-23）：面板页面
 
-`/panel <要求>` 通过 `workMode: "panel"` 提交。Core 将英文说明块追加在用户消息末尾并随事件保存，要求用 `render_html` 以 `display: "panel"` 新建页面、后续按页面 id 更新，正文避免复述页面内容。每条消息只能选一种执行方式。桌面、手机网页、安卓、TUI 和逐行 CLI 共用该入口。终端显示 `▣ 标题 v<n>`，桌面及移动端展示见 [ADR-0109](ADR-0109-page-versions.md)。
+`/page <要求>` 通过 `workMode: "page"` 提交。Core 将英文说明块追加在用户消息末尾并随事件保存，要求用 `render_html` 以 `display: "panel"` 新建页面、后续按页面 id 更新，正文避免复述页面内容。每条消息只能选一种执行方式。桌面、手机网页、安卓、TUI 和逐行 CLI 共用该入口。终端显示 `▣ 标题 v<n>`，桌面及移动端展示见 [ADR-0109](ADR-0109-page-versions.md)。

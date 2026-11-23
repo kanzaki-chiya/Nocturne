@@ -20,6 +20,7 @@ import {
   encodeDurableEvent,
   goalStatusLines,
   formatGoalDuration,
+  isWorkModeName,
   parseWorkModeSlash,
   replaySessionView,
   userEntryText,
@@ -153,27 +154,29 @@ describe("提交入口 workMode", () => {
     await session.close();
   });
 
-  it("/panel 将页面说明追加到用户消息并随持久事件编解码保留", async () => {
+  it("/page 将页面说明追加到用户消息并随持久事件编解码保留", async () => {
     const provider = new FakeProvider({ scripts: [textScript("好了")] });
     const runtime = await makeRuntime(provider);
     const session = await runtime.createSession({ model: "fake/fake-1" });
     try {
-      expect(parseWorkModeSlash("/panel")).toEqual({
+      expect(parseWorkModeSlash("/page")).toEqual({
         kind: "usage",
-        name: "panel",
-        hint: "用法：/panel 要求",
+        name: "page",
+        hint: "用法：/page 要求",
       });
-      const parsed = parseWorkModeSlash("/panel 做个看板");
-      if (parsed?.kind !== "submit") throw new Error("expected panel submit");
+      expect(isWorkModeName("panel")).toBe(false);
+      expect(parseWorkModeSlash("/panel 做个看板")).toBeUndefined();
+      const parsed = parseWorkModeSlash("/page 做个看板");
+      if (parsed?.kind !== "submit") throw new Error("expected page submit");
       expect(await session.submit({ text: parsed.text, workMode: parsed.workMode })).toBe("done");
       const [message] = users(session);
       if (message === undefined) throw new Error("expected a user event");
       const snapshot = message.payload.workMode;
-      expect(snapshot?.name).toBe("panel");
+      expect(snapshot?.name).toBe("page");
       expect(snapshot?.body).toContain('Use render_html with display: "panel"');
       expect(snapshot?.body).toContain("update it using its page id");
       expect(snapshot?.body).toContain("Do not repeat the page content");
-      const block = `<work-mode name="panel">\n${snapshot?.body ?? ""}\n</work-mode>`;
+      const block = `<work-mode name="page">\n${snapshot?.body ?? ""}\n</work-mode>`;
       expect(message.payload.content.at(-1)).toEqual({ type: "text", text: block });
       expect(requestText(provider.requests[0])).toContain(block);
       expect(decodeDurableEvent(encodeDurableEvent(message))).toEqual(message);
