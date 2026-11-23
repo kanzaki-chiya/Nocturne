@@ -23,8 +23,12 @@ import { createRpcServer, type RpcServer } from "@nocturne/rpc/server";
 import {
   createNocturneMcpServer,
   extractIncrementalWaitTurn,
+  formatReadSessionOutput,
+  MAX_WAIT_PROCESS_TEXT_CHARS,
   MAX_WAIT_TOOL_TARGET_CHARS,
   MAX_WAIT_TOOLS_PER_CALL,
+  MAX_WAIT_USER_TEXT_CHARS,
+  NOCTURNE_MCP_TOOLS,
   summarizeWaitToolEntry,
   type WaitToolCursor,
 } from "../src/index.js";
@@ -431,13 +435,12 @@ describe("MCP 等待返回精简、多会话等待、新建标题与子会话报
     const turn2 = wait2.lastTurn as {
       tools: string[];
       omittedPreviousTools: number;
-      assistantText: string;
     };
     expect(turn2.omittedPreviousTools).toBe(2);
     expect(turn2.tools).toHaveLength(2);
     expect(turn2.tools[0]).toContain("c.txt");
     expect(turn2.tools[1]).toContain("d.txt");
-    expect(turn2.assistantText).toBe("全部四个文件读取完毕");
+    expect("assistantText" in turn2).toBe(false);
 
     // 连接 2 首次等待同一会话：独立游标，不受连接 1 影响，从本轮开头列出全部 4 条
     const conn2Wait = parseToolJson(
@@ -863,5 +866,535 @@ describe("MCP 等待返回精简、多会话等待、新建标题与子会话报
       sessionIds: [],
     });
     expect(emptyArr.isError).toBe(true);
+  });
+
+  it("wait: false 的 nocturne_start_session 与 nocturne_send 只返回排队状态，不含 lastTurn / reply / 工具列表", async () => {
+    let releaseTurn1!: () => void;
+    const turn1Gate = new Promise<void>((resolve) => {
+      releaseTurn1 = resolve;
+    });
+    let turn1Started!: () => void;
+    const turn1Ready = new Promise<void>((resolve) => {
+      turn1Started = resolve;
+    });
+    cleanups.push(() => {
+      releaseTurn1();
+      return Promise.resolve();
+    });
+
+    let reqCount = 0;
+    const harness = await createHarness({
+      handler: async () => {
+        reqCount++;
+        if (reqCount === 1) {
+          turn1Started();
+          await turn1Gate;
+          return [
+            { type: "text_delta", text: "第一轮长回复" },
+            { type: "finish", reason: "stop" },
+          ];
+        }
+        return [
+          { type: "text_delta", text: "第二轮回复" },
+          { type: "finish", reason: "stop" },
+        ];
+      },
+    });
+    cleanups.push(() => harness.close());
+
+    const conn = await harness.connectAgent("agent-wait-false", "Wait False Agent");
+
+    const startRes = await conn.mcpClient.callTool({
+      name: "nocturne_start_session",
+      arguments: {
+        cwd: harness.workspace,
+        title: "精简排队测试",
+        prompt: "第一轮任务",
+        wait: false,
+      },
+    });
+    expect(startRes.isError).toBeFalsy();
+    const startData = parseToolJson(startRes);
+    expect(typeof startData.sessionId).toBe("string");
+    expect(startData.title).toBe("精简排队测试");
+    expect(startData.status).toBe("running");
+    expect(startData.queuedInputs).toBe(0);
+    expect(typeof startData.message).toBe("string");
+    expect(Object.keys(startData).sort()).toEqual([
+      "message",
+      "queuedInputs",
+      "sessionId",
+      "status",
+      "title",
+    ]);
+    expect("lastTurn" in startData).toBe(false);
+    expect("reply" in startData).toBe(false);
+    expect("tools" in startData).toBe(false);
+
+    await turn1Ready;
+
+    const sendRes = await conn.mcpClient.callTool({
+      name: "nocturne_send",
+      arguments: {
+        sessionId: startData.sessionId as string,
+        prompt: "第二轮排队任务",
+        wait: false,
+      },
+    });
+    expect(sendRes.isError).toBeFalsy();
+    const sendData = parseToolJson(sendRes);
+    expect(sendData.sessionId).toBe(startData.sessionId);
+    expect(sendData.title).toBe("精简排队测试");
+    expect(sendData.status).toBe("running");
+    expect(sendData.queuedInputs).toBe(1);
+    expect(typeof sendData.message).toBe("string");
+    expect(Object.keys(sendData).sort()).toEqual([
+      "message",
+      "queuedInputs",
+      "sessionId",
+      "status",
+      "title",
+    ]);
+    expect("lastTurn" in sendData).toBe(false);
+    expect("reply" in sendData).toBe(false);
+    expect("tools" in sendData).toBe(false);
+
+    releaseTurn1();
+    const waitRes = parseToolJson(
+      await conn.mcpClient.callTool({
+        name: "nocturne_wait",
+        arguments: { sessionId: startData.sessionId as string, timeoutSeconds: 10 },
+      }),
+    );
+    expect(waitRes.status).toBe("idle");
+    expect(waitRes.reply).toBe("第二轮回复");
+  });
+
+  it("extractIncrementalWaitTurn：首条 userText 截断至 300 字符、额外用户输入只计 extraInputs、回复去重且保留最后一段完整回复", () => {
+    const view = createSessionView();
+    const longPrompt = `首条用户消息：${"甲".repeat(360)}`;
+    const shellLog1 = `<shell-result id="bg-1" status="exited" exit="0">\n${"pnpm install log line\n".repeat(40)}</shell-result>`;
+    const shellLog2 = `<shell-result id="bg-2" status="exited" exit="0">\n${"cargo build log line\n".repeat(40)}</shell-result>`;
+    const longProcess = `过程说明：${"乙".repeat(420)}`;
+    const longFinalReply = `最终完整回复：${"丙".repeat(520)}`;
+
+    view.entries.push(
+      {
+        kind: "user",
+        key: "u-1",
+        seq: 1,
+        turnId: "t-1",
+        content: [{ type: "text", text: longPrompt }],
+      },
+      {
+        kind: "assistant",
+        key: "a-1",
+        seq: 2,
+        turnId: "t-1",
+        messageId: "m-1",
+        time: "2026-11-23T00:00:00.000Z",
+        text: longProcess,
+        reasoning: "",
+        toolCalls: [],
+        model: { provider: "fake", model: "fake-model" },
+        usage: undefined,
+        finishReason: "tool_calls",
+      },
+      makeToolEntry("c-1", "t-1", "shell", { seq: 3, command: "pnpm install" }),
+      {
+        kind: "user",
+        key: "u-2",
+        seq: 4,
+        turnId: "t-1",
+        content: [{ type: "text", text: shellLog1 }],
+        steer: true,
+      },
+      makeToolEntry("c-2", "t-1", "read", { seq: 5, filePath: "package.json" }),
+      {
+        kind: "user",
+        key: "u-3",
+        seq: 6,
+        turnId: "t-1",
+        content: [{ type: "text", text: shellLog2 }],
+        steer: true,
+      },
+      {
+        kind: "assistant",
+        key: "a-2",
+        seq: 7,
+        turnId: "t-1",
+        messageId: "m-2",
+        time: "2026-11-23T00:00:05.000Z",
+        text: longFinalReply,
+        reasoning: "",
+        toolCalls: [],
+        model: { provider: "fake", model: "fake-model" },
+        usage: undefined,
+        finishReason: "stop",
+      },
+    );
+
+    const { turn, reply } = extractIncrementalWaitTurn(view, undefined);
+    expect(turn).toBeDefined();
+    if (!turn) throw new Error("expected turn to be defined");
+    expect(Array.from(turn.userText).length).toBe(MAX_WAIT_USER_TEXT_CHARS);
+    expect(turn.userText.startsWith("首条用户消息：")).toBe(true);
+    expect(turn.userText.endsWith("…")).toBe(true);
+    expect(turn.userText).not.toContain("<shell-result");
+    expect(turn.extraInputs).toBe(2);
+    expect(turn.tools).toEqual(["[shell] ok — pnpm install", "[read] ok — package.json"]);
+    expect("assistantText" in turn).toBe(false);
+
+    const [processPart, finalPart] = reply.split("\n\n");
+    expect(Array.from(processPart ?? "").length).toBe(MAX_WAIT_PROCESS_TEXT_CHARS);
+    expect(processPart?.endsWith("…")).toBe(true);
+    expect(finalPart).toBe(longFinalReply);
+
+    // nocturne_read_session（formatReadSessionOutput）不受影响，仍保留完整用户条目与 assistantText
+    const readJson = JSON.parse(formatReadSessionOutput(view, { sessionId: "s-1" })) as {
+      turns: { userText: string; assistantText: string }[];
+    };
+    expect(readJson.turns[0]?.userText).toContain("<shell-result");
+    expect(readJson.turns[0]?.assistantText).toContain(longFinalReply);
+  });
+
+  it("单会话与多会话 nocturne_wait：含两条 <shell-result>、工具与助手回复的轮次仅保留截断首条 userText、extraInputs=2 且回复只出现一次", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "nct-mcp-compact-wait-"));
+    cleanups.push(() => rm(home, { recursive: true, force: true }));
+    const platform = createPlatform();
+    const { store: credentials } = await createCredentialStore(platform, home, {
+      backend: "memory",
+    });
+
+    const longPrompt = `主任务描述：${"A".repeat(340)}`;
+    const uniqueReply = "FINAL_UNIQUE_REPLY_MARKER_R1123J：构建与单测全部通过。";
+    const shellOut1 = `<shell-result id="bg-1" status="exited" exit="0">\n${"pnpm-install-output-line\n".repeat(30)}</shell-result>`;
+    const shellOut2 = `<shell-result id="bg-2" status="exited" exit="0">\n${"cargo-compile-output-line\n".repeat(30)}</shell-result>`;
+
+    const makeStubSession = (sessionId: string, withShellResults: boolean) => {
+      const events = [
+        {
+          type: "session.created",
+          sessionId,
+          seq: 1,
+          ts: "2026-11-23T00:00:00.000Z",
+          payload: {
+            cwd: home,
+            workspaceRoot: home,
+            formatVersion: 1,
+            nocturneVersion: "0.62.0-test",
+            model: { provider: "fake", model: "fake-model" },
+            permissionPreset: "bypass",
+          },
+        },
+        {
+          type: "turn.started",
+          sessionId,
+          seq: 2,
+          ts: "2026-11-23T00:00:01.000Z",
+          turnId: "t-1",
+          payload: {},
+        },
+        {
+          type: "message.user",
+          sessionId,
+          seq: 3,
+          ts: "2026-11-23T00:00:01.000Z",
+          turnId: "t-1",
+          payload: {
+            messageId: "u-1",
+            content: [{ type: "text", text: withShellResults ? longPrompt : "简短任务 B" }],
+          },
+        },
+        {
+          type: "tool.started",
+          sessionId,
+          seq: 4,
+          ts: "2026-11-23T00:00:02.000Z",
+          turnId: "t-1",
+          payload: {
+            callId: "c-1",
+            name: "shell",
+            input: { command: "pnpm install" },
+            subjects: [{ kind: "shell", target: "pnpm install" }],
+          },
+        },
+        {
+          type: "tool.completed",
+          sessionId,
+          seq: 5,
+          ts: "2026-11-23T00:00:03.000Z",
+          turnId: "t-1",
+          payload: {
+            callId: "c-1",
+            name: "shell",
+            status: "ok",
+            modelContent: "started",
+            truncated: false,
+            durationMs: 12,
+          },
+        },
+        ...(withShellResults
+          ? [
+              {
+                type: "message.user",
+                sessionId,
+                seq: 6,
+                ts: "2026-11-23T00:00:04.000Z",
+                turnId: "t-1",
+                payload: {
+                  messageId: "u-2",
+                  content: [{ type: "text", text: shellOut1 }],
+                  steer: true,
+                },
+              },
+              {
+                type: "tool.started",
+                sessionId,
+                seq: 7,
+                ts: "2026-11-23T00:00:05.000Z",
+                turnId: "t-1",
+                payload: {
+                  callId: "c-2",
+                  name: "read",
+                  input: { path: "Cargo.toml" },
+                  subjects: [{ kind: "read", target: "Cargo.toml" }],
+                },
+              },
+              {
+                type: "tool.completed",
+                sessionId,
+                seq: 8,
+                ts: "2026-11-23T00:00:06.000Z",
+                turnId: "t-1",
+                payload: {
+                  callId: "c-2",
+                  name: "read",
+                  status: "ok",
+                  modelContent: "[package]",
+                  truncated: false,
+                  durationMs: 5,
+                },
+              },
+              {
+                type: "message.user",
+                sessionId,
+                seq: 9,
+                ts: "2026-11-23T00:00:07.000Z",
+                turnId: "t-1",
+                payload: {
+                  messageId: "u-3",
+                  content: [{ type: "text", text: shellOut2 }],
+                  steer: true,
+                },
+              },
+            ]
+          : []),
+        {
+          type: "message.assistant",
+          sessionId,
+          seq: withShellResults ? 10 : 6,
+          ts: "2026-11-23T00:00:08.000Z",
+          turnId: "t-1",
+          payload: {
+            messageId: "a-1",
+            content: [
+              {
+                type: "text",
+                text: withShellResults ? uniqueReply : "SESSION_B_UNIQUE_REPLY：完成。",
+              },
+            ],
+            toolCalls: [],
+            model: { provider: "fake", model: "fake-model" },
+            finishReason: "stop",
+          },
+        },
+        {
+          type: "turn.completed",
+          sessionId,
+          seq: withShellResults ? 11 : 7,
+          ts: "2026-11-23T00:00:09.000Z",
+          turnId: "t-1",
+          payload: { reason: "done" },
+        },
+      ];
+      return {
+        id: sessionId,
+        durableEvents: () => events,
+        subscribe: () => () => undefined,
+        isIdle: () => true,
+        onIdle: () => () => undefined,
+        warnings: [],
+        pendingInputs: () => ({ items: [], paused: false }),
+        interrupt: () => undefined,
+        close: async () => undefined,
+        state: () => ({
+          meta: {
+            id: sessionId,
+            cwd: home,
+            workspaceRoot: home,
+            createdAt: "2026-11-23T00:00:00.000Z",
+            formatVersion: 1,
+            nocturneVersion: "0.62.0-test",
+          },
+          config: {
+            model: { provider: "fake", model: "fake-model" },
+            permissionPreset: "bypass",
+          },
+          history: [],
+          todos: [],
+          notes: [],
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          lastSeq: withShellResults ? 11 : 7,
+          openTurn: undefined,
+          unsettledCalls: new Map(),
+        }),
+      };
+    };
+
+    const sessA = makeStubSession("sess-compact-a", true);
+    const sessB = makeStubSession("sess-compact-b", false);
+    const stubRuntime = createRuntimeStub({
+      resumeSession: async (id) => {
+        if (id === sessA.id) return sessA as never;
+        if (id === sessB.id) return sessB as never;
+        throw new Error(`unknown session ${id}`);
+      },
+      listSessions: async () => [
+        {
+          id: sessA.id,
+          createdAt: "2026-11-23T00:00:00.000Z",
+          cwd: home,
+          workspaceRoot: home,
+          model: { provider: "fake", model: "fake-model" },
+          mtimeMs: Date.now(),
+        },
+        {
+          id: sessB.id,
+          createdAt: "2026-11-23T00:00:00.000Z",
+          cwd: home,
+          workspaceRoot: home,
+          model: { provider: "fake", model: "fake-model" },
+          mtimeMs: Date.now(),
+        },
+      ],
+      close: async () => undefined,
+    });
+
+    const rpcServer = createRpcServer({
+      nocturneVersion: "0.62.0-test",
+      agentPipe: false,
+      remote: { home, credentials },
+      createRuntime: async () => ({ runtime: stubRuntime }),
+    });
+    const [serverEnd, clientEnd] = createMemoryTransportPair();
+    const served = rpcServer.serve(serverEnd);
+    const desktopClient = createRpcClient(clientEnd, {
+      clientName: "Nocturne Desktop",
+      interactive: true,
+    });
+    cleanups.push(async () => {
+      desktopClient.close();
+      await served.catch(() => undefined);
+    });
+    await desktopClient.initialize();
+
+    const mcpServer = createNocturneMcpServer({
+      home,
+      name: "Compact Wait Agent",
+      connectTransport: async () => {
+        const [cEnd, sEnd] = createMemoryTransportPair();
+        void rpcServer.serve(sEnd, {
+          origin: "agent",
+          agent: { id: "agent-compact-wait", name: "Compact Wait Agent" },
+        });
+        return cEnd;
+      },
+    });
+    const [cT, sT] = InMemoryTransport.createLinkedPair();
+    const mcpClient = new Client({ name: "Compact Wait Agent", version: "1.0.0" });
+    await mcpServer.server.connect(sT);
+    await mcpClient.connect(cT);
+    cleanups.push(async () => {
+      await mcpClient.close().catch(() => undefined);
+      await mcpServer.close().catch(() => undefined);
+    });
+    await mcpClient.callTool({ name: "nocturne_list_sessions", arguments: {} });
+    await desktopClient.call("agent.respondPairing", {
+      agentId: "agent-compact-wait",
+      approved: true,
+      scope: "run",
+      maxPermissionPreset: "bypass",
+    });
+
+    // 1. 单会话 nocturne_wait
+    const singleRes = await mcpClient.callTool({
+      name: "nocturne_wait",
+      arguments: { sessionId: sessA.id, timeoutSeconds: 5 },
+    });
+    expect(singleRes.isError).toBeFalsy();
+    const singleRaw = getToolText(singleRes);
+    const singleData = parseToolJson(singleRes);
+    const singleTurn = singleData.lastTurn as {
+      userText: string;
+      extraInputs?: number;
+      tools: string[];
+    };
+    expect(Array.from(singleTurn.userText).length).toBe(MAX_WAIT_USER_TEXT_CHARS);
+    expect(singleTurn.userText.startsWith("主任务描述：")).toBe(true);
+    expect(singleTurn.userText.endsWith("…")).toBe(true);
+    expect(singleRaw).not.toContain("<shell-result");
+    expect(singleRaw).not.toContain("pnpm-install-output-line");
+    expect(singleRaw).not.toContain("cargo-compile-output-line");
+    expect(singleTurn.extraInputs).toBe(2);
+    expect(singleTurn.tools).toEqual(["[shell] ok — pnpm install", "[read] ok — Cargo.toml"]);
+    expect(singleData.reply).toBe(uniqueReply);
+    expect("assistantText" in singleTurn).toBe(false);
+    expect(singleRaw.split(uniqueReply).length - 1).toBe(1);
+
+    // 2. 多会话 nocturne_wait 同样适用
+    const multiRes = await mcpClient.callTool({
+      name: "nocturne_wait",
+      arguments: { sessionIds: [sessA.id, sessB.id], timeoutSeconds: 5 },
+    });
+    expect(multiRes.isError).toBeFalsy();
+    const multiRaw = getToolText(multiRes);
+    const multiData = parseToolJson(multiRes);
+    const multiSessions = multiData.sessions as {
+      sessionId: string;
+      reply: string;
+      lastTurn: { userText: string; extraInputs?: number };
+    }[];
+    expect(multiSessions).toHaveLength(2);
+    const [multiA, multiB] = multiSessions;
+    if (!multiA || !multiB) throw new Error("expected two sessions in multi wait result");
+    expect(multiRaw).not.toContain("<shell-result");
+    expect(multiRaw.split(uniqueReply).length - 1).toBe(1);
+    expect(multiRaw.split("SESSION_B_UNIQUE_REPLY：完成。").length - 1).toBe(1);
+    expect(Array.from(multiA.lastTurn.userText).length).toBe(MAX_WAIT_USER_TEXT_CHARS);
+    expect(multiA.lastTurn.extraInputs).toBe(2);
+    expect("assistantText" in multiA.lastTurn).toBe(false);
+    expect(multiB.lastTurn.userText).toBe("简短任务 B");
+    expect(multiB.lastTurn.extraInputs).toBeUndefined();
+    expect("assistantText" in multiB.lastTurn).toBe(false);
+
+    // 3. nocturne_read_session 仍返回原文
+    const readRes = await mcpClient.callTool({
+      name: "nocturne_read_session",
+      arguments: { sessionId: sessA.id, turns: 3 },
+    });
+    const readRaw = getToolText(readRes);
+    expect(readRaw).toContain("<shell-result");
+    expect(readRaw).toContain("pnpm-install-output-line");
+    expect(readRaw).toContain("cargo-compile-output-line");
+  });
+
+  it("工具 description 写明 wait: false 仅返回排队状态且查看过程/原文调用 nocturne_read_session", () => {
+    const byName = new Map(NOCTURNE_MCP_TOOLS.map((t) => [t.name, t.description ?? ""]));
+    expect(byName.get("nocturne_start_session")).toContain("wait: false");
+    expect(byName.get("nocturne_start_session")).toContain("nocturne_read_session");
+    expect(byName.get("nocturne_send")).toContain("wait: false");
+    expect(byName.get("nocturne_send")).toContain("nocturne_read_session");
+    expect(byName.get("nocturne_wait")).toContain("nocturne_read_session");
   });
 });

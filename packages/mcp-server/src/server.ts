@@ -65,7 +65,8 @@ export const NOCTURNE_MCP_TOOLS: readonly Tool[] = [
   },
   {
     name: "nocturne_start_session",
-    description: "在指定工作目录新建 Nocturne 会话并发送首条任务，可选等待本轮完成。",
+    description:
+      "在指定工作目录新建 Nocturne 会话并发送首条任务。wait: false 仅返回排队状态；wait: true 返回本轮增量摘要与回复，查看过程或原文调用 nocturne_read_session。",
     inputSchema: {
       type: "object",
       properties: {
@@ -96,7 +97,7 @@ export const NOCTURNE_MCP_TOOLS: readonly Tool[] = [
         },
         wait: {
           type: "boolean",
-          description: "是否等待本轮完成或暂停（默认 true）。",
+          description: "是否等待本轮完成或暂停（默认 true；false 仅返回排队状态）。",
         },
         timeoutSeconds: {
           type: "number",
@@ -109,7 +110,7 @@ export const NOCTURNE_MCP_TOOLS: readonly Tool[] = [
   {
     name: "nocturne_send",
     description:
-      "向已有 Nocturne 会话追加消息。走 enqueueInput 的 queue 模式：从不打断，忙时排到下一轮，空闲时立即开始。",
+      "向已有 Nocturne 会话追加消息（queue 模式，从不打断运行中轮次）。wait: false 仅返回排队状态；wait: true 返回本轮增量摘要与回复，查看过程或原文调用 nocturne_read_session。",
     inputSchema: {
       type: "object",
       properties: {
@@ -123,7 +124,7 @@ export const NOCTURNE_MCP_TOOLS: readonly Tool[] = [
         },
         wait: {
           type: "boolean",
-          description: "是否等待执行完成或暂停（默认 true）。",
+          description: "是否等待执行完成或暂停（默认 true；false 仅返回排队状态）。",
         },
         timeoutSeconds: {
           type: "number",
@@ -136,7 +137,7 @@ export const NOCTURNE_MCP_TOOLS: readonly Tool[] = [
   {
     name: "nocturne_wait",
     description:
-      "等待一个或多个正在运行的 Nocturne 会话完成当前轮次（含正常接续的排队轮次），或在等待用户审批权限 / 回答提问 / 队列暂停时立即返回。传 sessionId 等单个会话，传 sessionIds 同时等多个会话（任一满足停止条件即返回）。返回增量单行工具摘要。",
+      "等待一个或多个正在运行的 Nocturne 会话完成当前轮次（含正常接续的排队轮次），或在等待用户审批权限 / 回答提问 / 队列暂停时立即返回。传 sessionId 等单个会话，传 sessionIds 同时等多个会话（任一满足停止条件即返回）。返回增量工具摘要与最终回复，查看过程或原文调用 nocturne_read_session。",
     inputSchema: {
       type: "object",
       properties: {

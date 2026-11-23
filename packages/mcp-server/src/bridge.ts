@@ -539,8 +539,7 @@ export class McpBridge {
     await this.triggerSubmitOnTracked(tracked, prompt);
 
     if (!wait) {
-      return this.buildSessionWaitResult(tracked, {
-        advanceCursor: false,
+      return this.buildSessionQueuedResult(tracked, {
         requestedTitle: title,
         renameError,
       });
@@ -575,7 +574,7 @@ export class McpBridge {
     await this.triggerEnqueueOnTracked(tracked, prompt);
 
     if (!wait) {
-      return this.buildSessionWaitResult(tracked, { advanceCursor: false });
+      return this.buildSessionQueuedResult(tracked);
     }
     await this.waitForTrackedSessions([tracked], timeoutSeconds, context);
     return this.buildSessionWaitResult(tracked, { advanceCursor: true });
@@ -1010,7 +1009,7 @@ export class McpBridge {
       tracked.waitToolCursor = incremental.nextCursor;
     }
     const folded = incremental.turn;
-    const reply = folded?.assistantText ?? "";
+    const reply = incremental.reply;
 
     const turnOutcome = deriveTurnOutcome(status, view);
     const effectiveTitle =
@@ -1108,6 +1107,49 @@ export class McpBridge {
       return "Session is waiting for an answer. Only the agent that created this session can call nocturne_answer; ask the user to respond in Nocturne.";
     }
     return "Session is waiting for an answer. Call nocturne_answer with this sessionId and pendingQuestion.requestId to respond, or ask the user to respond in Nocturne.";
+  }
+
+  private buildSessionQueuedPayload(
+    tracked: TrackedBridgeSession,
+    options?: {
+      requestedTitle?: string | undefined;
+      renameError?: string | undefined;
+    },
+  ): Record<string, unknown> {
+    const view = tracked.tracker.view;
+    const pendingCount =
+      tracked.pendingInputIds.size + (tracked.activeStartToken !== undefined ? 1 : 0);
+    const status = deriveMcpSessionStatus(view, pendingCount, tracked.paused);
+    const effectiveTitle =
+      view.title ??
+      (options?.requestedTitle !== undefined && options.renameError === undefined
+        ? options.requestedTitle
+        : undefined);
+    const queuedInputs = tracked.pendingInputIds.size;
+    const message =
+      queuedInputs > 0
+        ? "消息已入队，可调用 nocturne_wait 等待完成，或调用 nocturne_read_session 查看会话。"
+        : "消息已提交，可调用 nocturne_wait 等待完成，或调用 nocturne_read_session 查看会话。";
+
+    return {
+      sessionId: tracked.sessionId,
+      ...(effectiveTitle !== undefined ? { title: effectiveTitle } : {}),
+      ...(options?.renameError !== undefined ? { renameError: options.renameError } : {}),
+      status,
+      queuedInputs,
+      message,
+    };
+  }
+
+  private buildSessionQueuedResult(
+    tracked: TrackedBridgeSession,
+    options?: {
+      requestedTitle?: string | undefined;
+      renameError?: string | undefined;
+    },
+  ): McpToolCallResult {
+    const payload = this.buildSessionQueuedPayload(tracked, options);
+    return this.textResult(JSON.stringify(payload, null, 2), payload);
   }
 
   private buildSessionWaitResult(

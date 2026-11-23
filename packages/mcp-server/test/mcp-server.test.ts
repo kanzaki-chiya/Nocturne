@@ -619,7 +619,8 @@ describe("packages/mcp-server 单元与集成测试", () => {
     });
     const waitData = parseToolJson(waitRes);
     expect(waitData.status).toBe("idle");
-    expect((waitData.lastTurn as { assistantText: string }).assistantText).toBe("慢响应最终完成");
+    expect(waitData.reply).toBe("慢响应最终完成");
+    expect("assistantText" in (waitData.lastTurn as Record<string, unknown>)).toBe(false);
   });
 
   it("超过 64 KB 时截断并附加说明", () => {

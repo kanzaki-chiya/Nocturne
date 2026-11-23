@@ -11,6 +11,10 @@ export const MAX_MCP_OUTPUT_BYTES = 64 * 1024;
 export const MAX_WAIT_TOOL_TARGET_CHARS = 120;
 /** 等待类返回中单次最多列出的最近工具调用条数 */
 export const MAX_WAIT_TOOLS_PER_CALL = 20;
+/** 等待类返回中本轮首条用户提交文本的最大字符数（含省略号） */
+export const MAX_WAIT_USER_TEXT_CHARS = 300;
+/** 等待类返回中最后一段回复之前的过程文字最大字符数（含省略号） */
+export const MAX_WAIT_PROCESS_TEXT_CHARS = 300;
 
 export type McpSessionStatus =
   "idle" | "running" | "waiting_for_permission" | "waiting_for_answer" | "paused" | "error";
@@ -30,11 +34,18 @@ export interface WaitToolCursor {
   reportedStates: Map<string, string>;
 }
 
-export interface WaitFoldedTurn extends FoldedTurn {
+export interface WaitFoldedTurn {
+  turnId: string;
+  status: FoldedTurn["status"];
+  userText: string;
+  /** 本轮除首条用户提交外的其余用户输入条目数（如后台命令结果 <shell-result>、插话、Runtime 注入等） */
+  extraInputs?: number | undefined;
+  tools: string[];
   /** 本次之前（上一次等待返回）已省略的本轮工具调用条数 */
   omittedPreviousTools: number;
   /** 本次新增工具超出单次条数上限时，因上限被省略的较早条数 */
   omittedExcessTools?: number | undefined;
+  error?: string | undefined;
 }
 
 export interface IncrementalWaitTurnOptions {
@@ -42,10 +53,14 @@ export interface IncrementalWaitTurnOptions {
   advanceCursor?: boolean | undefined;
   maxTools?: number | undefined;
   maxTargetChars?: number | undefined;
+  maxUserTextChars?: number | undefined;
+  maxProcessTextChars?: number | undefined;
 }
 
 export interface IncrementalWaitTurnResult {
   turn: WaitFoldedTurn | undefined;
+  /** 本轮助手回复（保留最后一段完整回复，较早过程文字按上限截断）；与 lastTurn 去重，只放在顶层 reply */
+  reply: string;
   nextCursor: WaitToolCursor | undefined;
 }
 
@@ -190,8 +205,19 @@ function summarizeWaitLiveTool(liveTool: LiveTool): string {
   return `[${liveTool.name}] running`;
 }
 
+function formatWaitReply(assistantParts: readonly string[], maxProcessTextChars: number): string {
+  if (assistantParts.length === 0) return "";
+  const finalPart = assistantParts[assistantParts.length - 1] ?? "";
+  if (assistantParts.length === 1) return finalPart;
+  const processText = assistantParts.slice(0, -1).join("\n\n");
+  const trimmedProcess = truncateChars(processText, maxProcessTextChars);
+  return `${trimmedProcess}\n\n${finalPart}`;
+}
+
 /**
  * 提取等待类返回用的最新轮次增量摘要：
+ * - `userText` 只保留本轮首条用户提交文本并截断至 `maxUserTextChars`（默认 300 字符），其余用户条目只计入 `extraInputs`；
+ * - 助手回复经 `reply` 返回（不重复放在 `lastTurn`），最后一段回复不截断，较早过程文字按 `maxProcessTextChars` 截断；
  * - 仅列出上次返回后新增或状态有变化的工具调用（同一轮次内）；
  * - 每条工具调用压成单行，shell 命令只取首行并截断；
  * - 单次最多列出最近 `maxTools`（默认 20）条，超出与历史省略数分开注明。
@@ -203,6 +229,11 @@ export function extractIncrementalWaitTurn(
 ): IncrementalWaitTurnResult {
   const maxTools = Math.max(1, options?.maxTools ?? MAX_WAIT_TOOLS_PER_CALL);
   const maxTargetChars = Math.max(2, options?.maxTargetChars ?? MAX_WAIT_TOOL_TARGET_CHARS);
+  const maxUserTextChars = Math.max(2, options?.maxUserTextChars ?? MAX_WAIT_USER_TEXT_CHARS);
+  const maxProcessTextChars = Math.max(
+    2,
+    options?.maxProcessTextChars ?? MAX_WAIT_PROCESS_TEXT_CHARS,
+  );
   const advanceCursor = options?.advanceCursor ?? true;
 
   let lastTurnId: string | undefined;
@@ -221,18 +252,22 @@ export function extractIncrementalWaitTurn(
   }
 
   if (lastTurnId === undefined) {
-    return { turn: undefined, nextCursor: cursor };
+    return { turn: undefined, reply: "", nextCursor: cursor };
   }
 
-  const userParts: string[] = [];
+  let firstUserText: string | undefined;
+  let extraInputs = 0;
   const assistantParts: string[] = [];
   const allTools: { id: string; status: string; line: string }[] = [];
   const seenCallIds = new Set<string>();
 
   for (const entry of view.entries) {
     if (entry.kind === "user" && entry.turnId === lastTurnId) {
-      const text = userEntryText(entry);
-      if (text.trim() !== "") userParts.push(text);
+      if (firstUserText === undefined) {
+        firstUserText = userEntryText(entry);
+      } else {
+        extraInputs++;
+      }
     } else if (entry.kind === "tool" && entry.turnId === lastTurnId) {
       const id = entry.callId || entry.key;
       seenCallIds.add(id);
@@ -309,13 +344,14 @@ export function extractIncrementalWaitTurn(
     turn: {
       turnId: lastTurnId,
       status,
-      userText: userParts.join("\n"),
+      userText: truncateChars(firstUserText ?? "", maxUserTextChars),
+      ...(extraInputs > 0 ? { extraInputs } : {}),
       tools: visibleTools.map((t) => t.line),
       omittedPreviousTools,
       ...(omittedExcessTools > 0 ? { omittedExcessTools } : {}),
-      assistantText: assistantParts.join("\n\n"),
       ...(error !== undefined ? { error } : {}),
     },
+    reply: formatWaitReply(assistantParts, maxProcessTextChars),
     nextCursor,
   };
 }
