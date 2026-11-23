@@ -139,9 +139,11 @@ function broadRules(name: PermissionPresetName): BroadRule[] {
   }
 }
 
+type PresetRule = PermissionRule & { exactResolvedPath?: true };
+
 /** 生成预设的规则序列（按"后写优先"排序：靠后的规则覆盖靠前的） */
-export function presetRules(name: PermissionPresetName, ctx: PresetContext): PermissionRule[] {
-  const rules: PermissionRule[] = broadRules(name);
+export function presetRules(name: PermissionPresetName, ctx: PresetContext): PresetRule[] {
+  const rules: PresetRule[] = broadRules(name);
   rules.push({ kind: "page", pattern: "*", action: name === "bypass" ? "allow" : "ask" });
   // ADR-0049：委派入口默认须确认，不继承 guarded/smart/bypass 的宽放行。
   rules.push({
@@ -174,7 +176,13 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Per
   // 同项目其他会话的面板页面版本 HTML 只读放行（ADR-0114 §5）：按文件精确放行，不放行整个目录
   for (const file of ctx.projectPageFiles ?? []) {
     const filePath = normalizePathText(file, ctx.caseSensitive);
-    rules.push({ kind: "read", pattern: filePath, action: "allow", label: PROJECT_PAGES_LABEL });
+    rules.push({
+      kind: "read",
+      pattern: filePath,
+      action: "allow",
+      label: PROJECT_PAGES_LABEL,
+      exactResolvedPath: true,
+    });
   }
 
   for (const root of ctx.skillRoots ?? []) {

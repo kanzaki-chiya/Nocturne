@@ -385,7 +385,12 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
       const { rule, origin, index } = entry;
       if (rule.kind !== undefined && rule.kind !== "*" && rule.kind !== s.kind) continue;
       if (rule.where !== undefined && rule.where !== s.where) continue;
-      if (!matchPattern(rule.pattern, s, workspaceRoot, caseSensitive)) continue;
+      const matches =
+        origin === "preset" && "exactResolvedPath" in rule && rule.exactResolvedPath === true
+          ? s.resolved !== undefined &&
+            normalizePathText(s.resolved, caseSensitive) === rule.pattern
+          : matchPattern(rule.pattern, s, workspaceRoot, caseSensitive);
+      if (!matches) continue;
       return {
         origin,
         index,

@@ -20,6 +20,17 @@ export interface ReadAttachmentResult {
   bytes: number;
 }
 
+export function isSafeAttachmentFilename(file: unknown): file is string {
+  return (
+    typeof file === "string" &&
+    file.length > 0 &&
+    !file.includes("..") &&
+    !/[<>:"/\\|?*\u0000-\u001f]/.test(file) &&
+    !/[. ]$/.test(file) &&
+    !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(file)
+  );
+}
+
 /**
  * 只授权 `events` 里 message.user / tool.completed 登记过的文件名；读取
  * `<sessionsDir>/attachments/<sessionId>/` 下的实际文件，拒绝链接与逃逸，
@@ -33,14 +44,7 @@ export async function readSessionAttachment(
   file: unknown,
 ): Promise<ReadAttachmentResult> {
   const { fs, paths } = platform;
-  if (
-    typeof file !== "string" ||
-    file.length === 0 ||
-    file.includes("..") ||
-    /[<>:"/\\|?*\u0000-\u001f]/.test(file) ||
-    /[. ]$/.test(file) ||
-    /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(file)
-  ) {
+  if (!isSafeAttachmentFilename(file)) {
     throw new SessionError("invalid_attachment_file", "附件必须是单个安全文件名");
   }
   // 原始持久日志是授权来源，包含已被回退或压缩隐藏的图片（含处理后分段）；不沿 parent 回溯。

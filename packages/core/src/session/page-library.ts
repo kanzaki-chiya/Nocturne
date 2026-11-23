@@ -24,7 +24,7 @@ import {
   type PageOrigin,
   type SessionPanelPageSummary,
 } from "../protocol/index.js";
-import { readSessionAttachment } from "./attachment-read.js";
+import { isSafeAttachmentFilename, readSessionAttachment } from "./attachment-read.js";
 import { copyPageDataFile } from "./page-data.js";
 import { assertSafeSessionId, readLogReadonly } from "./readonly-log.js";
 import type { SessionStore, SessionSummary } from "./types.js";
@@ -370,14 +370,15 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
       const project = await resolveProjectCached(summary.workspaceRoot);
       if (filterProjectKey !== undefined && project.key !== filterProjectKey) return [];
       const { pages, sessionTitle } = await readSessionPanelPages(summary);
-      if (pages.length === 0) return [];
-      return pages.map<ScannedPageInstance>((page) => ({
-        sessionId: summary.id,
-        sessionTitle,
-        ...(summary.archivedAt !== undefined ? { sessionArchived: true } : {}),
-        project,
-        summary: page,
-      }));
+      return pages
+        .filter((page) => isSafeAttachmentFilename(page.file))
+        .map<ScannedPageInstance>((page) => ({
+          sessionId: summary.id,
+          sessionTitle,
+          ...(summary.archivedAt !== undefined ? { sessionArchived: true } : {}),
+          project,
+          summary: page,
+        }));
     });
 
     return resolved.flat();
@@ -467,7 +468,9 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
           continue;
         }
         for (const file of inst.summary.files) {
-          files.add(paths.join(realSessionsDir, "attachments", inst.sessionId, file));
+          if (isSafeAttachmentFilename(file)) {
+            files.add(paths.join(realSessionsDir, "attachments", inst.sessionId, file));
+          }
         }
       }
       return [...files];
@@ -517,7 +520,7 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
       const targetPage = pages.find((p) => p.page === targetPageId && p.display === "panel");
       if (targetPage === undefined) return undefined;
       const latest = targetPage.versions.at(-1);
-      if (latest === undefined) return undefined;
+      if (latest === undefined || !isSafeAttachmentFilename(latest.file.file)) return undefined;
 
       // 沿同项目血缘解析最终来源，确保跨多次续改/分叉后仍沿用最早来源
       const projectInstances = await scanTopLevelSessions(currentProject.key);

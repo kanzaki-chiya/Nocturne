@@ -264,6 +264,21 @@ describe("createRulePolicy（Phase 3 规则引擎）", () => {
     expect(r.decision.matchedRule?.rule?.label).not.toBe("本会话落盘目录");
   });
 
+  it("同项目面板放行只匹配解析后的版本文件路径", () => {
+    const pageFile = `${SESSIONS}\\attachments\\s2\\page.html`;
+    const policy = createRulePolicy({
+      workspaceRoot: WS,
+      caseSensitive: false,
+      presetContext: { sessionsDir: SESSIONS, sessionId: "s1", projectPageFiles: [pageFile] },
+    });
+    const action = (resolved: string | undefined) =>
+      policy.evaluate([subject({ target: pageFile, ...(resolved ? { resolved } : {}) })]).decision
+        .action;
+    expect(action(pageFile)).toBe("allow");
+    expect(action(`${SESSIONS}\\attachments\\s3\\other.html`)).toBe("ask");
+    expect(action(undefined)).toBe("ask");
+  });
+
   it("guarded 高风险 shell 保持 ask", () => {
     const r = policyFor("guarded").evaluate([subject({ kind: "shell", target: "sudo rm -rf /" })]);
     expect(r.decision.action).toBe("ask");
