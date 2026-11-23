@@ -91,6 +91,7 @@ interface ObservedSessionHandle {
 /**
  * 为只读观察态会话构造稳定的 `RpcSession` 包装器（ADR-0099）：
  * - `readAttachment` 在只读态走 `runtime.readSessionAttachment`，不唤醒会话、不取锁；
+ * - `onEvent` 直接挂到 `client.onEvent` 按 `sessionId` 过滤，同步返回取消函数且不唤醒会话；
  * - `close` / `interrupt` 在只读态为空操作；
  * - 其他任何会话方法首次调用时先 `ensureLive()` 按 `afterSeq` 无损升级，再透传给真实句柄；
  * - 升级前后 `session` 对象引用不变，避免控件和面板状态重置。
@@ -110,6 +111,13 @@ function createObservedSession(
         live !== undefined
           ? live.readAttachment(file)
           : client.runtime.readSessionAttachment({ sessionId: id, file });
+      continue;
+    }
+    if (key === "onEvent") {
+      wrapper[key] = (listener: (event: RuntimeEvent) => void) =>
+        client.onEvent((eventSessionId, event) => {
+          if (eventSessionId === id) listener(event);
+        });
       continue;
     }
     if (key === "close") {

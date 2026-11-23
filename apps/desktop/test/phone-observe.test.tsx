@@ -20,6 +20,7 @@ import {
   type SessionOpened,
 } from "@nocturne/rpc/client";
 import { createAttachmentImageSource } from "../src/attachment-images";
+import { ImageViewerProvider } from "../src/ImageViewer";
 import { SessionScreen } from "../src/web/SessionScreen";
 import { PhoneSessions } from "../src/web/sessions";
 
@@ -84,6 +85,7 @@ function makeDurableEvents(id: string): DurableEvent[] {
 
 function makeHarness(options?: {
   list?: { id: string; openHere?: boolean; locked?: boolean }[];
+  events?: DurableEvent[];
   extraAfterUpgrade?: DurableEvent[];
   observeUnsupported?: boolean;
 }) {
@@ -119,7 +121,7 @@ function makeHarness(options?: {
       if (options?.observeUnsupported) {
         throw new RpcError("method_not_found", "Method not found", -32601);
       }
-      const events = makeDurableEvents(input.sessionId);
+      const events = options?.events ?? makeDurableEvents(input.sessionId);
       const after = input.afterSeq ?? 0;
       for (const e of events) {
         if (e.seq > after) observer.onEvent(e);
@@ -404,6 +406,140 @@ describe("PhoneSessions 顶层会话只读观察与按需升级（ADR-0099）", 
     expect(entry.observed).toBe(true);
     expect(h.resumeSpy).not.toHaveBeenCalled();
     expect(h.sessionCalls).toEqual([]);
+    images.dispose();
+  });
+
+  it("只读观察态带内嵌页面的会话挂载与卸载不抛错且不唤醒会话（session.onEvent 同步返回取消函数）", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    const inlineEvents: DurableEvent[] = [
+      ...makeDurableEvents("hist-page").slice(0, 3),
+      {
+        type: "tool.started",
+        sessionId: "hist-page",
+        seq: 4,
+        turnId: "t1",
+        time: iso(4),
+        payload: {
+          callId: "c1",
+          name: "render_html",
+          input: { title: "性能看板", display: "inline", html: "<h1>OK</h1>" },
+          subjects: [],
+          permission: { action: "allow", source: "rule" },
+        },
+      } as DurableEvent,
+      {
+        type: "tool.completed",
+        sessionId: "hist-page",
+        seq: 5,
+        turnId: "t1",
+        time: iso(5),
+        payload: {
+          callId: "c1",
+          name: "render_html",
+          status: "ok",
+          modelContent: "rendered",
+          output: { title: "性能看板", file: "page-1.html", page: "page-1", version: 1, bytes: 32 },
+          files: [
+            {
+              type: "file",
+              file: "page-1.html",
+              bytes: 52,
+              sha256: "a".repeat(64),
+              label: "性能看板.html",
+              mimeType: "text/html",
+              source: "upload",
+              inline: { title: "性能看板", page: "page-1", version: 1, display: "inline" },
+            },
+          ],
+          durationMs: 5,
+        },
+      } as DurableEvent,
+      {
+        type: "turn.completed",
+        sessionId: "hist-page",
+        seq: 6,
+        turnId: "t1",
+        time: iso(6),
+        payload: { reason: "done", steps: 1, usage: { inputTokens: 10, outputTokens: 5 } },
+      } as DurableEvent,
+    ];
+    const h = makeHarness({
+      list: [{ id: "hist-page", openHere: false }],
+      events: inlineEvents,
+    });
+    h.readAttachmentSpy.mockResolvedValue({
+      data: new TextEncoder().encode("<!doctype html><html><body><h1>OK</h1></body></html>"),
+      mimeType: "text/html",
+      bytes: 52,
+    });
+    vi.spyOn(h.client.runtime, "describeSkills").mockResolvedValue({
+      skills: [],
+    } as unknown as Awaited<ReturnType<typeof h.client.runtime.describeSkills>>);
+
+    await h.sessions.connected(h.client);
+    const entry = await h.sessions.open("hist-page");
+    expect(entry.observed).toBe(true);
+
+    // 直接验证 onEvent 同步返回取消函数、按 sessionId 过滤且不触发 ensureLive
+    const received: RuntimeEvent[] = [];
+    let clientHandler: ((sessionId: string, event: RuntimeEvent) => void) | undefined;
+    const clientOff = vi.fn();
+    const onEventSpy = vi.spyOn(h.client, "onEvent").mockImplementation((handler) => {
+      clientHandler = handler;
+      return clientOff;
+    });
+    const off = entry.session.onEvent((event) => received.push(event));
+    expect(typeof off).toBe("function");
+    expect(h.resumeSpy).not.toHaveBeenCalled();
+    const sampleEvent = inlineEvents[0] as RuntimeEvent;
+    clientHandler?.("other-session", sampleEvent);
+    clientHandler?.("hist-page", sampleEvent);
+    expect(received).toEqual([sampleEvent]);
+    off();
+    expect(clientOff).toHaveBeenCalledTimes(1);
+    onEventSpy.mockRestore();
+
+    const images = createAttachmentImageSource();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const mounted = createRoot(container);
+    root = mounted;
+
+    await act(async () => {
+      mounted.render(
+        <ImageViewerProvider>
+          <SessionScreen
+            entry={entry}
+            sessions={h.sessions}
+            connected
+            images={images}
+            openUrl={vi.fn()}
+            onError={vi.fn()}
+            onChanged={vi.fn()}
+            onForked={vi.fn()}
+          />
+        </ImageViewerProvider>,
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(container.querySelector("iframe.inline-page-frame")).not.toBeNull();
+    });
+
+    // 卸载会话页（模拟返回会话列表）：usePageBridge 清理函数调用 unsubscribe() 不得抛 TypeError
+    expect(() => {
+      act(() => {
+        mounted.unmount();
+      });
+    }).not.toThrow();
+    root = undefined;
+    expect(entry.observed).toBe(true);
+    expect(h.resumeSpy).not.toHaveBeenCalled();
     images.dispose();
   });
 });
