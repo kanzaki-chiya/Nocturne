@@ -16,6 +16,8 @@ import {
 } from "../src/index.js";
 import { FakeProvider, type FakeScript, type ModelRequest } from "../src/provider/index.js";
 import {
+  decodeDurableEvent,
+  encodeDurableEvent,
   goalStatusLines,
   formatGoalDuration,
   parseWorkModeSlash,
@@ -149,6 +151,35 @@ describe("提交入口 workMode", () => {
     expect(entry.workMode?.name).toBe("grill-me");
     expect(userEntryText(entry)).toBe("做个登录页");
     await session.close();
+  });
+
+  it("/panel 将页面说明追加到用户消息并随持久事件编解码保留", async () => {
+    const provider = new FakeProvider({ scripts: [textScript("好了")] });
+    const runtime = await makeRuntime(provider);
+    const session = await runtime.createSession({ model: "fake/fake-1" });
+    try {
+      expect(parseWorkModeSlash("/panel")).toEqual({
+        kind: "usage",
+        name: "panel",
+        hint: "用法：/panel 要求",
+      });
+      const parsed = parseWorkModeSlash("/panel 做个看板");
+      if (parsed?.kind !== "submit") throw new Error("expected panel submit");
+      expect(await session.submit({ text: parsed.text, workMode: parsed.workMode })).toBe("done");
+      const [message] = users(session);
+      if (message === undefined) throw new Error("expected a user event");
+      const snapshot = message.payload.workMode;
+      expect(snapshot?.name).toBe("panel");
+      expect(snapshot?.body).toContain('Use render_html with display: "panel"');
+      expect(snapshot?.body).toContain("update it using its page id");
+      expect(snapshot?.body).toContain("Do not repeat the page content");
+      const block = `<work-mode name="panel">\n${snapshot?.body ?? ""}\n</work-mode>`;
+      expect(message.payload.content.at(-1)).toEqual({ type: "text", text: block });
+      expect(requestText(provider.requests[0])).toContain(block);
+      expect(decodeDurableEvent(encodeDurableEvent(message))).toEqual(message);
+    } finally {
+      await session.close();
+    }
   });
 
   it("任务为空、与技能或委派同时出现、名字未知：invalid_command 且不写 Turn", async () => {

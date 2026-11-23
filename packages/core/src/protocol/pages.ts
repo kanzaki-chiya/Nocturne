@@ -82,7 +82,6 @@ export function appendSessionPageFromFile(
       ? file.inline.version
       : existing.versions.length + 1;
   existing.title = title;
-  if (resolveInlinePageDisplay(file) === "panel") existing.display = "panel";
   existing.versions.push({ version, file, title, seq });
 }
 

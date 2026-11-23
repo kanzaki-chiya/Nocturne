@@ -775,6 +775,7 @@ describe("render_html 工具与内嵌页面标记", () => {
           page: "page-1",
           title: "每周提交看板（终版）",
           html: "<h1>终版看板</h1><p>八周平均: 20.3</p>",
+          display: "ignored for updates",
         },
         // 4. 新建内嵌页面（缺省 display = "inline"）-> page-2 v1
         { title: "架构对比表", html: "<table><tr><td>A</td></tr></table>" },
@@ -1056,7 +1057,7 @@ describe("render_html 工具与内嵌页面标记", () => {
       }
     });
 
-    it("更新写入面板版本，回退和分叉在只剩第一版时恢复内嵌", async () => {
+    it("更新沿用内嵌，回退和分叉只保留有效版本", async () => {
       const root = mkdtempSync(path.join(tmpdir(), "nct-render-rewind-"));
       roots.push(root);
       const sessionsDir = path.join(root, "sessions");
@@ -1087,7 +1088,7 @@ describe("render_html 工具与内嵌页面标记", () => {
                 type: "tool_call",
                 toolCallId: "rh-t2",
                 name: "render_html",
-                input: { page: "page-1", display: "inline", edits: [{ old: "v1", new: "v2" }] },
+                input: { page: "page-1", display: "panel", edits: [{ old: "v1", new: "v2" }] },
               },
               { type: "finish", reason: "tool_calls" },
             ];
@@ -1112,18 +1113,45 @@ describe("render_html 工具与内嵌页面标记", () => {
         await session.submit({ text: "改成 v2" });
         const events = session.durableEvents();
         const before = replaySessionView(events);
-        expect(before.pages[0]?.display).toBe("panel");
+        expect(before.pages[0]?.display).toBe("inline");
         expect(before.pages[0]?.versions.map((v) => v.file.inline?.display)).toEqual([
           "inline",
-          "panel",
+          "inline",
         ]);
         const completions = events.filter(
           (event): event is DurableEvent<"tool.completed"> =>
             event.type === "tool.completed" && event.payload.name === "render_html",
         );
         expect(completions[0]?.payload.modelContent).toContain("page-1 v1，内嵌");
-        expect(completions[1]?.payload.modelContent).toContain("page-1 v2，面板");
-        expect(completions[1]?.payload.output).toMatchObject({ display: "panel", version: 2 });
+        expect(completions[1]?.payload.modelContent).toContain("page-1 v2，内嵌");
+        expect(completions[1]?.payload.output).toMatchObject({ display: "inline", version: 2 });
+
+        // 0.62.0 的日志会将内嵌页的更新版本记成 panel。
+        const oldLog = events.map((event) => {
+          if (event.type === "session.created") {
+            return encodeDurableEvent({
+              ...event,
+              payload: { ...event.payload, nocturneVersion: "0.62.0" },
+            });
+          }
+          const file = event.type === "tool.completed" ? event.payload.files?.[0] : undefined;
+          if (event.type === "tool.completed" && file?.inline?.version === 2) {
+            return encodeDurableEvent({
+              ...event,
+              payload: {
+                ...event.payload,
+                files: [{ ...file, inline: { ...file.inline, display: "panel" } }],
+              },
+            });
+          }
+          return encodeDurableEvent(event);
+        });
+        const restored = replaySessionView(oldLog.map(decodeDurableEvent));
+        expect(restored.pages[0]?.display).toBe("inline");
+        expect(restored.pages[0]?.versions.map((v) => v.file.inline?.display)).toEqual([
+          "inline",
+          "panel",
+        ]);
 
         const userEvents = session
           .durableEvents()
