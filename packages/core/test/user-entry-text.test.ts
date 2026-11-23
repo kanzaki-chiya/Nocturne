@@ -57,4 +57,21 @@ describe("userEntryText", () => {
       }),
     ).toBe("/claude2 看 @a.ts");
   });
+
+  it("有页面评论时切掉末尾评论提示块", () => {
+    expect(
+      userEntryText({
+        ...base,
+        content: [text("顺便调小标题"), text("<page-comments>...</page-comments>")],
+        pageComments: {
+          page: "page-1",
+          version: 1,
+          title: "架构图",
+          comments: [
+            { path: "body > h1:nth-of-type(1)", text: "架构图", x: 10, y: 10, note: "小一点" },
+          ],
+        },
+      }),
+    ).toBe("顺便调小标题");
+  });
 });

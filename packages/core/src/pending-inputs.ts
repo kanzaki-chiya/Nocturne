@@ -63,6 +63,16 @@ export class PendingInputs {
       createdAt: entry.createdAt,
       paused: entry.paused,
       ...(entry.input.workMode !== undefined ? { workMode: entry.input.workMode.name } : {}),
+      ...(entry.input.pageComments !== undefined
+        ? {
+            pageComments: {
+              page: entry.input.pageComments.page,
+              version: entry.input.pageComments.version,
+              title: entry.input.pageComments.title,
+              count: entry.input.pageComments.comments.length,
+            },
+          }
+        : {}),
     }));
     return { items, paused: items.length > 0 && items.every((item) => item.paused) };
   }

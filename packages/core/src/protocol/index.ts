@@ -42,4 +42,5 @@ export * from "./ensemble.js";
 export * from "./suite.js";
 export * from "./memory.js";
 export * from "./pages.js";
+export * from "./page-comments.js";
 export * from "./shell-pattern.js";

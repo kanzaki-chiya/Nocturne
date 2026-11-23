@@ -2,6 +2,7 @@ import type { BackgroundShellResult, SubagentResult } from "./events.js";
 import type { SkillSnapshot } from "./skills.js";
 import type { EnsemblePostDelivery } from "./ensemble.js";
 import type { SuiteReportDelivery } from "./suite.js";
+import type { PageCommentsSnapshot, PageCommentsSummary } from "./page-comments.js";
 /**
  * 公共数据类型（docs/protocols/events.md 第 4 节）。
  * 只包含类型，不包含任何行为或 I/O。
@@ -588,6 +589,8 @@ export type HistoryEntry =
       ensemble?: EnsemblePostDelivery | undefined;
       ensembleQuietReminder?: true | undefined;
       suiteReport?: SuiteReportDelivery | undefined;
+      /** 面板页面评论快照（ADR-0113）；旧日志无此字段 */
+      pageComments?: PageCommentsSnapshot | undefined;
     }
   | {
       kind: "assistant";
@@ -779,6 +782,8 @@ export interface PendingInputItem {
   paused: boolean;
   /** 执行方式名（ADR-0076）：界面在文本前显示 `/名字` */
   workMode?: string | undefined;
+  /** 面板页面评论摘要（ADR-0113）：界面在待发条目显示标签 */
+  pageComments?: PageCommentsSummary | undefined;
 }
 
 /** 待发输入的完整快照（`input.pending` payload 与 `pendingInputs()` 的返回） */

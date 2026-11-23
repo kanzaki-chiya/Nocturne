@@ -25,6 +25,7 @@ import type {
   FinishReason,
   ImageAttachment,
   LoopGuardConfig,
+  PageCommentsSnapshot,
   PermissionReviewedPayload,
   RuntimeStatus,
   SkillSnapshot,
@@ -110,6 +111,7 @@ export async function runTurn(
   ensemble?: EnsemblePostDelivery,
   ensembleQuietReminder?: true,
   suiteReport?: SuiteReportDelivery,
+  pageComments?: PageCommentsSnapshot,
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -182,6 +184,7 @@ export async function runTurn(
         ...(item.ensembleQuietReminder === true ? { ensembleQuietReminder: true as const } : {}),
         ...(item.suiteReport !== undefined ? { suiteReport: item.suiteReport } : {}),
         ...(item.workMode !== undefined ? { workMode: item.workMode } : {}),
+        ...(item.pageComments !== undefined ? { pageComments: item.pageComments } : {}),
         steer: true,
       },
       { turnId },
@@ -402,6 +405,7 @@ export async function runTurn(
         ...(skill ? { skill } : {}),
         ...(delegate ? { delegate } : {}),
         ...(workMode ? { workMode } : {}),
+        ...(pageComments ? { pageComments } : {}),
       },
       { turnId },
     );

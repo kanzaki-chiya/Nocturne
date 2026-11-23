@@ -176,6 +176,21 @@ const fileRefSchema = z.object({
   truncated: z.boolean(),
 });
 
+const pageCommentItemSchema = z.object({
+  path: z.string(),
+  text: z.string(),
+  x: z.number(),
+  y: z.number(),
+  note: z.string(),
+});
+
+const pageCommentsSchema = z.object({
+  page: z.string().min(1),
+  version: z.number().int().positive(),
+  title: z.string(),
+  comments: z.array(pageCommentItemSchema).min(1),
+});
+
 // ── payload schema ─────────────────────────────────────────
 
 const payloadSchemas = {
@@ -389,6 +404,8 @@ const payloadSchemas = {
     workMode: z
       .object({ name: z.string(), body: z.string(), source: z.string().optional() })
       .optional(),
+    // ADR-0113：面板页面评论快照；兼容扩展，旧版本按普通用户消息读取
+    pageComments: pageCommentsSchema.optional(),
   }),
   "message.assistant": z.object({
     messageId: z.string(),

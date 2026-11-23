@@ -230,6 +230,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
           ...(p.ensemble !== undefined ? { ensemble: p.ensemble } : {}),
           ...(p.ensembleQuietReminder === true ? { ensembleQuietReminder: true as const } : {}),
           ...(p.suiteReport !== undefined ? { suiteReport: p.suiteReport } : {}),
+          ...(p.pageComments !== undefined ? { pageComments: p.pageComments } : {}),
           // ADR-0023：旧日志无 attachments 字段——有值才带上，缺省不落进历史
           ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
           ...(p.files !== undefined ? { files: p.files } : {}),

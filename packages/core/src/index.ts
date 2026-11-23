@@ -324,10 +324,14 @@ import { createApplySubagentChangesTool } from "./tools/builtin/apply-subagent-c
 import { createUpdateGoalTool } from "./tools/builtin/update-goal.js";
 import {
   effectiveEvents,
+  formatPageCommentsBlock,
   isWorkModeName,
+  PAGE_COMMENT_TEXT_MAX_CHARS,
   workModeCommandName,
   workModeOrigins,
   type GoalStatus,
+  type PageCommentsInput,
+  type PageCommentsSnapshot,
   type PlanConfig,
   type WorkModeName,
   type WorkModeSnapshot,
@@ -601,6 +605,8 @@ export interface SubmitInput {
   delegate?: AgentDelegation | undefined;
   /** 执行方式（ADR-0076）：与 skill、delegate 互斥，正文为任务，不得为空 */
   workMode?: WorkModeName | undefined;
+  /** 面板页面评论（ADR-0113）：随用户消息持久化并追加英文评论块给模型 */
+  pageComments?: PageCommentsInput | undefined;
 }
 
 export type { ReadAttachmentResult };
@@ -2163,7 +2169,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // @ 引用的文件/目录快照附在消息尾部；审查只读取用户亲自输入的部分。
         const snapshots =
           (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
-          (entry.skill ? 1 : 0);
+          (entry.skill ? 1 : 0) +
+          (entry.pageComments ? 1 : 0);
         return [
           entry.content
             .slice(0, entry.content.length - snapshots)
@@ -4003,16 +4010,82 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           );
         delegation = { agent: agent.name, task: input.delegate.task };
       }
-      const attachmentError = validateAttachmentInputs(input.attachments ?? []);
+      let pageComments: PageCommentsSnapshot | undefined;
+      const commentScreenshotInputs: NonNullable<SubmitInput["attachments"]> = [];
+      const commentScreenshotIndices = new Set<number>();
+      if (input.pageComments !== undefined) {
+        const raw = input.pageComments;
+        if (
+          typeof raw.page !== "string" ||
+          raw.page.trim() === "" ||
+          !Number.isInteger(raw.version) ||
+          raw.version < 1 ||
+          typeof raw.title !== "string" ||
+          !Array.isArray(raw.comments) ||
+          raw.comments.length === 0
+        ) {
+          throw new RuntimeCommandError("invalid_command", "pageComments 参数不合法");
+        }
+        const items = raw.comments.map((item, idx) => {
+          if (
+            typeof item.path !== "string" ||
+            typeof item.text !== "string" ||
+            typeof item.x !== "number" ||
+            !Number.isFinite(item.x) ||
+            typeof item.y !== "number" ||
+            !Number.isFinite(item.y) ||
+            typeof item.note !== "string" ||
+            item.note.trim() === ""
+          ) {
+            throw new RuntimeCommandError(
+              "invalid_command",
+              `pageComments.comments[${idx}] 不合法`,
+            );
+          }
+          const trimmedText = item.text.trim().slice(0, PAGE_COMMENT_TEXT_MAX_CHARS);
+          const trimmedNote = item.note.trim();
+          // ADR-0113：无可见文字元素且当前模型支持图片输入时，附带点击处周围截图
+          if (
+            item.screenshot !== undefined &&
+            trimmedText === "" &&
+            model.model.capabilities.imageInput
+          ) {
+            commentScreenshotIndices.add(idx);
+            commentScreenshotInputs.push({
+              data: item.screenshot.data,
+              mimeType: item.screenshot.mimeType,
+              label:
+                item.screenshot.label ??
+                `page-comment-${raw.page.trim()}-v${raw.version}-${idx + 1}.png`,
+              source: "paste",
+            });
+          }
+          return {
+            path: item.path,
+            text: trimmedText,
+            x: Math.round(item.x),
+            y: Math.round(item.y),
+            note: trimmedNote,
+          };
+        });
+        pageComments = {
+          page: raw.page.trim(),
+          version: raw.version,
+          title: raw.title,
+          comments: items,
+        };
+      }
+      const combinedAttachmentInputs = [...(input.attachments ?? []), ...commentScreenshotInputs];
+      const attachmentError = validateAttachmentInputs(combinedAttachmentInputs);
       if (attachmentError) throw new RuntimeCommandError("invalid_command", attachmentError);
-      if (input.attachments?.length && !execEnv.attachments)
+      if (combinedAttachmentInputs.length && !execEnv.attachments)
         throw new RuntimeCommandError("invalid_command", "附件存储不可用");
       const saveAttachments = async () => {
         if (!execEnv.attachments) return { attachments: [], files: [] };
         try {
           return await saveInputAttachments(
             execEnv.attachments,
-            input.attachments ?? [],
+            combinedAttachmentInputs,
             false,
             effectiveSignal,
           );
@@ -4119,6 +4192,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         };
         appended.push({ type: "text", text: workModeBlock(workMode.name, workMode.body) });
       }
+      if (pageComments !== undefined) {
+        appended.push({
+          type: "text",
+          text: formatPageCommentsBlock(pageComments, commentScreenshotIndices),
+        });
+      }
       const prepared: PreparedInput = {
         content,
         appended,
@@ -4129,6 +4208,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ...(skillInvocation !== undefined ? { skillInvocation } : {}),
         ...(delegation !== undefined ? { delegate: delegation } : {}),
         ...(workMode !== undefined ? { workMode } : {}),
+        ...(pageComments !== undefined ? { pageComments } : {}),
       };
       if (workMode !== undefined) workModeStarts.add(prepared);
       return prepared;
@@ -4780,6 +4860,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.ensemble,
             prepared.ensembleQuietReminder,
             prepared.suiteReport,
+            prepared.pageComments,
           );
           if (ensembleTurnStarting) {
             ensembleTurnStarting = false;

@@ -691,6 +691,30 @@ function wireSubmitInput(input: SubmitInput): RpcParams<"session.submit"> {
     ...(a.label !== undefined ? { label: a.label } : {}),
     ...(a.source !== undefined ? { source: a.source } : {}),
   }));
+  const pageComments =
+    input.pageComments === undefined
+      ? undefined
+      : {
+          page: input.pageComments.page,
+          version: input.pageComments.version,
+          title: input.pageComments.title,
+          comments: input.pageComments.comments.map((c) => ({
+            path: c.path,
+            text: c.text,
+            x: c.x,
+            y: c.y,
+            note: c.note,
+            ...(c.screenshot !== undefined
+              ? {
+                  screenshot: {
+                    data: encodeBase64(c.screenshot.data),
+                    mimeType: c.screenshot.mimeType,
+                    ...(c.screenshot.label !== undefined ? { label: c.screenshot.label } : {}),
+                  },
+                }
+              : {}),
+          })),
+        };
   return {
     ...(input.skill !== undefined ? { skill: input.skill } : {}),
     ...(input.delegate !== undefined ? { delegate: input.delegate } : {}),
@@ -698,6 +722,7 @@ function wireSubmitInput(input: SubmitInput): RpcParams<"session.submit"> {
     ...(input.text !== undefined ? { text: input.text } : {}),
     ...(input.content !== undefined ? { content: input.content } : {}),
     ...(attachments !== undefined ? { attachments } : {}),
+    ...(pageComments !== undefined ? { pageComments } : {}),
   } as RpcParams<"session.submit">;
 }
 

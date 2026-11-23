@@ -24,6 +24,7 @@ import type {
   SuiteThreadUpdatedPayload,
 } from "./suite.js";
 import type { GoalConfig, PlanConfig, WorkModeSnapshot } from "./work-modes.js";
+import type { PageCommentsSnapshot } from "./page-comments.js";
 import type {
   AgentDelegation,
   AssistantTiming,
@@ -171,6 +172,11 @@ export interface MessageUserPayload {
    * 兼容扩展，旧版本按普通用户消息读取，不提升 formatVersion。
    */
   workMode?: WorkModeSnapshot | undefined;
+  /**
+   * 面板页面评论（ADR-0113）：记录页面 id、版本号、标题与评论列表，content 末尾同时含 `<page-comments>` 英文块。
+   * 兼容扩展，旧版本按普通用户消息读取，不提升 formatVersion。
+   */
+  pageComments?: PageCommentsSnapshot | undefined;
 }
 
 export interface AttachmentDescribedPayload {

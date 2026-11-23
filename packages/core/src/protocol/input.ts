@@ -15,6 +15,7 @@ import type {
 } from "./types.js";
 import type { SkillInvocation, SkillSnapshot } from "./skills.js";
 import type { WorkModeSnapshot } from "./work-modes.js";
+import type { PageCommentsSnapshot } from "./page-comments.js";
 
 export interface PreparedInput {
   subagent?: SubagentResult | undefined;
@@ -37,6 +38,8 @@ export interface PreparedInput {
   delegate?: AgentDelegation | undefined;
   /** 执行方式快照（ADR-0076）；说明块在 appended 里 */
   workMode?: WorkModeSnapshot | undefined;
+  /** 面板页面评论快照（ADR-0113）；英文提示块在 appended 里 */
+  pageComments?: PageCommentsSnapshot | undefined;
 }
 
 /** `message.user` 的 content：用户正文 + 追加的快照块（与普通提交同序） */

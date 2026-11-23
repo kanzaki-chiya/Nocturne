@@ -160,13 +160,16 @@ export async function rewindTargets(
     }
     const untracked = countUntrackedCalls(events.filter((e) => e.seq > event.seq));
     const workMode = event.payload.workMode;
+    const pageComments = event.payload.pageComments;
     const typed = event.payload.content
       .slice(
         0,
         event.payload.content.length -
           (event.payload.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) -
           // ADR-0076：执行方式说明块在末尾，不回填
-          (workMode ? 1 : 0),
+          (workMode ? 1 : 0) -
+          // ADR-0113：页面评论提示块在末尾，不回填
+          (pageComments ? 1 : 0),
       )
       .filter((b) => b.type === "text")
       .map((b) => b.text)
@@ -180,7 +183,10 @@ export async function rewindTargets(
             .split("\n")
             .find((line) => line.trim() !== "")
             ?.trim() ?? shown)
-        : (firstUserText(event.payload) ?? ""),
+        : (firstUserText(event.payload) ??
+          (pageComments
+            ? `${pageComments.title} v${pageComments.version} · ${pageComments.comments.length}`
+            : "")),
       time: event.time,
       text: workMode === undefined ? typed : isRuntimeWorkMode(workMode) ? "" : shown,
       hasImages: (event.payload.attachments?.length ?? 0) > 0,

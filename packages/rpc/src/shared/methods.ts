@@ -230,6 +230,22 @@ export interface SessionParams {
   sessionId: string;
 }
 
+export interface WirePageComment {
+  path: string;
+  text: string;
+  x: number;
+  y: number;
+  note: string;
+  screenshot?: { data: string; mimeType: string; label?: string };
+}
+
+export interface WirePageComments {
+  page: string;
+  version: number;
+  title: string;
+  comments: WirePageComment[];
+}
+
 /** 提交内容的线上形状：`session.submit` 与 `session.enqueueInput` 共用 */
 export interface WireSubmitFields {
   skill?: SkillInvocation;
@@ -239,6 +255,8 @@ export interface WireSubmitFields {
   text?: string;
   content?: ContentBlock[];
   attachments?: WireAttachment[];
+  /** 面板页面评论（ADR-0113） */
+  pageComments?: WirePageComments;
 }
 
 /**

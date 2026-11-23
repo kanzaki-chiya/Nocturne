@@ -2743,8 +2743,7 @@ class Connection implements HubPeer {
         const input = parseSubmitInput(p);
         if (
           this.origin === "remote" &&
-          (input.attachments ?? []).reduce((sum, a) => sum + a.data.byteLength, 0) >
-            remoteAttachmentLimit(this.remoteLimit)
+          submitAttachmentBytes(input) > remoteAttachmentLimit(this.remoteLimit)
         )
           throw new RpcProtocolError("attachment_too_large", "附件过大");
         return await this.hub.operate(session, () => session.submit(input));
@@ -2757,8 +2756,7 @@ class Connection implements HubPeer {
         const input = parseSubmitInput(p);
         if (
           this.origin === "remote" &&
-          (input.attachments ?? []).reduce((sum, a) => sum + a.data.byteLength, 0) >
-            remoteAttachmentLimit(this.remoteLimit)
+          submitAttachmentBytes(input) > remoteAttachmentLimit(this.remoteLimit)
         )
           throw new RpcProtocolError("attachment_too_large", "附件过大");
         return await this.hub.operate(session, () => session.enqueueInput(mode, input));
@@ -3201,6 +3199,78 @@ function parseAgentProcessInfo(raw: unknown): AgentProcessInfo | undefined {
   };
 }
 
+function submitAttachmentBytes(input: SubmitInput): number {
+  const direct = (input.attachments ?? []).reduce((sum, a) => sum + a.data.byteLength, 0);
+  const screenshots = (input.pageComments?.comments ?? []).reduce(
+    (sum, c) => sum + (c.screenshot?.data.byteLength ?? 0),
+    0,
+  );
+  return direct + screenshots;
+}
+
+function parsePageComments(value: unknown): NonNullable<SubmitInput["pageComments"]> {
+  const o = asParams(value);
+  const page = reqString(o, "page");
+  const version = o.version;
+  if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
+    throw new InvalidParamsError("pageComments.version 必须是正整数");
+  }
+  const title = o.title;
+  if (typeof title !== "string") {
+    throw new InvalidParamsError("pageComments.title 必须是字符串");
+  }
+  if (!Array.isArray(o.comments) || o.comments.length === 0) {
+    throw new InvalidParamsError("pageComments.comments 必须是非空数组");
+  }
+  const comments = o.comments.map((raw: unknown, i) => {
+    const c = asParams(raw);
+    if (typeof c.path !== "string") {
+      throw new InvalidParamsError(`pageComments.comments[${i}].path 必须是字符串`);
+    }
+    if (typeof c.text !== "string") {
+      throw new InvalidParamsError(`pageComments.comments[${i}].text 必须是字符串`);
+    }
+    if (typeof c.x !== "number" || !Number.isFinite(c.x)) {
+      throw new InvalidParamsError(`pageComments.comments[${i}].x 必须是有限数字`);
+    }
+    if (typeof c.y !== "number" || !Number.isFinite(c.y)) {
+      throw new InvalidParamsError(`pageComments.comments[${i}].y 必须是有限数字`);
+    }
+    if (typeof c.note !== "string") {
+      throw new InvalidParamsError(`pageComments.comments[${i}].note 必须是字符串`);
+    }
+    let screenshot: { data: Uint8Array; mimeType: string; label?: string | undefined } | undefined;
+    if (c.screenshot !== undefined && c.screenshot !== null) {
+      const s = asParams(c.screenshot);
+      if (typeof s.data !== "string") {
+        throw new InvalidParamsError(`pageComments.comments[${i}].screenshot.data 必须是 base64`);
+      }
+      if (typeof s.mimeType !== "string") {
+        throw new InvalidParamsError(
+          `pageComments.comments[${i}].screenshot.mimeType 必须是字符串`,
+        );
+      }
+      if (s.label !== undefined && typeof s.label !== "string") {
+        throw new InvalidParamsError(`pageComments.comments[${i}].screenshot.label 必须是字符串`);
+      }
+      screenshot = {
+        data: decodeBase64(s.data, `pageComments.comments[${i}].screenshot.data`),
+        mimeType: s.mimeType,
+        ...(s.label !== undefined ? { label: s.label } : {}),
+      };
+    }
+    return {
+      path: c.path,
+      text: c.text,
+      x: c.x,
+      y: c.y,
+      note: c.note,
+      ...(screenshot !== undefined ? { screenshot } : {}),
+    };
+  });
+  return { page, version, title, comments };
+}
+
 /** `session.submit` / `session.enqueueInput` 共用的提交内容解析（ADR-0070） */
 function parseSubmitInput(p: {
   skill?: unknown;
@@ -3209,6 +3279,7 @@ function parseSubmitInput(p: {
   text?: unknown;
   content?: unknown;
   attachments?: unknown;
+  pageComments?: unknown;
 }): SubmitInput {
   const input: SubmitInput = {};
   if (p.skill !== undefined) {
@@ -3236,6 +3307,9 @@ function parseSubmitInput(p: {
   }
   if (p.attachments !== undefined && p.attachments !== null) {
     input.attachments = parseAttachments(p.attachments);
+  }
+  if (p.pageComments !== undefined && p.pageComments !== null) {
+    input.pageComments = parsePageComments(p.pageComments);
   }
   return input;
 }
