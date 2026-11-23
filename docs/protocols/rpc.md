@@ -115,6 +115,8 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 
 `submit` / `enqueueInput` 的 `pageComments.comments[]` 可传原评论 `{ path, text, x, y, note, screenshot? }` 或续回 `{ replyTo, note }`。Core 写入用户消息时分配 `id`。待发快照含去掉截图数据后的 `items`，用于显示排队中的讨论。详见 [ADR-0115](../decisions/ADR-0115-page-comment-threads.md)。
 
+`submit` / `enqueueInput` 的 `quotes` 为可选 `{ text: string, seq?: number }[]`（[ADR-0116](../decisions/ADR-0116-quote-reply.md)）：`text` 非空（Core 去首尾空白），`seq` 可选正整数（来源消息持久事件序号）；允许正文为空提交，Core 在 `content` 最前面生成 `> ` 引用文本块，待发快照 `PendingInputItem.quotes` 与回退目标 `RewindTarget.quotes` 原样保留。
+
 `submit.delegate` 为 `{ agent: string, task: string }`，与 `skill` 互斥。RPC 保留任务原文，Core 校验 agent 已启用并生成明确的 `task.agent` 委派指令，将委派快照写入 `message.user`；它不绕过入口权限确认，也不是直接启动外部进程。见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)。
 
 `submit.workMode` / `enqueueInput.workMode` 为执行方式名（[ADR-0076](../decisions/ADR-0076-work-modes.md)、[ADR-0089](../decisions/ADR-0089-ensemble.md)，含 `"ensemble"`），与 `skill`、`delegate` 互斥。不是已知名字时 RPC 报 `invalid_params`；其余校验（正文非空、不能作为插话、子会话不可用、环境不支持后台子代理或已有活动合奏）在 Core，报 `invalid_command`。合奏存续期间，本机与远程客户端可通过 `session.open` 打开未移除成员的 `childSessionId`，直接对其调用 `session.submit`、`session.enqueueInput`、`session.respondPermission`、`session.respondQuestion` 与 `session.interrupt`（复用 Runtime 托管的同一常驻子会话实例；直接 `submit` 给成员的消息不上指挥（Maestro，`@maestro`）留言板，成员被移除或合奏结束后拒绝新的提交）。
