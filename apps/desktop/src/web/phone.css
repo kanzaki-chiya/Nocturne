@@ -639,6 +639,11 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.phone-card .has-skill textarea,
+.phone-input-mirror {
+  /* 两层预留相同的滚动条宽度，出现滚动条时续行仍与原生光标对齐。 */
+  scrollbar-gutter: stable;
+}
 .phone-input-mirror {
   position: absolute;
   inset: 0;

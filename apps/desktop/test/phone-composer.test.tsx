@@ -528,11 +528,15 @@ const pdf: SkillOverview = {
   size: 120,
 };
 
-it("手机斜杠菜单的命令和技能说明都左对齐并单行省略", async () => {
-  const description = "检查手机输入框里的文字换行和光标位置。".repeat(5);
+function applyPhoneStyles() {
   const style = document.createElement("style");
   style.textContent = readFileSync(join(import.meta.dirname, "../src/web/phone.css"), "utf8");
   container.className = "phone";
+  container.prepend(style);
+}
+
+it("手机斜杠菜单的命令和技能说明都左对齐并单行省略", async () => {
+  const description = "检查手机输入框里的文字换行和光标位置。".repeat(5);
   await act(() =>
     root?.render(
       <PhoneComposer
@@ -546,7 +550,7 @@ it("手机斜杠菜单的命令和技能说明都左对齐并单行省略", asyn
       />,
     ),
   );
-  container.prepend(style);
+  applyPhoneStyles();
   const field = container.querySelector("textarea");
   if (!field) throw new Error("缺少输入框");
   act(() => fireEvent.change(field, { target: { value: "/" } }));
@@ -608,6 +612,39 @@ it("手机插件补全、退格、输入历史和分叉回填共用技能标签�
     skill: { name: "pdf", arguments: "分叉" },
     attachments: [],
   });
+});
+
+it("手机技能草稿的镜像与输入框共享滚动条留白和滚动位置", async () => {
+  const text = "中文 English 混排的一行。\n".repeat(12);
+  await act(() =>
+    root?.render(
+      <PhoneComposer
+        variant="session"
+        running={false}
+        controls={undefined}
+        onSubmit={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSlash={vi.fn()}
+        skills={[pdf]}
+        fill={{ text: `/pdf ${text}`, seq: 1 }}
+      />,
+    ),
+  );
+  applyPhoneStyles();
+  const field = container.querySelector("textarea");
+  const mirror = container.querySelector<HTMLElement>(".phone-input-mirror");
+  if (!field || !mirror) throw new Error("缺少技能草稿输入框或镜像");
+  expect(field.value).toBe(text);
+  expect(mirror.textContent).toContain(text);
+  for (const layer of [field, mirror]) {
+    expect(getComputedStyle(layer).getPropertyValue("scrollbar-gutter")).toBe("stable");
+  }
+  field.scrollTop = 84;
+  field.setSelectionRange(14, 14);
+  act(() => fireEvent.scroll(field));
+  expect(mirror.scrollTop).toBe(84);
+  expect(field.selectionStart).toBe(14);
+  expect(field.selectionEnd).toBe(14);
 });
 
 it("手机手输计划等待组字结束再在工具栏显示执行方式标签", async () => {
