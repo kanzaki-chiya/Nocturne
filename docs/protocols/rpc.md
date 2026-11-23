@@ -42,6 +42,8 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `renameSession` | `{ sessionId, title }` → `null`；调用 Core 的 `Runtime.renameSession`，成功后通知会话列表变化；参数必须为字符串，标题内容的校验由 Core 负责 |
 | `archiveSession` / `unarchiveSession` | `{ sessionId }` → `null`；仅本机连接可调用。调用 Core 的同名方法，成功后发送 `runtime.sessionsChanged`；`archiveSession` 在忙状态时返回 `session_busy`（`unarchiveSession` 不判断忙状态、不取锁，旁路不存在也视为成功），子会话均返回 `invalid_command`（ADR-0080）。不写会话事件 |
 | `usageStats` | `{ days?: number }`（正整数，缺省全部）→ protocol 的 `UsageStats`（含按模型的 `requests`、`latency`、`performance`、`cacheSavings`、首末使用时间，范围内逐日的 `requests` 与 `models` 拆分，以及 `performanceGranularity`）；只读，不打开会话或取锁，见 [usage.md](../architecture/usage.md) |
+| `listPages` | `{ projectKey?: string, workspaceRoot?: string }` → `PageLibraryListResult`（`{ projectKey, projectName, isDefault, items: PageLibraryItem[] }`）；按共用项目键列出顶层会话（含已归档）中的面板页面，按来源 `origin` 合并为最近副本、按最近更新倒序；不含本机绝对路径，只读、不取锁，见 [ADR-0114](../decisions/ADR-0114-project-page-library.md) |
+| `listPageProjects` | `{ workspaceRoot?: string }` → `PageLibraryProjectsResult`（`{ currentProjectKey, projects: PageLibraryProject[] }`）；列出有面板页面的项目（含默认工作区「对话」）以及 `workspaceRoot` 对应的当前项目键；不含本机绝对路径，只读、不取锁 |
 | `listModels` / `defaultModel` / `listRecentModels` | 模型列表 / `ModelRef \| null` / `ModelRef[]`；前两者可带 `workspaceRoot`；`listModels` 另可带 `includeDisabled`（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)：true 时含停用模型并带 `disabled`，默认滤除；停用模型也带 `unavailable`） |
 | `describeSettings` / `updateSettings` | `SettingItem[]`；均可带 `workspaceRoot`，`updateSettings { patch, reviewerKey? }`；`describeSettings` 的模型设置项可带 `disabled: "provider" \| "model"`，由注册表解析派生，供设置值显示停用状态，模型选择列表仍用默认 `listModels()` |
 | `listShells` | `{ workspaceRoot? }` → 全部已知种类的 DetectedShell[]（含不可用项） |
@@ -540,6 +542,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 |---|---|
 | `initialize` | 仅连接握手，不创建 Runtime |
 | `runtime.listSessions`、`runtime.usageStats` | 允许（只读）；`listSessions` 的 `cwd` 只是过滤条件，远程即使传 `includeArchived: true` 仍强制排除归档 |
+| `runtime.listPages`、`runtime.listPageProjects` | 允许（只读，[ADR-0114](../decisions/ADR-0114-project-page-library.md)）：返回面板页面与项目摘要（不含本机绝对路径）；不加入外部 agent 白名单 |
 | `runtime.listModels`、`runtime.defaultModel`、`runtime.listRecentModels`、`runtime.describeSettings`、`runtime.describeModelRoles`、`runtime.listShells` | 允许（只读），`workspaceRoot` 不受限（含读取 `appearance.themePreset` 与 `appearance.customThemes`，ADR-0093、ADR-0094） |
 | `skills.describeSkills` | 允许（只读），`workspaceRoot` 必填，并按 `runtime.createSession` 的目录存在性和工作区信任规则校验。用于手机新建会话和查看历史会话时的技能补全 |
 | `runtime.createSession` | 允许除 `branch` 外的选项（携带 `branch` 报 `remote_not_allowed`，ADR-0085）。显式 `cwd` / `workspaceRoot` 须是已存在的绝对路径文件夹，否则 `workspace_not_found`；工作区根有项目配置但未信任、且不是非子代理会话（包含已归档会话）用过的 cwd 或工作区根（真实路径匹配）时报 `workspace_untrusted`，信任只能在电脑上决定。`text` 不触发 Turn |
@@ -605,6 +608,8 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 | `RuntimeSession.readAppResource(input)` | `session.readAppResource({ sessionId, pluginId, serverId, uri })` | `McpAppResourceResult`（仅本机） |
 | `RuntimeSession.callAppTool(input)` | `session.callAppTool({ sessionId, pluginId, serverId, tool, arguments? })` | `McpAppToolCallResult`（仅本机） |
 | `RuntimeSession.listAppSurfaces()` | `session.listAppSurfaces({ sessionId })` | `SessionAppSurface[]`（仅本机） |
+| `Runtime.listPages(input?)` | `runtime.listPages({ projectKey?, workspaceRoot? })` | `PageLibraryListResult` |
+| `Runtime.listPageProjects(input?)` | `runtime.listPageProjects({ workspaceRoot? })` | `PageLibraryProjectsResult` |
 
 ## 9. 服务端进程
 

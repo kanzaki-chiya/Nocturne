@@ -386,7 +386,7 @@ function allPendingPermissions(
 
 `session.rewound` 含对话时，归约器使用与 Core 折叠同源的 `effectiveEvents` 重建条目、清单、笔记、页面列表（`pages`）、附件描述和工具簿记，移除目标用户消息及后续事件（其 turn.started 同时移除）。当前配置、标题、累计用量与 Turn 计数保留。通知是可重放的 `NoticeEntry(subtype="rewound")`，显示目标首行、成功还原数、失败数；分叉追加的回退（`fork: true`）只截断，不生成通知；仅还原文件时保留已有条目并追加通知。`checkpoint.file` 不创建条目。在线与重放遵循相同规则，见 [ADR-0041](../decisions/ADR-0041-checkpoints-rewind-fork.md)。
 
-`SessionView.pages` 的每项形状为 `SessionPage`（`{ page, title, display, versions }`，其中 `title` 为最新一版标题，`display` 为有效版本第一版的显示方式；`versions` 每项为 `{ version, file, title, seq }`，定义于 `packages/core/src/protocol/pages.ts`）。`inline` 不含 `page` 字段的旧会话附件各自投影为单版本、`display: "inline"` 的页面，页面 id 为 `legacy-<file>`，不与新建页面 `page-<n>` 冲突（[ADR-0109](../decisions/ADR-0109-page-versions.md)）。
+`SessionView.pages` 的每项形状为 `SessionPage`（`{ page, title, display, origin?, versions }`，其中 `title` 为最新一版标题，`display` 为有效版本第一版的显示方式，`origin` 为页面来源 `{ sessionId, page }`，用于跨会话项目页面库合并同源副本，`versions` 每项为 `{ version, file, title, seq }`，定义于 `packages/core/src/protocol/pages.ts`）。`origin` 在派生时计算：本会话新建页面的来源为自身；分叉复制的页面沿用源会话对应页面来源；经 `render_html` 跨会话接着改（`inline.from`）生成的页面沿用被指页面来源（[ADR-0114](../decisions/ADR-0114-project-page-library.md) §3）。`inline` 不含 `page` 字段的旧会话附件各自投影为单版本、`display: "inline"` 的页面，页面 id 为 `legacy-<file>`，不与新建页面 `page-<n>` 冲突（[ADR-0109](../decisions/ADR-0109-page-versions.md)）。
 
 回退目标只取非插话的 `message.user`（`steer !== true`）：回退到一条插话会把 Turn 截成半截（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §7）。`rewindTargets()` 不列插话，`rewind` / `forkSession` 指向插话一律返回 `invalid_command`。
 

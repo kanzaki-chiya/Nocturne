@@ -121,6 +121,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0111](ADR-0111-page-storage-and-model.md) | 页面存数据与调用模型 | 已接受 |
 | [ADR-0112](ADR-0112-page-cdn.md) | 回复页面从 cdnjs 加载资源 | 已接受 |
 | [ADR-0113](ADR-0113-page-comments.md) | 面板页面上直接评论（沙箱空壳评论层、圆点与弹窗、无文字元素局部截图、`message.user.pageComments` 与英文 `<page-comments>` 提示块） | 已接受 |
+| [ADR-0114](ADR-0114-project-page-library.md) | 项目页面库（共用项目键、来源派生 `origin`、跨会话聚合与旁路缓存、桌面侧栏「页面」入口、`list_pages` 与 `render_html` 跨会话接着改、同项目面板页面只读放行） | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
