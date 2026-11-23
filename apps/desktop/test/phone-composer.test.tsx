@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act } from "react";
 import { fireEvent } from "@testing-library/react";
 import type { SkillOverview } from "@nocturne/core/protocol";
@@ -501,31 +503,66 @@ it("空闲时发送键是普通发送，不带 mode", async () => {
   expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ text: "普通发送" }));
 });
 
+const pdf: SkillOverview = {
+  name: "pdf",
+  source: "plugin",
+  plugin: "pdf@builtin",
+  pluginDisplayName: "PDF 文档",
+  layer: "user",
+  entryPath: "skills/pdf/SKILL.md",
+  realPath: "skills/pdf/SKILL.md",
+  description: "处理 PDF",
+  displayedDescriptionLength: 6,
+  otherEntries: [],
+  invocation: "both",
+  catalogStatus: "full",
+  enabled: true,
+  commandConflict: false,
+  missingDescription: false,
+  fields: {},
+  unknownFields: {},
+  ignored: [],
+  bodyLines: 1,
+  bodyPreview: "body",
+  files: [],
+  size: 120,
+};
+
+it("手机斜杠菜单的命令和技能说明都左对齐并单行省略", async () => {
+  const description = "检查手机输入框里的文字换行和光标位置。".repeat(5);
+  const style = document.createElement("style");
+  style.textContent = readFileSync(join(import.meta.dirname, "../src/web/phone.css"), "utf8");
+  container.className = "phone";
+  await act(() =>
+    root?.render(
+      <PhoneComposer
+        variant="session"
+        running={false}
+        controls={undefined}
+        onSubmit={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSlash={vi.fn()}
+        skills={[{ ...pdf, source: ".nocturne", name: "layout-check", description }]}
+      />,
+    ),
+  );
+  container.prepend(style);
+  const field = container.querySelector("textarea");
+  if (!field) throw new Error("缺少输入框");
+  act(() => fireEvent.change(field, { target: { value: "/" } }));
+  const summaries = [...container.querySelectorAll(".phone-slash-row > span")];
+  expect(summaries.map((summary) => summary.textContent)).toContain("压缩当前上下文");
+  expect(summaries.map((summary) => summary.textContent)).toContain(description);
+  for (const summary of summaries) {
+    const computed = getComputedStyle(summary);
+    expect(computed.textAlign).toBe("left");
+    expect(computed.whiteSpace).toBe("nowrap");
+    expect(computed.overflow).toBe("hidden");
+    expect(computed.textOverflow).toBe("ellipsis");
+  }
+});
+
 it("手机插件补全、退格、输入历史和分叉回填共用技能标签并保持发送载荷", async () => {
-  const pdf: SkillOverview = {
-    name: "pdf",
-    source: "plugin",
-    plugin: "pdf@builtin",
-    pluginDisplayName: "PDF 文档",
-    layer: "user",
-    entryPath: "skills/pdf/SKILL.md",
-    realPath: "skills/pdf/SKILL.md",
-    description: "处理 PDF",
-    displayedDescriptionLength: 6,
-    otherEntries: [],
-    invocation: "both",
-    catalogStatus: "full",
-    enabled: true,
-    commandConflict: false,
-    missingDescription: false,
-    fields: {},
-    unknownFields: {},
-    ignored: [],
-    bodyLines: 1,
-    bodyPreview: "body",
-    files: [],
-    size: 120,
-  };
   const onSubmit = vi.fn((_input: ComposerSubmit) => Promise.resolve(true));
   const ui = (fill?: { text: string; seq: number }) => (
     <PhoneComposer
