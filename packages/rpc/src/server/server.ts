@@ -3298,6 +3298,29 @@ function parsePageComments(value: unknown): NonNullable<SubmitInput["pageComment
   return { page, version, title, comments };
 }
 
+function parseQuotes(value: unknown): NonNullable<SubmitInput["quotes"]> {
+  if (!Array.isArray(value)) throw new InvalidParamsError("quotes 必须是数组");
+  return value.map((item, i) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      throw new InvalidParamsError(`quotes[${i}] 必须是对象`);
+    }
+    const q = item as Params;
+    if (typeof q.text !== "string") {
+      throw new InvalidParamsError(`quotes[${i}].text 必须是字符串`);
+    }
+    if (
+      q.seq !== undefined &&
+      (typeof q.seq !== "number" || !Number.isInteger(q.seq) || q.seq < 1)
+    ) {
+      throw new InvalidParamsError(`quotes[${i}].seq 必须是正整数`);
+    }
+    return {
+      text: q.text,
+      ...(typeof q.seq === "number" ? { seq: q.seq } : {}),
+    };
+  });
+}
+
 /** `session.submit` / `session.enqueueInput` 共用的提交内容解析（ADR-0070） */
 function parseSubmitInput(p: {
   skill?: unknown;
@@ -3307,6 +3330,7 @@ function parseSubmitInput(p: {
   content?: unknown;
   attachments?: unknown;
   pageComments?: unknown;
+  quotes?: unknown;
 }): SubmitInput {
   const input: SubmitInput = {};
   if (p.skill !== undefined) {
@@ -3337,6 +3361,9 @@ function parseSubmitInput(p: {
   }
   if (p.pageComments !== undefined && p.pageComments !== null) {
     input.pageComments = parsePageComments(p.pageComments);
+  }
+  if (p.quotes !== undefined && p.quotes !== null) {
+    input.quotes = parseQuotes(p.quotes);
   }
   return input;
 }

@@ -161,21 +161,28 @@ export async function rewindTargets(
     const untracked = countUntrackedCalls(events.filter((e) => e.seq > event.seq));
     const workMode = event.payload.workMode;
     const pageComments = event.payload.pageComments;
+    const quotes = event.payload.quotes?.length ? event.payload.quotes : undefined;
+    const start = quotes ? 1 : 0;
+    const end = Math.max(
+      start,
+      event.payload.content.length -
+        (event.payload.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) -
+        // ADR-0076：执行方式说明块在末尾，不回填
+        (workMode ? 1 : 0) -
+        // ADR-0113：页面评论提示块在末尾，不回填
+        (pageComments ? 1 : 0),
+    );
     const typed = event.payload.content
-      .slice(
-        0,
-        event.payload.content.length -
-          (event.payload.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) -
-          // ADR-0076：执行方式说明块在末尾，不回填
-          (workMode ? 1 : 0) -
-          // ADR-0113：页面评论提示块在末尾，不回填
-          (pageComments ? 1 : 0),
-      )
+      .slice(start, end)
       .filter((b) => b.type === "text")
       .map((b) => b.text)
       .join("\n");
     // 执行方式消息：列表与回填带命令名，回填后照原模式重新提交；Runtime 写入的模式消息不回填
     const shown = workModeDisplayText(typed, workMode);
+    const quoteFallback = quotes?.[0]?.text
+      .split("\n")
+      .find((line) => line.trim() !== "")
+      ?.trim();
     targets.push({
       seq: event.seq,
       firstLine: workMode
@@ -184,11 +191,13 @@ export async function rewindTargets(
             .find((line) => line.trim() !== "")
             ?.trim() ?? shown)
         : (firstUserText(event.payload) ??
+          quoteFallback ??
           (pageComments
             ? `${pageComments.title} v${pageComments.version} · ${pageComments.comments.length}`
             : "")),
       time: event.time,
       text: workMode === undefined ? typed : isRuntimeWorkMode(workMode) ? "" : shown,
+      ...(quotes ? { quotes } : {}),
       hasImages: (event.payload.attachments?.length ?? 0) > 0,
       files,
       untrackedCalls: untracked.total,

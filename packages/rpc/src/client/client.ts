@@ -734,6 +734,7 @@ function wireSubmitInput(input: SubmitInput): RpcParams<"session.submit"> {
     ...(input.content !== undefined ? { content: input.content } : {}),
     ...(attachments !== undefined ? { attachments } : {}),
     ...(pageComments !== undefined ? { pageComments } : {}),
+    ...(input.quotes?.length ? { quotes: input.quotes } : {}),
   } as RpcParams<"session.submit">;
 }
 

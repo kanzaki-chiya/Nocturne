@@ -56,6 +56,7 @@ import type {
   JevReviewerConfig,
   ReviewerSampleInfo,
   ReviewerSampleResult,
+  MessageQuote,
   ModelInfo,
   ModelRef,
   ModelRole,
@@ -265,6 +266,8 @@ export interface WireSubmitFields {
   attachments?: WireAttachment[];
   /** 面板页面评论（ADR-0113） */
   pageComments?: WirePageComments;
+  /** 引用回复片段（ADR-0116） */
+  quotes?: MessageQuote[];
 }
 
 /**

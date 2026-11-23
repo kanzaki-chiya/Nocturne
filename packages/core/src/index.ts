@@ -324,12 +324,15 @@ import { createApplySubagentChangesTool } from "./tools/builtin/apply-subagent-c
 import { createUpdateGoalTool } from "./tools/builtin/update-goal.js";
 import {
   effectiveEvents,
+  formatQuotesBlock,
   PAGE_COMMENT_ID_PATTERN,
   isWorkModeName,
+  normalizeQuoteText,
   PAGE_COMMENT_TEXT_MAX_CHARS,
   workModeCommandName,
   workModeOrigins,
   type GoalStatus,
+  type MessageQuote,
   type PageCommentsInput,
   type PageCommentsSnapshot,
   type PageLibraryListResult,
@@ -610,6 +613,8 @@ export interface SubmitInput {
   workMode?: WorkModeName | undefined;
   /** 面板页面评论（ADR-0113）：随用户消息持久化并追加英文评论块给模型 */
   pageComments?: PageCommentsInput | undefined;
+  /** 引用回复片段（ADR-0116）：随用户消息持久化并在 content 最前面加入引用文本块 */
+  quotes?: MessageQuote[] | undefined;
 }
 
 export type { ReadAttachmentResult };
@@ -2200,14 +2205,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const userMessages = () =>
       session.state().history.flatMap((entry) => {
         if (entry.kind !== "user") return [];
-        // @ 引用的文件/目录快照附在消息尾部；审查只读取用户亲自输入的部分。
+        // @ 引用的文件/目录快照附在消息尾部，引用块在首部；审查只读取用户亲自输入的部分。
+        const start = entry.quotes?.length ? 1 : 0;
         const snapshots =
           (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
           (entry.skill ? 1 : 0) +
           (entry.pageComments ? 1 : 0);
         return [
           entry.content
-            .slice(0, entry.content.length - snapshots)
+            .slice(start, Math.max(start, entry.content.length - snapshots))
             .filter((b) => b.type === "text")
             .map((b) => b.text)
             .join(""),
@@ -4285,10 +4291,37 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         };
         appended.push({ type: "text", text: workModeBlock(workMode.name, workMode.body) });
       }
+      let quotes: MessageQuote[] | undefined;
+      let prepended: ContentBlock[] | undefined;
+      if (input.quotes !== undefined) {
+        if (!Array.isArray(input.quotes)) {
+          throw new RuntimeCommandError("invalid_command", "quotes 参数必须是数组");
+        }
+        if (input.quotes.length > 0) {
+          quotes = input.quotes.map((item, idx) => {
+            if (typeof item !== "object" || typeof item.text !== "string") {
+              throw new RuntimeCommandError("invalid_command", `quotes[${idx}] 不合法`);
+            }
+            const normalized = normalizeQuoteText(item.text);
+            if (normalized === "") {
+              throw new RuntimeCommandError("invalid_command", `quotes[${idx}].text 不能为空`);
+            }
+            if (item.seq !== undefined && (!Number.isInteger(item.seq) || item.seq < 1)) {
+              throw new RuntimeCommandError("invalid_command", `quotes[${idx}].seq 必须是正整数`);
+            }
+            return {
+              text: normalized,
+              ...(item.seq !== undefined ? { seq: item.seq } : {}),
+            };
+          });
+          prepended = [{ type: "text", text: formatQuotesBlock(quotes) }];
+        }
+      }
       const prepared: PreparedInput = {
         ...(commentScreenshotIndices.size > 0
           ? { pageCommentScreenshotIndices: commentScreenshotIndices }
           : {}),
+        ...(prepended !== undefined ? { prepended } : {}),
         content,
         appended,
         ...(files.length ? { files } : {}),
@@ -4299,6 +4332,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ...(delegation !== undefined ? { delegate: delegation } : {}),
         ...(workMode !== undefined ? { workMode } : {}),
         ...(pageComments !== undefined ? { pageComments } : {}),
+        ...(quotes !== undefined ? { quotes } : {}),
       };
       if (workMode !== undefined) workModeStarts.add(prepared);
       return prepared;
@@ -4952,6 +4986,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.suiteReport,
             prepared.pageComments,
             prepared.pageCommentScreenshotIndices,
+            prepared.quotes,
           );
           if (ensembleTurnStarting) {
             ensembleTurnStarting = false;

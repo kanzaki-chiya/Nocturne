@@ -74,6 +74,7 @@ export class PendingInputs {
             },
           }
         : {}),
+      ...(entry.input.quotes?.length ? { quotes: entry.input.quotes } : {}),
     }));
     return { items, paused: items.length > 0 && items.every((item) => item.paused) };
   }

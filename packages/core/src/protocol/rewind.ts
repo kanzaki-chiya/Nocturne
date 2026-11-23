@@ -1,9 +1,13 @@
 import type { DurableEvent, SessionRewoundPayload } from "./events.js";
 import type { MessageUserPayload } from "./events.js";
+import type { MessageQuote } from "./quotes.js";
 import type { SubjectKind } from "./types.js";
 
-export function firstUserText(payload: Pick<MessageUserPayload, "content">): string | undefined {
-  const block = payload.content.find((b) => b.type === "text");
+export function firstUserText(
+  payload: Pick<MessageUserPayload, "content" | "quotes">,
+): string | undefined {
+  const start = payload.quotes?.length ? 1 : 0;
+  const block = payload.content.slice(start).find((b) => b.type === "text");
   if (block?.type !== "text") return undefined;
   // 第一个非空行：粘贴的长文常以空行开头，只取首行会得到空串，
   // 桌面端会把这样的会话当成空会话隐藏（仍不跳到下一个文本块）
@@ -60,6 +64,8 @@ export interface RewindTarget {
   firstLine: string;
   time: string;
   text: string;
+  /** 原消息携带的引用回复（ADR-0116）：回退放回输入框时一起恢复 */
+  quotes?: MessageQuote[] | undefined;
   hasImages: boolean;
   files: RewindFile[];
   untrackedCalls: number;

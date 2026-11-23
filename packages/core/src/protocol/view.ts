@@ -49,6 +49,7 @@ import {
   type SessionPage,
 } from "./pages.js";
 import type { PageCommentsSnapshot } from "./page-comments.js";
+import type { MessageQuote } from "./quotes.js";
 import { effectiveEvents, rewindNotification, firstUserText } from "./rewind.js";
 export { firstUserText } from "./rewind.js";
 import type {
@@ -182,24 +183,27 @@ export interface UserEntry {
   workMode?: WorkModeSnapshot | undefined;
   /** 面板页面评论快照（ADR-0113）：界面在消息里显示评论标签 */
   pageComments?: PageCommentsSnapshot | undefined;
+  /** 引用回复片段（ADR-0116）：界面在消息正文上方显示引用 */
+  quotes?: MessageQuote[] | undefined;
   descriptions?: AttachmentDescribedPayload[] | undefined;
 }
 
 /**
  * 用户消息里用户亲自输入的正文（客户端显示、复制、重发用）。
  *
- * 提交时 Core 在 `content` 末尾按顺序追加给模型看的快照块（`src/index.ts`
- * 的 submit 路径，经 `runTurn` 落盘）：每个非图片 `@` 引用一块（`resolveFileRefs`）、
- * 技能正文一块、委派指令一块、文件引用一块、执行方式说明一块、页面评论一块。这里按条数从末尾切掉，
- * 再拼接剩下的 text 块。
- * 以后新增快照种类或改变追加数量，必须同步改这里。
+ * 提交时 Core 在 `content` 最前面放置引用回复文本块（`quotes` 非空时一块，ADR-0116），
+ * 并在末尾按顺序追加给模型看的快照块（`src/index.ts` 的 submit 路径，经 `runTurn` 落盘）：
+ * 每个非图片 `@` 引用一块（`resolveFileRefs`）、技能正文一块、委派指令一块、文件引用一块、
+ * 执行方式说明一块、页面评论一块。这里按条数切掉首部引用块与末尾快照块，再拼接剩下的 text 块。
+ * 以后新增快照种类或改变前后追加数量，必须同步改这里。
  */
 export function userEntryText(
   entry: Pick<
     UserEntry,
-    "content" | "fileRefs" | "skill" | "delegate" | "files" | "workMode" | "pageComments"
+    "content" | "quotes" | "fileRefs" | "skill" | "delegate" | "files" | "workMode" | "pageComments"
   >,
 ): string {
+  const start = entry.quotes?.length ? 1 : 0;
   const snapshots =
     (entry.fileRefs?.filter((ref) => ref.kind !== "image").length ?? 0) +
     (entry.skill ? 1 : 0) +
@@ -207,7 +211,9 @@ export function userEntryText(
     (entry.files?.length ? 1 : 0) +
     (entry.workMode ? 1 : 0) +
     (entry.pageComments ? 1 : 0);
-  const content = snapshots === 0 ? entry.content : entry.content.slice(0, -snapshots);
+  const end =
+    snapshots === 0 ? entry.content.length : Math.max(start, entry.content.length - snapshots);
+  const content = entry.content.slice(start, end);
   return content
     .filter((block) => block.type === "text")
     .map((block) => block.text)
@@ -685,6 +691,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(event.payload.pageComments !== undefined
           ? { pageComments: event.payload.pageComments }
           : {}),
+        ...(event.payload.quotes?.length ? { quotes: event.payload.quotes } : {}),
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
           : {}),

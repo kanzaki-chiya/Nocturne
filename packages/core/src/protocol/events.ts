@@ -25,6 +25,7 @@ import type {
 } from "./suite.js";
 import type { GoalConfig, PlanConfig, WorkModeSnapshot } from "./work-modes.js";
 import type { PageCommentsSnapshot } from "./page-comments.js";
+import type { MessageQuote } from "./quotes.js";
 import type {
   AgentDelegation,
   AssistantTiming,
@@ -177,6 +178,11 @@ export interface MessageUserPayload {
    * 兼容扩展，旧版本按普通用户消息读取，不提升 formatVersion。
    */
   pageComments?: PageCommentsSnapshot | undefined;
+  /**
+   * 引用回复（ADR-0116）：记录用户选中的消息片段与来源持久事件序号，content 最前面同时含 `> ` 引用文本块。
+   * 兼容扩展，旧版本按普通用户消息读取，不提升 formatVersion。
+   */
+  quotes?: MessageQuote[] | undefined;
 }
 
 export interface AttachmentDescribedPayload {

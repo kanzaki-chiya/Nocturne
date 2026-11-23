@@ -202,6 +202,11 @@ const pageCommentsSchema = z.object({
   comments: z.array(pageCommentItemSchema).min(1),
 });
 
+const messageQuoteSchema = z.object({
+  text: z.string(),
+  seq: z.number().int().positive().optional(),
+});
+
 // ── payload schema ─────────────────────────────────────────
 
 const payloadSchemas = {
@@ -418,6 +423,8 @@ const payloadSchemas = {
       .optional(),
     // ADR-0113：面板页面评论快照；兼容扩展，旧版本按普通用户消息读取
     pageComments: pageCommentsSchema.optional(),
+    // ADR-0116：引用回复片段；兼容扩展，旧版本按普通用户消息读取
+    quotes: z.array(messageQuoteSchema).optional(),
   }),
   "message.assistant": z.object({
     messageId: z.string(),

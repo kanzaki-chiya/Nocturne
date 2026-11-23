@@ -159,4 +159,36 @@ describe("待发输入（ADR-0070）", () => {
     await h.client.shutdown();
     await Promise.all([h.served]);
   });
+
+  it("session.submit / enqueueInput / rewindTargets 经 RPC 透传 quotes（ADR-0116）", async () => {
+    const h = await connectMany({
+      scripts: [askScript, textScript("首轮结束"), textScript("排队结束")],
+    });
+    const { session } = await h.client.runtime.createSession({ model: MODEL, cwd: h.ws });
+    const events: RuntimeEvent[] = [];
+    await session.subscribe((event) => events.push(event));
+
+    const firstQuotes = [{ text: "第一段引用", seq: 2 }];
+    const turn = session.submit({ text: "首轮问题", quotes: firstQuotes });
+    await until(() => events.some((event) => event.type === "question.requested"));
+
+    const queuedQuotes = [{ text: "排队引用", seq: 3 }];
+    await session.enqueueInput("queue", { text: "排队问题", quotes: queuedQuotes });
+    const pending = await session.pendingInputs();
+    expect(pending.items[0]?.quotes).toEqual(queuedQuotes);
+
+    const asked = events.findLast((event) => event.type === "question.requested");
+    if (asked?.type !== "question.requested") throw new Error("缺少提问请求");
+    await session.respondQuestion(asked.payload.requestId, {
+      answers: [{ selected: [], text: "好" }],
+    });
+    expect(await turn).toBe("done");
+
+    const targets = await session.rewindTargets();
+    expect(targets.find((t) => t.text === "首轮问题")?.quotes).toEqual(firstQuotes);
+    expect(targets.find((t) => t.text === "排队问题")?.quotes).toEqual(queuedQuotes);
+
+    await h.client.shutdown();
+    await Promise.all([h.served]);
+  });
 });

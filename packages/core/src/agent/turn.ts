@@ -25,6 +25,7 @@ import type {
   FinishReason,
   ImageAttachment,
   LoopGuardConfig,
+  MessageQuote,
   PageCommentsSnapshot,
   PermissionReviewedPayload,
   RuntimeStatus,
@@ -113,6 +114,7 @@ export async function runTurn(
   suiteReport?: SuiteReportDelivery,
   pageComments?: PageCommentsSnapshot,
   pageCommentScreenshotIndices?: ReadonlySet<number>,
+  quotes?: MessageQuote[],
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -186,6 +188,7 @@ export async function runTurn(
         ...(item.suiteReport !== undefined ? { suiteReport: item.suiteReport } : {}),
         ...(item.workMode !== undefined ? { workMode: item.workMode } : {}),
         ...(item.pageComments !== undefined ? { pageComments: item.pageComments } : {}),
+        ...(item.quotes?.length ? { quotes: item.quotes } : {}),
         steer: true,
       },
       { turnId, pageCommentScreenshotIndices: item.pageCommentScreenshotIndices },
@@ -407,6 +410,7 @@ export async function runTurn(
         ...(delegate ? { delegate } : {}),
         ...(workMode ? { workMode } : {}),
         ...(pageComments ? { pageComments } : {}),
+        ...(quotes?.length ? { quotes } : {}),
       },
       { turnId, pageCommentScreenshotIndices },
     );
