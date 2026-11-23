@@ -6,11 +6,11 @@
 
 ## 背景
 
-[ADR-0076](ADR-0076-work-modes.md) 引入了多代理攻坚 `/boost`，复用后台子代理（[ADR-0073](ADR-0073-background-subagents.md)）与工作树隔离（[ADR-0075](ADR-0075-worktree-isolation.md)）并行执行独立子任务。但 `/boost` 的子代理是一次性的：
+[ADR-0076](ADR-0076-work-modes.md) 引入了多代理攻坚 `/fugue`，复用后台子代理（[ADR-0073](ADR-0073-background-subagents.md)）与工作树隔离（[ADR-0075](ADR-0075-worktree-isolation.md)）并行执行独立子任务。但 `/fugue` 的子代理是一次性的：
 
 1. 子代理跑完 `finish` 即关闭，无法在审查发现问题后被直接叫醒返工，只能由父代理自己修或重开一个丢掉上下文的新子代理；
 2. 子代理之间不能直接通气（例如共用类型定义或接口变更），一切中转都压在父会话上下文上；
-3. 子代理是无交互 gate（[subagent.md](../architecture/subagent.md) §7.1），在默认的 `default` 权限预设下任何写文件和执行命令都会直接被 `non_interactive` 拒绝，导致 `/boost` 在默认预设下退化为「并行调查 + 主代理串行实现」；
+3. 子代理是无交互 gate（[subagent.md](../architecture/subagent.md) §7.1），在默认的 `default` 权限预设下任何写文件和执行命令都会直接被 `non_interactive` 拒绝，导致 `/fugue` 在默认预设下退化为「并行调查 + 主代理串行实现」；
 4. 主代理自己仍有改文件工具，模型容易绕过委派自己动手，破坏协调职责与验证闭环。
 
 参照 Google Antigravity 的 Swarm 设计（Coordinator + 常驻命名成员 + 公开任务书 Charter + 共享留言板 `@` 提及唤醒 + 独立 Verifier 返工闭环），我们需要一种面向复杂多模块改造的执行方式 **Ensemble**。本 ADR 定下 Ensemble 的全部架构、协议与运行时边界；本轮只落地 ADR、Core、协议与测试，不做三端界面。
@@ -35,7 +35,7 @@
 
 - `SubmitInput.workMode` 与 `WORK_MODE_NAMES` 增加 `"ensemble"`，客户端斜杠解析支持 `/ensemble <任务>`。名称固定为 `ensemble`，不用 `team`（保留给未来可能的多人协作 teamwork）。
 - Ensemble 与 `/goal` 一样跨多轮持续生效，直至指挥调用 `ensemble_end` 工具、用户调用 `RuntimeSession.endEnsemble()`，或对话回退到 Ensemble 建立之前。一个会话同一时刻至多有一个活动 Ensemble；已有活动 Ensemble 时再次提交 `workMode: "ensemble"` 返回 `invalid_command`。
-- 准入前提与 `/boost` 相同：宿主开启 `RuntimeOptions.subagent.background === true`、子代理未停用（`subagent.enabled !== false`）、非无人值守定时任务会话（`meta.schedule === undefined`），否则拒绝并返回 `invalid_command`；`nctrn -p` 与定时任务因此不支持。
+- 准入前提与 `/fugue` 相同：宿主开启 `RuntimeOptions.subagent.background === true`、子代理未停用（`subagent.enabled !== false`）、非无人值守定时任务会话（`meta.schedule === undefined`），否则拒绝并返回 `invalid_command`；`nctrn -p` 与定时任务因此不支持。
 
 ### 2. 指挥与工具集收窄
 
@@ -137,9 +137,9 @@
   2. 对有独立工作树的成员先完成工作树快照结算：已并回（`head === base` 或已合并入主仓库 `HEAD`，调用 `cleanupMergedWorktrees`）的工作树与 `nocturne/` 分支自动清理；仍有未并回提交的工作树与分支完整保留，写入 `ensemble.ended.unmerged` 并在返回值/工具输出中逐项列出；
   3. 立即恢复指挥的文件编辑工具与 `task` 工具。
 
-## 与 `/boost` 和后台子代理的区别
+## 与 `/fugue` 和后台子代理的区别
 
-| 对比项 | 后台子代理（ADR-0073） | `/boost`（ADR-0076 §6） | `/ensemble`（本 ADR） |
+| 对比项 | 后台子代理（ADR-0073） | `/fugue`（ADR-0076 §6） | `/ensemble`（本 ADR） |
 |---|---|---|---|
 | 会话寿命 | 一次性，`finish` 后关闭 | 一次性后台子代理组合，单轮引导 | 跨轮常驻子会话，可反复 `@` 唤醒与追问 |
 | 角色分工 | 父代理既可自己改也可派子代理 | 主代理仍持有编辑工具，可自己兜底改文件 | 指挥卸载编辑工具，强制「协调 + 实现 + 验证」分离 |

@@ -6,15 +6,15 @@
 
 ## 背景
 
-[路线图](../roadmap/roadmap.md)「之后」参照 Antigravity 列了四种执行方式，按代价从低到高：追问需求 `/grill-me`、目标模式 `/goal`、计划模式 `/plan`、多代理攻坚 `/boost`。[agent-loop.md](../architecture/agent-loop.md) 第 5 节要求计划模式、目标管理这类产品功能作为独立模块，通过工具或事件接入，不进 Agent Loop。可用的基础已经齐了：向用户提问（[ADR-0032](ADR-0032-ask-user-tool.md)）、运行中插话的安全点（[ADR-0070](ADR-0070-steer-and-queue-input.md)）、后台子代理（[ADR-0073](ADR-0073-background-subagents.md)）与工作树隔离（[ADR-0075](ADR-0075-worktree-isolation.md)）、六种权限预设。
+[路线图](../roadmap/roadmap.md)「之后」参照 Antigravity 列了四种执行方式，按代价从低到高：追问需求 `/grill-me`、目标模式 `/goal`、计划模式 `/plan`、多代理攻坚 `/fugue`。[agent-loop.md](../architecture/agent-loop.md) 第 5 节要求计划模式、目标管理这类产品功能作为独立模块，通过工具或事件接入，不进 Agent Loop。可用的基础已经齐了：向用户提问（[ADR-0032](ADR-0032-ask-user-tool.md)）、运行中插话的安全点（[ADR-0070](ADR-0070-steer-and-queue-input.md)）、后台子代理（[ADR-0073](ADR-0073-background-subagents.md)）与工作树隔离（[ADR-0075](ADR-0075-worktree-isolation.md)）、六种权限预设。
 
-本 ADR 定下四个模式的入口、状态存放与恢复、`/goal` 的上限、`/plan` 的批准流程、`/boost` 的并行上限，以及各客户端的支持范围。
+本 ADR 定下四个模式的入口、状态存放与恢复、`/goal` 的上限、`/plan` 的批准流程、`/fugue` 的并行上限，以及各客户端的支持范围。
 
 ## 决定
 
 ### 1. 统一入口：提交时带 `workMode`
 
-- `SubmitInput` 增加可选 `workMode: "grill-me" | "plan" | "goal" | "boost"`，与 `skill`、`delegate` 互斥（同时出现报 `invalid_command`）。字段名不用 `mode`，因为 `enqueueInput` 的 `mode` 已经表示插话或排队。
+- `SubmitInput` 增加可选 `workMode: "grill-me" | "plan" | "goal" | "fugue"`，与 `skill`、`delegate` 互斥（同时出现报 `invalid_command`）。字段名不用 `mode`，因为 `enqueueInput` 的 `mode` 已经表示插话或排队。
 - 用户正文就是任务（`/goal` 的目标、`/plan` 的任务……），去首尾空白后不得为空，否则 `invalid_command`。
 - Core 在提交准备阶段（与技能正文同处）给消息末尾追加一个英文说明块 `<work-mode name="…">…</work-mode>`，`message.user` 带可选字段 `workMode: { name, body, source? }`，`body` 即该块正文。这和技能快照同构：回放、回退、分叉、导出都沿用快照，不重新生成。兼容扩展，旧版本按普通用户消息显示，不提升 `formatVersion`。
 - `source` 区分写入来源（修订 2026-11-02）：用户提交的消息不带；Runtime 自己写的模式消息（目标核对与收尾说明、`resumeGoal` 的继续说明、`approvePlan` 的「批准」）带 `source: "runtime"`。未知值同样按非用户提交处理。客户端据此决定重发：用户提交的模式消息重发、编辑并重发时带原 `workMode` 重新提交，照常走模式起始流程（切预设、设定目标）；Runtime 写入的消息不提供重发。不按正文是否为空判断，因为「批准」有正文。
@@ -97,7 +97,7 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 - **放弃**：`RuntimeSession.cancelPlan()`，写 `permissionPreset: restorePreset`、`plan: null`，不开 Turn。
 - 计划模式期间用户手动切换预设照常生效；批准与放弃仍按 `restorePreset` 恢复。
 
-### 6. 多代理攻坚 `/boost`
+### 6. 多代理攻坚 `/fugue`
 
 - **前提**：宿主开启了后台子代理（ADR-0073 §5 的 `RuntimeOptions.subagent.background`）且子代理未停用；否则 `invalid_command`（「当前环境不支持后台子代理」）。`nctrn -p` 与定时任务因此不支持。
 - **并行上限**：沿用每个父会话的 `maxBackground`（默认 3），由 Runtime 强制；说明块写明这个数和工作区是否为 git 仓库（决定能否用工作树隔离）。
@@ -116,7 +116,7 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 | `/goal stop`、`/goal resume` | `stopGoal()`、`resumeGoal()` |
 | `/plan 任务` | `workMode: "plan"` |
 | `/plan approve`、`/plan cancel` | `approvePlan()`、`cancelPlan()` |
-| `/boost 任务` | `workMode: "boost"` |
+| `/fugue 任务` | `workMode: "fugue"` |
 
 子命令只匹配整行恰好是该单词的情况，其余文字都按任务处理。
 
@@ -125,7 +125,7 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 | `/grill-me` | ✓ | ✓ | ✓ | ✓ | — |
 | `/goal` | ✓ | ✓ | ✓ | ✓ | — |
 | `/plan` | ✓ | ✓ | ✓，计划消息下方加「批准」按钮 | ✓，同桌面端 | — |
-| `/boost` | ✓ | ✓ | ✓ | ✓ | — |
+| `/fugue` | ✓ | ✓ | ✓ | ✓ | — |
 
 - `nctrn -p` 不解析斜杠命令。逐行 CLI 在 Turn 期间只接受中断，命令在空闲时输入。桌面端与手机网页运行中发送带模式的命令按排队处理。
 - 用户消息显示：桌面端和手机网页在正文前显示执行方式图标与名字（如「计划」），点击可展开说明块。核对说明折叠时只显示该标签。纯文本客户端保留命令名。Runtime 写入的模式消息（§1 `source`）不显示「编辑并重发」「重发」。不加模式徽标、状态说明、副标题或占位提示；「批准」按钮只在计划模式、会话空闲时出现在最后一条助手消息下方。
@@ -136,7 +136,7 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 - 四个模式都不在 Agent Loop 里按工具名或模式名分支；Agent Loop 只多一个与 `takeSteers` 同形的注入点。
 - 状态在已知事件的可选字段里，旧版本照常恢复含这些字段的会话（只是不再按模式行事）。
 - 目标模式会在用户不操作时继续花费，上限默认 10 轮、60 分钟；中断即停止。
-- `/boost` 的效果取决于权限预设与仓库条件，说明块给模型留了退路，但在 `default` 预设下基本退化为「并行调查 + 主代理实现」。
+- `/fugue` 的效果取决于权限预设与仓库条件，说明块给模型留了退路，但在 `default` 预设下基本退化为「并行调查 + 主代理实现」。
 - 计划的「评论」就是普通回复，不支持按行批注。
 
 ## 备选方案
@@ -146,11 +146,11 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 - **目标完成靠解析回复里的标记文本**：不需要工具，但容易误判，也拿不到结构化的清单；不采用。
 - **计划用专门的 `submit_plan` 工具提交**：结构更清楚，但多一个工具和一套显示；计划本来就是一条 Markdown 回复，第一版不做。
 - **按金额限制目标花费**：依赖价格数据，很多模型没有；以后有统一价格来源再加。
-- **`/boost` 自动切到 `guarded`**：静默放宽权限违背用户意图；不采用。
+- **`/fugue` 自动切到 `guarded`**：静默放宽权限违背用户意图；不采用。
 
-## 修订（2026-11-03：`/boost` 默认委派）
+## 修订（2026-11-03：`/fugue` 默认委派）
 
-实测 `/boost` 在非 git 目录从不派可写子代理，因为说明块要求主代理自己写所有文件。现在非 git 时先问用户是否初始化；说明块写明这是用户的明确选择，能拆就默认委派，派完结束本轮。基础系统提示和 `task` 说明不再断言写操作一定被拒绝，改为按当前权限判定。常驻成员与共享留言板编排的第五种执行方式 `/ensemble` 见 [ADR-0089](ADR-0089-ensemble.md)。
+实测 `/fugue` 在非 git 目录从不派可写子代理，因为说明块要求主代理自己写所有文件。现在非 git 时先问用户是否初始化；说明块写明这是用户的明确选择，能拆就默认委派，派完结束本轮。基础系统提示和 `task` 说明不再断言写操作一定被拒绝，改为按当前权限判定。常驻成员与共享留言板编排的第五种执行方式 `/ensemble` 见 [ADR-0089](ADR-0089-ensemble.md)。
 
 ## 修订（2026-11-02：取消固定目标上限）
 
@@ -165,3 +165,9 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 ## 修订（2026-11-23）：面板页面
 
 `/cadenza <要求>` 通过 `workMode: "cadenza"` 提交。Core 将英文说明块追加在用户消息末尾并随事件保存，要求用 `render_html` 以 `display: "panel"` 新建页面、后续按页面 id 更新，正文避免复述页面内容。每条消息只能选一种执行方式。桌面、手机网页、安卓、TUI 和逐行 CLI 共用该入口。终端显示 `▣ 标题 v<n>`，桌面及移动端展示见 [ADR-0109](ADR-0109-page-versions.md)。
+
+## 修订（2026-11-23）
+
+多代理攻坚的命令 `/boost`（内部名 `boost`）改名为 `/fugue`（内部名 `fugue`），菜单摘要仍为「多代理攻坚」，说明块改以 `Fugue mode` 开头，行为不变。改名缘于「赋格（fugue）」各声部独立进入、并行展开并最终编织成一体的意象，更贴合拆分子任务、后台子代理并行执行、整合回归的工作方式，也与 `/ensemble`、`/cadenza` 保持统一命名体系。
+
+不再保留 `/boost` 命令别名：输入 `/boost` 按普通未知命令处理，`SubmitInput.workMode: "boost"` 按未知执行方式拒绝。旧会话日志中落盘的 `message.user.workMode` 快照若为 `name: "boost"`，由 Core 协议层集中映射为 `fugue` 读取：`userWorkMode`、派生视图、`workModeCommandName` 与回退/重发均视作 `fugue`，客户端不各自特判；快照中的说明块正文原样沿用，不改写旧数据、不迁移文件。

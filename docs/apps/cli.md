@@ -133,7 +133,7 @@ nctrn mcp [--name <label>]   # 对外 MCP 服务器桥（stdio，连接桌面端
 | `/goal cancel` | 立刻中断进行中的轮次并取消目标（持久写 `goal: null`，无确认）；没有目标报 `invalid_command` | `session.cancelGoal()` |
 | `/plan <任务>` | 计划模式：Turn 开始前切到 `read-only` 并记下原预设，只读探索后产出 Markdown 计划（ADR-0076 §5）；直接回复即评论并修订计划 | `session.submit({ text, workMode: "plan" })` |
 | `/plan approve`、`/plan cancel` | 批准计划：恢复原预设（原本只读时改用 `default`）、退出计划模式并开新 Turn 实施；放弃计划：恢复原预设且不开 Turn | `session.approvePlan()`、`session.cancelPlan()` |
-| `/boost <任务>` | 多代理攻坚：拆解子任务、用后台子代理（`isolation: "worktree"` 或只读）并行实现与调查、`apply_subagent_changes` 并回并做回归（ADR-0076 §6） | `session.submit({ text, workMode: "boost" })` |
+| `/fugue <任务>` | 多代理攻坚：拆解子任务、用后台子代理（`isolation: "worktree"` 或只读）并行实现与调查、`apply_subagent_changes` 并回并做回归（ADR-0076 §6） | `session.submit({ text, workMode: "fugue" })` |
 | `/cadenza <要求>` | 生成面板页面（[ADR-0109](../decisions/ADR-0109-page-versions.md)），逐行 CLI 显示页面入口 | `session.submit({ text, workMode: "cadenza" })` |
 | `/ensemble end` | 结束当前合奏（[ADR-0089](../decisions/ADR-0089-ensemble.md)）；CLI 没有留言板界面，`/ensemble board` 只打印用法 | `session.endEnsemble()` |
 | `/rewind` | 编号选择轮次、操作和预览确认；空行或默认 `N` 取消 | `session.rewindTargets()`、`session.rewind()` |
