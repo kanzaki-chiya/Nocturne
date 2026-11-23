@@ -494,7 +494,7 @@ describe("手机端页面入口行与全屏遮罩版本切换（ADR-0109）", ()
       title: "手机看板",
       page: "page-1",
       version: 1,
-      display: "panel",
+      display: "inline",
     });
     const f2 = makeHtmlAttachment({
       file: "file-2.html",

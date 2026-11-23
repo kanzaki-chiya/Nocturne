@@ -1718,6 +1718,62 @@ it("崩溃恢复：模型不可用的会话不阻塞其余会话，点开是换�
   await waitFor(() => expect(screen.queryByText(/后台已退出/)).toBeNull());
 });
 
+it("内嵌页面实时转面板时替换旧版本并打开最新版，切换会话回放时只显示入口行", async () => {
+  const pageVersion = (version: number, display: "inline" | "panel") => ({
+    type: "tool.completed",
+    payload: {
+      callId: `page-call-${version}`,
+      name: "render_html",
+      status: "ok",
+      modelContent: "ok",
+      durationMs: 5,
+      files: [
+        {
+          type: "file",
+          file: `file-${version}.html`,
+          bytes: 3,
+          sha256: "a".repeat(64),
+          label: "图表.html",
+          mimeType: "text/html",
+          source: "upload",
+          inline: { title: "图表", page: "page-1", display, version },
+        },
+      ],
+    },
+  });
+  const first = pageVersion(1, "inline");
+  const second = pageVersion(2, "panel");
+  const host = replayHost([], undefined, undefined, undefined, (id) =>
+    id === "gamma" ? [first, second] : [],
+  );
+  const { container } = render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha (?:会话|正文)/ }));
+  const messages = await screen.findByRole("region", { name: "会话消息" });
+  await within(messages).findByText("alpha 正文");
+  const backend = host.calls.find(
+    (call) => call.method === "session.subscribe" && call.params.sessionId === "alpha",
+  );
+  if (backend === undefined) throw new Error("缺少 alpha 会话订阅");
+  const panelButton = () => screen.getByRole("button", { name: "右侧面板" });
+
+  await act(async () => host.emitEvent(backend.backendId, "alpha", first));
+  await waitFor(() => expect(messages.querySelector(".inline-page iframe")).not.toBeNull());
+  expect(panelButton().getAttribute("aria-pressed")).toBe("false");
+
+  await act(async () => host.emitEvent(backend.backendId, "alpha", second));
+  expect(messages.querySelector(".inline-page")).toBeNull();
+  expect(messages.querySelectorAll(".page-entry-row")).toHaveLength(2);
+  expect(panelButton().getAttribute("aria-pressed")).toBe("true");
+  expect(container.querySelector(".page-ver-count")?.textContent).toBe("2 / 2");
+
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  const historical = await screen.findByRole("region", { name: "会话消息" });
+  await within(historical).findByText("gamma 正文");
+  expect(historical.querySelector(".inline-page")).toBeNull();
+  expect(historical.querySelectorAll(".page-entry-row")).toHaveLength(2);
+  expect(panelButton().getAttribute("aria-pressed")).toBe("false");
+});
+
 // ── 项目手动排序 ──────────────────────────────────────────────
 
 const projectNames = () =>
