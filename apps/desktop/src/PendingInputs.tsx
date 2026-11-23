@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import {
+  pageCommentsLabel,
   unwrapEnsemblePostText,
   type PendingInputItem,
   type PendingInputsSnapshot,
@@ -142,13 +143,15 @@ export function PendingInputs({
         const isShell = item.mode === "shell";
         const unwrappedEnsemble = unwrapEnsemblePostText(item.text);
         const isEnsemblePost = unwrappedEnsemble !== item.text;
+        const commentLabel =
+          item.pageComments === undefined ? undefined : pageCommentsLabel(item.pageComments);
         const rowText = isShell
           ? `后台任务 · ${item.shellName ?? ""} · 等待送达`
           : isSubagent
             ? "子代理结果"
             : isEnsemblePost
               ? unwrappedEnsemble
-              : item.text === "" && item.workMode === undefined
+              : item.text === "" && item.workMode === undefined && commentLabel === undefined
                 ? "（仅图片）"
                 : item.text;
         return (
@@ -182,6 +185,8 @@ export function PendingInputs({
                     <InputLabel data={workModeLabel(item.workMode)} />{" "}
                   </>
                 )}
+                {commentLabel && <InputLabel data={{ icon: "chat_1", label: commentLabel }} />}
+                {commentLabel && rowText !== "" && " "}
                 {rowText}
               </span>
             )}

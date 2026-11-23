@@ -664,7 +664,16 @@ export function App({ host }: { host: DesktopHost }) {
           setPagesVersion((v) => v + 1);
         }
       }
-      if (live && (event.type === "session.rewound" || event.type === "session.titled")) {
+      if (
+        live &&
+        (event.type === "session.rewound" ||
+          event.type === "session.titled" ||
+          event.type === "page.comment_resolved" ||
+          (event.type === "message.user" && event.payload.pageComments !== undefined) ||
+          (event.type === "tool.completed" &&
+            event.payload.name === "reply_page_comment" &&
+            event.payload.status === "ok"))
+      ) {
         setPagesVersion((v) => v + 1);
       }
       if (event.type === "turn.started") {
@@ -1886,6 +1895,15 @@ export function App({ host }: { host: DesktopHost }) {
       onUpdate: handleUpdatePageComment,
       onDelete: handleDeletePageComment,
       onClearPage: handleClearPageCommentsByPage,
+      onSend: async (sessionId, pageComments) => {
+        await conversations.submitInput(
+          { text: "", attachments: [], pageComments },
+          "steer",
+          undefined,
+          undefined,
+          sessionId,
+        );
+      },
       supportsImageInput:
         active !== undefined && active.dead !== true && active.session.id === selectedId
           ? () => active.session.visionInfo().then((info) => info.imageInput)

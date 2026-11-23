@@ -474,6 +474,42 @@ describe("desktop conversation lifecycle", () => {
     f.complete(id);
   });
 
+  it("将即时页面评论送到所属会话，空闲直接提交、运行中排入待发", async () => {
+    const f = fixture();
+    await f.controller.open("s1", "plain");
+    const input = {
+      text: "",
+      attachments: [],
+      pageComments: {
+        page: "page-1",
+        title: "Agent Loop",
+        version: 1,
+        comments: [{ path: "body > #entry", text: "入口", x: 5, y: 10, note: "加粗" }],
+      },
+    };
+    await f.controller.submitInput(input, "steer", undefined, undefined, "s1");
+    expect(f.calls.find((call) => call.method === "session.submit")?.params).toMatchObject({
+      sessionId: "s1",
+      text: "",
+      pageComments: input.pageComments,
+    });
+    f.event("s1", "turn.started", { turnIndex: 2 });
+    await vi.waitFor(() =>
+      expect(conversationStatus(f.controller.selected as never)).not.toBe("idle"),
+    );
+    await f.controller.submitInput(input, "steer", undefined, undefined, "s1");
+    expect(f.calls.find((call) => call.method === "session.enqueueInput")?.params).toMatchObject({
+      sessionId: "s1",
+      mode: "steer",
+      text: "",
+      pageComments: input.pageComments,
+    });
+    await f.controller.open("s2", "plain");
+    await expect(
+      f.controller.submitInput(input, "steer", undefined, undefined, "s1"),
+    ).rejects.toThrow("页面会话已切换或断开");
+  });
+
   it("运行中插话与排队走 enqueueInput，快照随 input.pending 更新（ADR-0070）", async () => {
     const f = fixture();
     await f.controller.open("s1", "plain");

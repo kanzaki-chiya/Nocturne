@@ -203,7 +203,10 @@ export function PageLibraryPage({
       }}
     >
       <Icon name={pinned ? "pin" : "file"} size={ICON_MD} className="plib-icon" />
-      <span className="plib-title">{item.title}</span>
+      <span className="plib-title">
+        <span>{item.title}</span>
+        {item.hasUnresolvedComments && <span className="plib-comment-dot" aria-hidden="true" />}
+      </span>
       <span className="plib-session">{item.sessionTitle}</span>
       <span className="plib-ver">v{item.version}</span>
       <span className="plib-time">{formatPageUpdatedAt(item.updatedAt)}</span>

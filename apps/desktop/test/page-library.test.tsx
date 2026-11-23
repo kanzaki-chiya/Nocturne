@@ -181,6 +181,7 @@ describe("项目页面库桌面端（ADR-0114）", () => {
         file: "file-3.html",
         updatedAt: todayIso,
         projectKey: "k-alpha",
+        hasUnresolvedComments: true,
       },
       {
         origin: { sessionId: "s-b", page: "page-1" },
@@ -274,6 +275,9 @@ describe("项目页面库桌面端（ADR-0114）", () => {
       expect(screen.getByText("订单看板")).toBeTruthy();
       expect(screen.getByText("延迟分布图")).toBeTruthy();
     });
+
+    expect(screen.getByText("订单看板").nextElementSibling?.className).toBe("plib-comment-dot");
+    expect(screen.getByText("延迟分布图").nextElementSibling).toBeNull();
 
     // 初始全部在「最近」组，没有「置顶」组
     expect(screen.queryByLabelText("置顶")).toBeNull();

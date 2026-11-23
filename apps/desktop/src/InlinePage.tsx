@@ -9,8 +9,11 @@ import {
   type ReactNode,
 } from "react";
 import {
+  projectQueuedPageComments,
   resolveInlinePageId,
   type FileAttachment,
+  type PageCommentsInput,
+  type PendingInputItem,
   type PageCommentScreenshotInput,
   type SessionPage,
   type SessionPageVersion,
@@ -23,6 +26,7 @@ import {
   useSaveFile,
 } from "./ImageViewer";
 import { Menu, MenuItem } from "./Menu";
+import { PageCommentThreadPopover } from "./PageCommentThreadPopover";
 import { PageModelPermission, PageModelStop, usePageBridge, type PageSession } from "./page-bridge";
 import {
   clampCommentPopoverPosition,
@@ -145,6 +149,9 @@ interface SandboxCommentPin {
   number: number;
   x: number;
   y: number;
+  path?: string;
+  text?: string;
+  relocate?: boolean;
   active?: boolean;
 }
 
@@ -383,10 +390,11 @@ function useSandboxedHtmlFrame(opts: {
     );
   }, []);
 
+  const commentPinState = commentPins === undefined ? undefined : JSON.stringify(commentPins);
   useEffect(() => {
     if (html === undefined) return;
     postCommentState();
-  }, [html, commentMode, commentPins, postCommentState]);
+  }, [html, commentMode, commentPinState, postCommentState]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -890,6 +898,9 @@ export interface PagePaneCommentsController {
   onAdd: (version: number, title: string, item: DraftPageComment) => void;
   onUpdate: (version: number, id: string, note: string) => void;
   onDelete: (version: number, id: string) => void;
+  pendingInputs: readonly PendingInputItem[];
+  onSend: (input: PageCommentsInput) => Promise<void>;
+  onResolve: (id: string) => Promise<void>;
   /** 检查当前模型是否支持图片输入（只在无可见文字元素时调用） */
   supportsImageInput?: (() => Promise<boolean>) | undefined;
 }
@@ -944,6 +955,9 @@ export function PagePane({
   const [menuOpen, setMenuOpen] = useState(false);
   const [commentMode, setCommentMode] = useState(false);
   const [editor, setEditor] = useState<CommentEditorState | null>(null);
+  const [openThread, setOpenThread] = useState<CommentPinClickMessage | null>(null);
+  const [sendingDraft, setSendingDraft] = useState(false);
+  const [commentError, setCommentError] = useState<string>();
   const downloadBtnRef = useRef<HTMLButtonElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const editorInputRef = useRef<HTMLTextAreaElement>(null);
@@ -982,10 +996,32 @@ export function PagePane({
         : [],
     [comments, activeVersion],
   );
+  const queued = useMemo(
+    () => projectQueuedPageComments(page?.page ?? "", comments?.pendingInputs ?? []),
+    [page?.page, comments?.pendingInputs],
+  );
+  const durableThreads = page?.comments ?? [];
+  const lastNumber = Number(durableThreads.at(-1)?.id?.slice(1)) || 0;
+  const visibleThreads = [
+    ...durableThreads.flatMap((thread) =>
+      thread.id === undefined || thread.resolved
+        ? []
+        : [{ key: thread.id, number: Number(thread.id.slice(1)), thread }],
+    ),
+    ...queued.threads.map((thread, index) => ({
+      key: thread.queueKey,
+      number: lastNumber + index + 1,
+      thread,
+    })),
+  ].filter(({ thread }) => activeVersion !== undefined && thread.version <= activeVersion);
+  const currentThread = visibleThreads.find(({ key }) => key === openThread?.pinId)?.thread;
+  const commentCount = visibleThreads.length + versionComments.length;
 
   // 切换版本时收起当前弹窗；清理未完成的局部截图
   useEffect(() => {
     setEditor(null);
+    setOpenThread(null);
+    setCommentError(undefined);
     const pending = regionCapturesRef.current;
     for (const entry of pending.values()) {
       clearTimeout(entry.timer);
@@ -1103,6 +1139,8 @@ export function PagePane({
           )
           .catch(() => undefined);
       }
+      setOpenThread(null);
+      setCommentError(undefined);
       setEditor({
         mode: "new",
         tempId: makeDraftCommentId(),
@@ -1122,7 +1160,13 @@ export function PagePane({
   const handleCommentPinClick = useCallback(
     (click: CommentPinClickMessage) => {
       const existing = versionComments.find((c) => c.id === click.pinId);
-      if (existing === undefined) return;
+      setCommentError(undefined);
+      if (existing === undefined) {
+        setEditor(null);
+        setOpenThread((open) => (open?.pinId === click.pinId ? null : click));
+        return;
+      }
+      setOpenThread(null);
       setEditor({
         mode: "edit",
         id: existing.id,
@@ -1139,31 +1183,46 @@ export function PagePane({
       setEditor(null);
       return;
     }
-    if (commentMode) {
-      setCommentMode(false);
+    if (openThread !== null) {
+      setOpenThread(null);
+      return;
     }
-  }, [editor, commentMode]);
+    if (commentMode) setCommentMode(false);
+  }, [editor, openThread, commentMode]);
 
-  const commentPins = useMemo<SandboxCommentPin[] | undefined>(() => {
-    if (comments === undefined) return undefined;
-    const list: SandboxCommentPin[] = versionComments.map((item, idx) => ({
-      id: item.id,
-      number: idx + 1,
-      x: item.x,
-      y: item.y,
-      ...(editor?.mode === "edit" && editor.id === item.id ? { active: true } : {}),
-    }));
-    if (editor?.mode === "new") {
-      list.push({
-        id: editor.tempId,
-        number: list.length + 1,
-        x: editor.x,
-        y: editor.y,
-        active: true,
-      });
-    }
-    return list;
-  }, [comments, versionComments, editor]);
+  const commentPins: SandboxCommentPin[] | undefined =
+    comments === undefined
+      ? undefined
+      : [
+          ...visibleThreads.map(({ key, number, thread }) => ({
+            id: key,
+            number,
+            x: thread.x,
+            y: thread.y,
+            path: thread.path,
+            text: thread.text,
+            relocate: thread.version !== activeVersion,
+            active: openThread?.pinId === key,
+          })),
+          ...versionComments.map((item, index) => ({
+            id: item.id,
+            number: lastNumber + queued.threads.length + index + 1,
+            x: item.x,
+            y: item.y,
+            active: editor?.mode === "edit" && editor.id === item.id,
+          })),
+          ...(editor?.mode === "new"
+            ? [
+                {
+                  id: editor.tempId,
+                  number: lastNumber + queued.threads.length + versionComments.length + 1,
+                  x: editor.x,
+                  y: editor.y,
+                  active: true,
+                },
+              ]
+            : []),
+        ];
 
   const { iframeRef, handleLoad, bridge } = useSandboxedHtmlFrame({
     html: loaded?.html,
@@ -1207,40 +1266,35 @@ export function PagePane({
     });
   };
 
-  const commitEditor = () => {
-    if (!comments || !editor) return;
-    const trimmed = editor.note.trim();
-    if (trimmed === "") return;
+  const commitEditor = async (send: boolean) => {
+    if (!comments || !editor || sendingDraft) return;
+    const note = editor.note.trim();
+    if (note === "") return;
     if (editor.mode === "edit") {
-      comments.onUpdate(activeVer.version, editor.id, trimmed);
+      comments.onUpdate(activeVer.version, editor.id, note);
       setEditor(null);
       return;
     }
-    const targetVersion = activeVer.version;
-    const targetTitle = activeVer.title;
-    const draft = editor;
-    setEditor(null);
-    if (draft.screenshotPromise !== undefined) {
-      void draft.screenshotPromise.then((screenshot) => {
-        comments.onAdd(targetVersion, targetTitle, {
-          id: draft.tempId,
-          path: draft.path,
-          text: draft.text,
-          x: draft.x,
-          y: draft.y,
-          note: trimmed,
-          ...(screenshot !== undefined ? { screenshot } : {}),
-        });
-      });
-    } else {
-      comments.onAdd(targetVersion, targetTitle, {
-        id: draft.tempId,
-        path: draft.path,
-        text: draft.text,
-        x: draft.x,
-        y: draft.y,
-        note: trimmed,
-      });
+    const { tempId, path, text, x, y, screenshotPromise } = editor;
+    const { version, title } = activeVer;
+    setSendingDraft(true);
+    setCommentError(undefined);
+    try {
+      const screenshot = screenshotPromise === undefined ? undefined : await screenshotPromise;
+      const item = { path, text, x, y, note, ...(screenshot !== undefined ? { screenshot } : {}) };
+      if (send) {
+        await comments.onSend({ page: page.page, version, title, comments: [item] });
+      } else {
+        comments.onAdd(version, title, { id: tempId, ...item });
+      }
+      setEditor((current) =>
+        current?.mode === "new" && current.tempId === tempId ? null : current,
+      );
+      if (send) setCommentMode(false);
+    } catch (error) {
+      setCommentError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSendingDraft(false);
     }
   };
 
@@ -1255,8 +1309,11 @@ export function PagePane({
     editor === null
       ? 0
       : editor.mode === "new"
-        ? versionComments.length + 1
-        : versionComments.findIndex((c) => c.id === editor.id) + 1;
+        ? lastNumber + queued.threads.length + versionComments.length + 1
+        : lastNumber +
+          queued.threads.length +
+          versionComments.findIndex((c) => c.id === editor.id) +
+          1;
 
   const popoverPos =
     editor !== null
@@ -1282,17 +1339,13 @@ export function PagePane({
               title="评论"
               disabled={loaded === undefined}
               onClick={() => {
-                setCommentMode((prev) => {
-                  const next = !prev;
-                  if (!next) setEditor(null);
-                  return next;
-                });
+                setOpenThread(null);
+                if (commentMode) setEditor(null);
+                setCommentMode(!commentMode);
               }}
             >
               <Icon name="chat_1" size={ICON_MD} />
-              {versionComments.length > 0 && (
-                <span className="page-pane-comment-count">{versionComments.length}</span>
-              )}
+              {commentCount > 0 && <span className="page-pane-comment-count">{commentCount}</span>}
             </IconButton>
           )}
           <IconButton
@@ -1345,6 +1398,31 @@ export function PagePane({
             onLoad={handleLoad}
           />
         )}
+        {comments && openThread && currentThread && (
+          <PageCommentThreadPopover
+            key={openThread.pinId}
+            thread={currentThread}
+            pending={currentThread.pending || queued.replyTargets.has(openThread.pinId)}
+            x={openThread.viewportX}
+            y={openThread.viewportY}
+            onClose={() => {
+              setOpenThread(null);
+            }}
+            onResolve={
+              currentThread.id === undefined
+                ? undefined
+                : () => comments.onResolve(openThread.pinId)
+            }
+            onReply={(note) =>
+              comments.onSend({
+                page: page.page,
+                version: activeVer.version,
+                title: activeVer.title,
+                comments: [{ replyTo: openThread.pinId, note }],
+              })
+            }
+          />
+        )}
         {editor !== null && popoverPos !== null && (
           <div
             className="page-comment-popover"
@@ -1365,6 +1443,8 @@ export function PagePane({
                 ref={editorInputRef}
                 className="page-comment-popover-input"
                 rows={2}
+                aria-label="评论"
+                disabled={sendingDraft}
                 value={editor.note}
                 onChange={(e) => {
                   const next = e.target.value;
@@ -1373,7 +1453,7 @@ export function PagePane({
                 onKeyDown={(e) => {
                   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                     e.preventDefault();
-                    commitEditor();
+                    void commitEditor(false);
                   }
                 }}
               />
@@ -1401,12 +1481,23 @@ export function PagePane({
                 </Button>
                 <Button
                   size="sm"
-                  variant="primary"
-                  disabled={editor.note.trim() === ""}
-                  onClick={commitEditor}
+                  variant={editor.mode === "new" ? "ghost" : "primary"}
+                  disabled={sendingDraft || editor.note.trim() === ""}
+                  onClick={() => void commitEditor(false)}
                 >
                   {editor.mode === "new" ? "添加" : "保存"}
                 </Button>
+                {editor.mode === "new" && (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    title={commentError}
+                    disabled={sendingDraft || editor.note.trim() === ""}
+                    onClick={() => void commitEditor(true)}
+                  >
+                    发送
+                  </Button>
+                )}
               </div>
             </div>
           </div>

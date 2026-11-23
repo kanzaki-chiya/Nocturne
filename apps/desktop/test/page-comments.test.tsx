@@ -6,7 +6,9 @@ import {
   createSessionView,
   formatPageCommentsBlock,
   type FileAttachment,
+  type PageCommentsInput,
   type PageCommentsSnapshot,
+  type PendingInputItem,
   type SessionPage,
   type UserEntry,
 } from "@nocturne/core/protocol";
@@ -89,9 +91,17 @@ function makeFakeSession() {
 function Harness({
   onSubmitted,
   supportsImageInput,
+  page = twoVersionPage,
+  pendingInputs = [],
+  onSend = vi.fn(async () => undefined),
+  onResolve = vi.fn(async () => undefined),
 }: {
   onSubmitted?: (payload: ComposerSubmit) => void;
   supportsImageInput?: () => Promise<boolean>;
+  page?: SessionPage;
+  pendingInputs?: PendingInputItem[];
+  onSend?: (input: PageCommentsInput) => Promise<void>;
+  onResolve?: (id: string) => Promise<void>;
 }) {
   const [selectedVersion, setSelectedVersion] = useState<number | undefined>(1);
   const [groups, setGroups] = useState<DraftPageCommentGroup[]>([]);
@@ -100,7 +110,7 @@ function Harness({
   return (
     <div>
       <PagePane
-        page={twoVersionPage}
+        page={page}
         selectedVersion={selectedVersion}
         session={session}
         onSelectVersion={setSelectedVersion}
@@ -118,6 +128,9 @@ function Harness({
           onDelete: (version, id) => {
             setGroups((prev) => removeDraftPageComment(prev, "page-1", version, id));
           },
+          pendingInputs,
+          onSend,
+          onResolve,
           supportsImageInput,
         }}
       />
@@ -148,6 +161,152 @@ function Harness({
 function must<T>(value: T | null | undefined, label: string): T {
   if (value === null || value === undefined) throw new Error(`missing ${label}`);
   return value;
+}
+
+describe("桌面面板页面讨论串（ADR-0115）", () => {
+  it("发送按钮交付单条评论，待发圆点只显示加载圈", async () => {
+    const onSend = vi.fn(async (_input: PageCommentsInput) => undefined);
+    const rendered = render(<Harness onSend={onSend} />);
+    const dispatch = await connectCommentFrame();
+    fireEvent.click(screen.getByRole("button", { name: "评论" }));
+    dispatch({
+      type: "nocturne:inline-html:comment-pick",
+      path: "body > #entry",
+      text: "入口",
+      x: 40,
+      y: 60,
+      viewportX: 40,
+      viewportY: 60,
+      hasVisibleText: true,
+    });
+    const dialog = screen.getByRole("dialog", { name: "评论" });
+    expect(
+      within(dialog)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["取消", "添加", "发送"]);
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "加粗" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    const submitted = must(onSend.mock.calls[0]?.[0], "sent comment");
+    expect(submitted).toEqual({
+      page: "page-1",
+      title: "Agent Loop",
+      version: 1,
+      comments: [{ path: "body > #entry", text: "入口", x: 40, y: 60, note: "加粗" }],
+    });
+    rendered.rerender(
+      <Harness
+        onSend={onSend}
+        pendingInputs={[
+          {
+            id: "pi-1",
+            mode: "steer",
+            text: "",
+            createdAt: "2026-11-24T11:00:00Z",
+            attachments: 0,
+            paused: false,
+            pageComments: {
+              page: submitted.page,
+              title: submitted.title,
+              version: submitted.version,
+              count: 1,
+              items: submitted.comments,
+            },
+          },
+        ]}
+      />,
+    );
+    dispatch({
+      type: "nocturne:inline-html:comment-pin-click",
+      pinId: "pi-1:0",
+      viewportX: 40,
+      viewportY: 60,
+    });
+    const thread = screen.getByRole("dialog", { name: "评论" });
+    expect(within(thread).getByText("加粗")).toBeTruthy();
+    expect(thread.querySelector('[aria-busy="true"]')).toBeTruthy();
+    expect(within(thread).queryByRole("textbox")).toBeNull();
+  });
+
+  it("展示往来、发送续回并解决讨论，解决后移除圆点和计数", async () => {
+    const time = "2026-11-24T11:00:00Z";
+    const page: SessionPage = {
+      ...twoVersionPage,
+      comments: [
+        {
+          id: "c1",
+          path: "#entry",
+          text: "入口",
+          x: 40,
+          y: 60,
+          note: "加粗",
+          version: 1,
+          seq: 3,
+          time,
+          pending: false,
+          resolved: false,
+          replies: [{ by: "model", text: "已经加粗。", version: 2, seq: 6, time }],
+        },
+      ],
+    };
+    const onSend = vi.fn(async (_input: PageCommentsInput) => undefined);
+    const onResolve = vi.fn(async (_id: string) => undefined);
+    const { container, rerender } = render(
+      <Harness page={page} onSend={onSend} onResolve={onResolve} />,
+    );
+    const dispatch = await connectCommentFrame();
+    const open = () =>
+      dispatch({
+        type: "nocturne:inline-html:comment-pin-click",
+        pinId: "c1",
+        viewportX: 40,
+        viewportY: 60,
+      });
+    open();
+    const dialog = screen.getByRole("dialog", { name: "评论" });
+    for (const text of ["你", "Nocturne", "v1", "v2", "已经加粗。"])
+      expect(within(dialog).getByText(text)).toBeTruthy();
+    expect(dialog.querySelectorAll("time")).toHaveLength(2);
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "强调色" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "发送" }));
+    await waitFor(() =>
+      expect(onSend.mock.calls[0]?.[0].comments).toEqual([{ replyTo: "c1", note: "强调色" }]),
+    );
+    const resolve = within(dialog).getByRole("button", { name: "解决" });
+    expect(resolve.getAttribute("title")).toBe("解决");
+    fireEvent.click(resolve);
+    await waitFor(() => expect(onResolve).toHaveBeenCalledWith("c1"));
+    rerender(
+      <Harness
+        page={{
+          ...page,
+          comments: page.comments?.map((thread) => ({ ...thread, resolved: true })),
+        }}
+        onSend={onSend}
+        onResolve={onResolve}
+      />,
+    );
+    expect(container.querySelector(".page-pane-comment-count")).toBeNull();
+    open();
+    expect(screen.queryByRole("dialog", { name: "评论" })).toBeNull();
+  });
+});
+
+async function connectCommentFrame() {
+  const iframe = (await screen.findByTitle("Agent Loop")) as HTMLIFrameElement;
+  const win = must(iframe.contentWindow, "contentWindow");
+  const post = vi.spyOn(win, "postMessage").mockImplementation(() => undefined);
+  const dispatch = (data: Record<string, unknown>) =>
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: win, data }));
+    });
+  dispatch({ type: "nocturne:inline-html:ready" });
+  const message = post.mock.calls
+    .map(([data]) => data as { type: string; id: string })
+    .find((data) => data.type === "nocturne:inline-html:render");
+  const id = must(message, "frame render").id;
+  return (data: Record<string, unknown>) => dispatch({ ...data, id });
 }
 
 describe("桌面面板页面评论交互（ADR-0113）", () => {

@@ -634,6 +634,119 @@
   color: var(--a-error);
 }
 
+.page-comment-thread {
+  width: min(300px, calc(100% - 20px));
+  max-height: calc(100% - 20px);
+  padding: var(--space-3);
+  gap: var(--space-3);
+  outline: none;
+}
+
+.page-comment-thread-resolve {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+}
+
+.page-comment-thread-messages {
+  display: grid;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow: auto;
+}
+
+.page-comment-thread-message {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.page-comment-thread-avatar {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--a-raised);
+  color: var(--a-secondary);
+  font-size: var(--fs-1);
+}
+
+.page-comment-thread-avatar.is-model {
+  background: var(--a-accent-subtle);
+}
+
+.page-comment-thread-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 20px;
+  color: var(--a-muted);
+  font-size: var(--fs-1);
+}
+
+.page-comment-thread-meta strong {
+  color: var(--a-text);
+  font-weight: var(--fw-semibold);
+}
+
+.page-comment-thread-version {
+  padding: 0 var(--space-0-5);
+  border-radius: var(--radius-1);
+  background: var(--a-raised);
+  font-family: var(--mono);
+}
+
+.page-comment-thread-text {
+  color: var(--a-text);
+  font-size: var(--fs-2);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.page-comment-thread-reply {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+.page-comment-thread-reply .page-comment-popover-input {
+  min-height: 30px;
+}
+
+.page-comment-thread-send:not(:disabled) {
+  background: var(--a-accent);
+  color: var(--a-on-accent);
+}
+
+.page-comment-thread-wait {
+  display: grid;
+  min-height: 30px;
+  place-items: center;
+}
+
+.page-comment-thread-wait::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--a-border-strong);
+  border-top-color: var(--a-accent);
+  border-radius: var(--radius-pill);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion]) .page-comment-thread-wait::before {
+    animation: page-comment-spin 0.8s linear infinite;
+  }
+}
+
+@keyframes page-comment-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .page-comment-chips {
   display: flex;
   flex-wrap: wrap;

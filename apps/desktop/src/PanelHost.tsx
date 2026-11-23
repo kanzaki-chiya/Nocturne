@@ -20,6 +20,7 @@ import type {
   ApplicationTarget,
   BackgroundShellTask,
   LocalFileContent,
+  PageCommentsInput,
   PluginOverview,
   SessionAppSurface,
   SubagentSummary,
@@ -270,6 +271,7 @@ export function useSidePanel({
         onUpdate: (page: string, version: number, id: string, note: string) => void;
         onDelete: (page: string, version: number, id: string) => void;
         onClearPage: (page: string) => void;
+        onSend: (sessionId: string, input: PageCommentsInput) => Promise<void>;
         supportsImageInput?: (() => Promise<boolean>) | undefined;
       }
     | undefined;
@@ -2166,6 +2168,9 @@ export function useSidePanel({
                       onDelete: (version: number, id: string) => {
                         pageComments.onDelete(pageId, version, id);
                       },
+                      pendingInputs: active.pendingInputs.items,
+                      onSend: (input) => pageComments.onSend(active.session.id, input),
+                      onResolve: (comment) => active.session.resolvePageComment(pageId, comment),
                       supportsImageInput: pageComments.supportsImageInput,
                     }),
                   }

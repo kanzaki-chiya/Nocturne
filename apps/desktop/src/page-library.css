@@ -153,10 +153,25 @@
 }
 
 .plib-page .plib-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--a-text);
+}
+
+.plib-page .plib-title > :first-child {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--a-text);
+}
+
+.plib-page .plib-comment-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--a-accent);
 }
 
 .plib-page .plib-session {

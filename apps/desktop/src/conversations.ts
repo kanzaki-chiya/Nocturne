@@ -585,9 +585,16 @@ export class Conversations {
     create?: CreateSessionChoice,
     /** 本地消息已挂上、会话已选中（新会话已建好）时回调，不等 Core 接受 */
     onStarted?: () => void,
+    expectedSessionId?: string,
   ): Promise<boolean> {
     const prepared = await this.serial(async () => {
       const entry = this.selected;
+      if (
+        expectedSessionId !== undefined &&
+        (entry?.session.id !== expectedSessionId || entry.dead === true)
+      ) {
+        throw new Error("页面会话已切换或断开");
+      }
       const queue =
         entry !== undefined &&
         entry.dead !== true &&

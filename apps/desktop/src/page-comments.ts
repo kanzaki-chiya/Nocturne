@@ -134,13 +134,11 @@ export function toPageCommentsSnapshot(input: PageCommentsInput): PageCommentsSn
     page: input.page,
     version: input.version,
     title: input.title,
-    comments: input.comments.map((c) => ({
-      path: c.path,
-      text: c.text,
-      x: c.x,
-      y: c.y,
-      note: c.note,
-    })),
+    comments: input.comments.map((c) =>
+      c.replyTo !== undefined
+        ? { replyTo: c.replyTo, note: c.note }
+        : { path: c.path, text: c.text, x: c.x, y: c.y, note: c.note },
+    ),
   };
 }
 
