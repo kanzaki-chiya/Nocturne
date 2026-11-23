@@ -656,6 +656,7 @@
   border: 0;
   background: transparent;
   resize: none;
+  overflow-y: hidden;
   max-height: 160px;
 }
 .phone-card .has-skill textarea {

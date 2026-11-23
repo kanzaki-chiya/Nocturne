@@ -79,7 +79,7 @@
 
 ### 4. 公开查询、RPC 与客户端
 
-- 新增 `Runtime.describeProjectSubagents({ workspaceRoot? })` 及对应 RPC 方法 `agents.describeProjectSubagents`，返回 `{ agents, warnings }`，每项为 `{ id, name, description, source, path, effort?, tools?, shadowedBy? }`（`tools` 为映射并相减后的结果，`warnings` 带文件路径）。方法仅本机开放，远程调用报 `remote_not_allowed`（同 `skills.describeSkills` 与 `agents.describeExternalAgents`）。不新增或修改事件。
+- 新增 `Runtime.describeProjectSubagents({ workspaceRoot? })` 及对应 RPC 方法 `agents.describeProjectSubagents`，返回 `{ agents, warnings }`，每项为 `{ id, name, description, source, path, effort?, tools?, shadowedBy? }`（`tools` 为映射并相减后的结果，`warnings` 带文件路径）。方法仅本机开放，远程调用报 `remote_not_allowed`（同 `agents.describeExternalAgents`）。不新增或修改事件。
 - **桌面端「设置」→「子代理」**：在「内置档位」与插件分组之间新增「项目」分组（无项目子代理时隐藏），列出所选工作区生效的项目子代理；解析警告按现有警告样式展示；点行进入只读详情页，展示名称、完整描述、来源文件路径、工具与思考档位，无模型选择、无开关、无多余说明文字或徽标。
 - **TUI `/settings`**：存在生效的项目子代理时新增「项目」只读分组，列出 `project:<名字>`、工具数与思考档位，说明区展示描述与来源路径。
 

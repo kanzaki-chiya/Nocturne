@@ -294,14 +294,24 @@ export function PhoneComposer({
     : undefined;
   const indexReady = fileRefs !== null && index?.key === fileRefs.key;
 
+  const MAX_COMPOSER_HEIGHT = 160;
+
   const syncMirror = () => {
     if (mirror.current && field.current) mirror.current.scrollTop = field.current.scrollTop;
   };
   useEffect(() => {
     const node = field.current;
     if (node === null) return;
+    node.style.overflowY = "hidden";
     node.style.height = "auto";
-    node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
+    const baseHeight = node.clientHeight;
+    const contentHeight = node.scrollHeight;
+    // scrollHeight 是四舍五入的整数，多行小数行高（如 23.2px × 2 + 20px = 66.4px）可能少算最多 0.5px；
+    // 超过单行基线时向上留 1px，避免未达上限时出现假滚动条或亚像素溢出。
+    const targetHeight = contentHeight > baseHeight ? contentHeight + 1 : contentHeight;
+    const overflowing = targetHeight > MAX_COMPOSER_HEIGHT;
+    node.style.height = `${Math.min(targetHeight, MAX_COMPOSER_HEIGHT)}px`;
+    node.style.overflowY = overflowing ? "auto" : "hidden";
     syncMirror();
   }, [visibleDraft, draftSkill?.label]);
 

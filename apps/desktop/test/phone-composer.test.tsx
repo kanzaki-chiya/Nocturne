@@ -614,6 +614,51 @@ it("手机插件补全、退格、输入历史和分叉回填共用技能标签�
   });
 });
 
+it("手机输入框内容未超 160px 时向下兼容小数行高且隐藏滚动条，超限时恢复滚动", async () => {
+  await act(() =>
+    root?.render(
+      <PhoneComposer
+        variant="session"
+        running={false}
+        controls={undefined}
+        onSubmit={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSlash={vi.fn()}
+        skills={[pdf]}
+      />,
+    ),
+  );
+  const field = container.querySelector("textarea");
+  if (!field) throw new Error("缺少输入框");
+  let measuredScroll = 44;
+  Object.defineProperty(field, "clientHeight", { configurable: true, get: () => 44 });
+  Object.defineProperty(field, "scrollHeight", { configurable: true, get: () => measuredScroll });
+
+  // 单行保持 44px 基线且不出滚动条
+  act(() => fireEvent.change(field, { target: { value: "单行内容" } }));
+  expect(field.style.height).toBe("44px");
+  expect(field.style.overflowY).toBe("hidden");
+
+  // 两行小数高度（如 66.4px 四舍五入为 66）向上留 1px 且不出滚动条
+  measuredScroll = 66;
+  act(() => fireEvent.change(field, { target: { value: "第一行\n第二行" } }));
+  expect(field.style.height).toBe("67px");
+  expect(field.style.overflowY).toBe("hidden");
+
+  // 选技能后的三行同样留 1px 且不出滚动条
+  measuredScroll = 90;
+  act(() => fireEvent.change(field, { target: { value: "/pdf 第一行\n第二行\n第三行" } }));
+  expect(container.querySelector(".phone-input-mirror")).not.toBeNull();
+  expect(field.style.height).toBe("91px");
+  expect(field.style.overflowY).toBe("hidden");
+
+  // 超过 160px 上限时封顶并恢复纵向滚动条
+  measuredScroll = 240;
+  act(() => fireEvent.change(field, { target: { value: `/pdf ${"长文本\n".repeat(10)}` } }));
+  expect(field.style.height).toBe("160px");
+  expect(field.style.overflowY).toBe("auto");
+});
+
 it("手机技能草稿的镜像与输入框共享滚动条留白和滚动位置", async () => {
   const text = "中文 English 混排的一行。\n".repeat(12);
   await act(() =>
