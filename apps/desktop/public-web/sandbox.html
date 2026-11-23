@@ -965,6 +965,36 @@
           if (commentHoverEl) commentHoverEl.style.display = "none";
         }
 
+        function resolveCommentPinPosition(pin) {
+          if (!pin.relocate) return pin;
+          let target;
+          if (typeof pin.path === "string" && pin.path !== "") {
+            try {
+              target = document.querySelector(pin.path);
+            } catch {
+              // Older selectors can be invalid for the current document.
+            }
+          }
+          const hasBox = (el) => el && !isInsideCommentUi(el) && el.getClientRects().length > 0;
+          if (!hasBox(target) && typeof pin.text === "string" && pin.text !== "") {
+            const candidates = Array.from(document.body.querySelectorAll("*")).reverse();
+            let substringMatch;
+            for (const el of candidates) {
+              if (!hasBox(el)) continue;
+              const text = extractVisibleText(el);
+              if (text === pin.text) {
+                target = el;
+                break;
+              }
+              if (!substringMatch && text.includes(pin.text)) substringMatch = el;
+            }
+            if (!hasBox(target)) target = substringMatch;
+          }
+          if (!hasBox(target)) return pin;
+          const rect = target.getBoundingClientRect();
+          return { x: rect.left + rect.width / 2 + window.scrollX, y: rect.top + window.scrollY };
+        }
+
         function renderCommentPins() {
           if (commentPins.length === 0 && !commentLayer) return;
           ensureCommentUi();
@@ -985,8 +1015,9 @@
             btn.setAttribute("data-pin-id", pin.id);
             btn.setAttribute("aria-label", `评论 ${pin.number}`);
             if (pin.active) btn.setAttribute("data-active", "true");
-            btn.style.left = `${Math.round(pin.x)}px`;
-            btn.style.top = `${Math.round(pin.y)}px`;
+            const { x, y } = resolveCommentPinPosition(pin);
+            btn.style.left = `${Math.round(x)}px`;
+            btn.style.top = `${Math.round(y)}px`;
             btn.textContent = String(pin.number);
             commentLayer.appendChild(btn);
           }

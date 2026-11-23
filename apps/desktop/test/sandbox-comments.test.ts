@@ -226,6 +226,48 @@ describe("sandbox.html 评论层（ADR-0113）", () => {
     h.dom.window.close();
   });
 
+  it("新版本圆点按路径、可见文字、原坐标依次定位", () => {
+    const h = createSandboxHarness();
+    h.renderPage('<p id="moved">改过的文字</p><p id="replacement">保留的原文</p>');
+    for (const [id, left, top] of [
+      ["moved", 30, 40],
+      ["replacement", 130, 140],
+    ] as const) {
+      const target = must(h.document.getElementById(id), id);
+      const rect = new h.window.DOMRect(left, top, 40, 20);
+      vi.spyOn(target, "getClientRects").mockReturnValue([rect] as unknown as DOMRectList);
+      vi.spyOn(target, "getBoundingClientRect").mockReturnValue(rect);
+    }
+    h.sendFromParent({
+      type: "nocturne:inline-html:comment-pins",
+      id: "inst-1",
+      pins: [
+        { id: "c1", number: 1, path: "#moved", text: "保留的原文", x: 1, y: 2, relocate: true },
+        { id: "c2", number: 2, path: "#old", text: "保留的原文", x: 3, y: 4, relocate: true },
+        { id: "c3", number: 3, path: "[", text: "缺失的原文", x: 5, y: 6, relocate: true },
+        { id: "c4", number: 4, path: "#moved", text: "保留的原文", x: 7, y: 8 },
+      ],
+    });
+    expect(
+      Array.from(h.document.querySelectorAll<HTMLElement>(".nct-comment-pin"), (pin) => [
+        pin.style.left,
+        pin.style.top,
+      ]),
+    ).toEqual([
+      ["50px", "40px"],
+      ["150px", "140px"],
+      ["5px", "6px"],
+      ["7px", "8px"],
+    ]);
+    h.dom.window.close();
+  });
+
+  it("两份沙箱空壳完全一致", () => {
+    expect(
+      readFileSync(path.resolve(import.meta.dirname, "../../relay/public/sandbox.html"), "utf8"),
+    ).toBe(SANDBOX_HTML);
+  });
+
   it("圆点绘制、可点选、不进入截图序列化 DOM", async () => {
     const h = createSandboxHarness();
     h.renderPage(`<!doctype html><html><body><div id="box">内容</div></body></html>`);
