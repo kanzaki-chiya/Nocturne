@@ -286,6 +286,8 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
         description: "对上一版 HTML 按序执行的精确替换（仅更新用，与 html 互斥，小改动优先）",
       },
       display: {
+        type: "string",
+        enum: ["inline", "panel"],
         description:
           'For new pages, use "inline" by default and "panel" only on explicit user request. Updates ignore this field and keep the display of the first version.',
       },

@@ -770,12 +770,12 @@ describe("render_html 工具与内嵌页面标记", () => {
             { old: "总数: 162</p><p>环比: +10%", new: "总数: 162</p><p>环比: +26%" },
           ],
         },
-        // 3. html 整份重写并更新标题
+        // 3. html 整份重写并更新标题，传入合法但不同的 display: "inline" 仍忽略
         {
           page: "page-1",
           title: "每周提交看板（终版）",
           html: "<h1>终版看板</h1><p>八周平均: 20.3</p>",
-          display: "ignored for updates",
+          display: "inline",
         },
         // 4. 新建内嵌页面（缺省 display = "inline"）-> page-2 v1
         { title: "架构对比表", html: "<table><tr><td>A</td></tr></table>" },
