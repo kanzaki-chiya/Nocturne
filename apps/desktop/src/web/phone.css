@@ -100,6 +100,7 @@
   overflow: hidden;
   padding-top: env(safe-area-inset-top);
   font-size: var(--fs-4);
+  touch-action: pan-x pan-y;
 }
 /* 触控目标不小于 44px（DESIGN.md 第 2 节）：保持高优先级，按钮类写的更小 min-height 不生效 */
 .phone
@@ -302,6 +303,8 @@
 .phone textarea {
   width: 100%;
   font: inherit;
+  /* 输入控件字号不小于 16px，避免手机端聚焦触发系统自动放大 */
+  font-size: var(--fs-4);
   color: var(--a-text);
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-3);
@@ -309,6 +312,13 @@
   background: var(--a-input);
   margin-top: 6px;
   caret-color: var(--a-accent);
+}
+.phone .input,
+.phone .textarea,
+.phone .conversation .ask .ask-rule-input,
+.phone .conversation .ask textarea,
+.phone .qcard :is(input, textarea) {
+  font-size: var(--fs-4);
 }
 .phone input::placeholder,
 .phone textarea::placeholder {
@@ -1204,7 +1214,7 @@
   border: 0;
   background: transparent;
   color: var(--a-secondary);
-  font-size: var(--fs-3);
+  font-size: var(--fs-4);
 }
 .phone .danger {
   color: var(--a-error);

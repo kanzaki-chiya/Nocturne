@@ -132,6 +132,12 @@ class MainActivity : TauriActivity() {
     webViewRef = webView
     // wry 在 setWebView 之后才 setWebViewClient；排到主线程队列后面再包装，才能包住它的 client
     webView.post {
+      // 禁用 WebView 级整页缩放；内嵌页面全屏缩放由沙箱 iframe 内手势处理
+      webView.settings.apply {
+        setSupportZoom(false)
+        builtInZoomControls = false
+        displayZoomControls = false
+      }
       webView.webViewClient = GuardedWebViewClient(webView.webViewClient, ::rendererGone)
       webView.webChromeClient?.let { webView.webChromeClient = CameraPermissionClient(this, it) }
     }
