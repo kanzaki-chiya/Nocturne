@@ -24,7 +24,7 @@ import {
   type ViewEntry,
 } from "@nocturne/core/protocol";
 import stringWidth from "string-width";
-import { boxSafe, stripControls, truncateLine } from "../format.js";
+import { boxSafe, formatQuoteLines, stripControls, truncateLine } from "../format.js";
 import { ensembleAuthorLabel } from "../text-format-ensemble.js";
 import {
   parseSuiteThreadReport,
@@ -121,9 +121,21 @@ function UserRow({
       </Box>
     );
   }
+  const quoteLines =
+    entry.quotes && entry.quotes.length > 0
+      ? formatQuoteLines(entry.quotes, {
+          maxWidth: Math.max(1, width - 4),
+          ascii: env.ascii,
+        })
+      : [];
   const text = workModeDisplayText(userText(entry), entry.workMode);
   return (
     <Box marginTop={1} flexDirection="column">
+      {quoteLines.map((line, i) => (
+        <Text key={`quote:${i}`} dimColor wrap="truncate">
+          {line}
+        </Text>
+      ))}
       <Text color={theme.accent} bold>
         {glyphs(env).prompt}{" "}
         {splitInputTokens(text).map((part, i) =>

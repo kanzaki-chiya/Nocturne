@@ -34,6 +34,7 @@ import { interleaveClient, type ClientLine } from "./client-lines.js";
 import { splitInputTokens, userText, fileRefLine } from "./file-refs.js";
 import {
   boxSafe,
+  formatQuoteLines,
   lastWrapBreak,
   noteItemsFromEntry,
   permissionReviewLine,
@@ -335,10 +336,23 @@ function layoutEntryBody(
           }));
         return [...barred(`${entry.key}:h`, head, { dim: true }), ...barred(entry.key, body, {})];
       }
+      const quoteLines =
+        entry.quotes && entry.quotes.length > 0
+          ? formatQuoteLines(entry.quotes, {
+              maxWidth: budget(width),
+              ascii,
+              safeBox: true,
+            }).map((line, i) => ({
+              key: `${entry.key}:quote:${i}`,
+              text: line,
+              dim: true,
+            }))
+          : [];
       const text = workModeDisplayText(userText(entry), entry.workMode);
       const fullText = stripControls(`${prompt} ${text}`.replace(/\r\n?/g, "\n"));
       let offset = 0;
       return [
+        ...quoteLines,
         ...rows(entry.key, `${prompt} ${text}`, width, { color: theme.accent, bold: true }).map(
           (line) => {
             // [Image #n] 占位换色，与正文区分（其余分段继承本行的 cyan/bold）

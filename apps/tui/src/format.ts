@@ -5,6 +5,7 @@
 import stringWidth from "string-width";
 
 import type {
+  MessageQuote,
   NoteItem,
   PermissionReviewedPayload,
   ToolEntry,
@@ -380,4 +381,76 @@ export function permissionReviewLine(review: PermissionReviewedPayload): string 
   const label = { allow: "放行", block: "拦截", unsure: "交给你确认" }[review.verdict];
   const usage = review.usage;
   return `审查：${label} — ${review.reason.replace(/\s+/g, " ")}${review.cached ? "（缓存）" : ""}${usage ? `（审查用量：${usage.inputTokens} 输入 / ${usage.outputTokens} 输出）` : ""}`;
+}
+
+const QUOTE_MAX_LINES = 2;
+
+function wrapQuoteParagraph(text: string, limit: number): string[] {
+  const out: string[] = [];
+  for (const part of text.split("\n")) {
+    if (part === "") {
+      out.push("");
+      continue;
+    }
+    let line = "";
+    let used = 0;
+    for (const ch of part) {
+      const w = Math.max(1, stringWidth(ch));
+      if (w > limit) continue;
+      if (used + w > limit && line !== "") {
+        const at = lastWrapBreak(line, { nextWide: stringWidth(ch) >= 2 });
+        if (at > 0 && at < line.length) {
+          out.push(line.slice(0, at));
+          line = line.slice(at);
+          used = stringWidth(line);
+        }
+        if (used + w > limit && line !== "") {
+          out.push(line);
+          line = "";
+          used = 0;
+        }
+      }
+      line += ch;
+      used += w;
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+/** ADR-0116 §5：TUI 与 CLI 在用户消息上方以 `> ` 行显示引用，每段最多两行。 */
+export function formatQuoteLines(
+  quotes: readonly MessageQuote[],
+  options: {
+    maxWidth?: number | undefined;
+    ascii?: boolean | undefined;
+    safeBox?: boolean | undefined;
+  } = {},
+): string[] {
+  const ellipsis = options.ascii === true || options.safeBox === true ? "..." : "…";
+  const contentLimit =
+    options.maxWidth !== undefined ? Math.max(1, options.maxWidth - 2) : undefined;
+  const result: string[] = [];
+  for (const quote of quotes) {
+    const raw = stripControls(quote.text.replace(/\r\n?/g, "\n")).trim();
+    const clean = options.safeBox === true ? boxSafe(raw) : raw;
+    if (clean === "") continue;
+    const lines =
+      contentLimit !== undefined ? wrapQuoteParagraph(clean, contentLimit) : clean.split("\n");
+    if (lines.length <= QUOTE_MAX_LINES) {
+      for (const line of lines) result.push(`> ${line}`);
+      continue;
+    }
+    const first = lines[0] ?? "";
+    const second = (lines[1] ?? "").trimEnd();
+    result.push(`> ${first}`);
+    if (contentLimit === undefined) {
+      result.push(`> ${second}${ellipsis}`);
+    } else if (stringWidth(second) + stringWidth(ellipsis) <= contentLimit) {
+      result.push(`> ${second}${ellipsis}`);
+    } else {
+      result.push(`> ${truncateLine(`${second} `, contentLimit, ellipsis)}`);
+    }
+  }
+  return result;
 }

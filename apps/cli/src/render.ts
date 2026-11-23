@@ -4,7 +4,7 @@
  * 颜色经 util.styleText（终端不支持或 NO_COLOR 时自动降级）。
  */
 import { styleText } from "node:util";
-import { truncateMiddle } from "@nocturne/tui/text-format";
+import { formatQuoteLines, truncateMiddle } from "@nocturne/tui/text-format";
 
 import {
   SUBAGENT_TASK_FALLBACK,
@@ -157,6 +157,9 @@ export function renderEvent(ev: RuntimeEvent, mode: RenderMode): Rendered[] {
   switch (ev.type) {
     case "message.user":
       return [
+        ...(ev.payload.quotes && ev.payload.quotes.length > 0
+          ? formatQuoteLines(ev.payload.quotes).map((line) => aux(style("dim", line)))
+          : []),
         ...(ev.payload.fileRefs ?? []).map((ref) =>
           aux(
             `  附带 @${ref.path}${ref.kind === "file" ? `（${ref.lines ?? 0}/${ref.totalLines ?? 0} 行）` : ref.kind === "directory" ? "（目录）" : "（图片）"}`,

@@ -1,7 +1,7 @@
 import { parseFileRefs } from "@nocturne/core";
 import { userEntryText, type FileRef, type UserEntry } from "@nocturne/core/protocol";
 
-/** 用户消息原文：规则在 Core 的 `userEntryText`（去掉末尾快照块）。 */
+/** 用户消息原文：规则在 Core 的 `userEntryText`（去掉首部引用块与末尾快照块）。 */
 export function userText(entry: UserEntry): string {
   return userEntryText(entry);
 }

@@ -278,6 +278,39 @@ describe("事件渲染（cli.md 第 5 节）", () => {
     ).toEqual([{ channel: "stdout", text: "/grill-me" }]);
   });
 
+  it("引用回复消息（ADR-0116）：以弱色 > 行显示引用，每段最多两行", () => {
+    const quotes = [
+      { text: "第一段只有一行", seq: 2 },
+      { text: "第二段第一行\n第二段第二行\n第二段第三行", seq: 4 },
+    ];
+    const interactive = renderEvent(
+      durable("message.user", {
+        messageId: "m-quote",
+        content: [{ type: "text", text: "好的" }],
+        quotes,
+      }),
+      "interactive",
+    );
+    expect(interactive).toHaveLength(3);
+    expect(interactive.every((r) => r.channel === "stdout")).toBe(true);
+    expect(interactive.map((r) => r.text.replace(/\x1b\[[0-9;]*m/g, ""))).toEqual([
+      "> 第一段只有一行",
+      "> 第二段第一行",
+      "> 第二段第二行…",
+    ]);
+
+    const printMode = renderEvent(
+      durable("message.user", {
+        messageId: "m-quote",
+        content: [{ type: "text", text: "好的" }],
+        quotes,
+      }),
+      "print",
+    );
+    expect(printMode).toHaveLength(3);
+    expect(printMode.every((r) => r.channel === "stderr")).toBe(true);
+  });
+
   it("结构化输出省略时显示真实省略提示", () => {
     const ev = renderEvent(
       durable("tool.completed", {

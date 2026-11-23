@@ -7,7 +7,7 @@ import {
   type SessionView,
   type UsageStats,
 } from "@nocturne/core/protocol";
-export { stripControls, truncateMiddle } from "./format.js";
+export { formatQuoteLines, stripControls, truncateMiddle } from "./format.js";
 
 /** 厂商价（ADR-0053 修订）的来源说明；桌面用量页同一措辞。 */
 export const VENDOR_PRICE_NOTE =
