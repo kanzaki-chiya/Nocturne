@@ -21,7 +21,7 @@ export const WORK_MODE_ITEMS: readonly (InputLabelData & { name: WorkModeName })
   { name: "plan", label: "计划", icon: "list_check" },
   { name: "boost", label: "多代理攻坚", icon: "robot" },
   { name: "ensemble", label: "合奏", icon: "group" },
-  { name: "page", label: "面板页面", icon: "layout_right" },
+  { name: "cadenza", label: "面板页面", icon: "layout_right" },
 ];
 
 export function workModeLabel(name: string): InputLabelData {

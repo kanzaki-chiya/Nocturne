@@ -73,7 +73,7 @@ function ensembleBody(context: WorkModeContext): string {
   ].join("\n");
 }
 
-const PAGE = [
+const CADENZA = [
   'Use render_html with display: "panel" to create a new page for the request above.',
   "- When revising this page later in the same session, update it using its page id instead of creating another page.",
   "- Do not repeat the page content in your written reply.",
@@ -85,7 +85,7 @@ const BODIES: Record<WorkModeName, (context: WorkModeContext) => string> = {
   plan: () => PLAN,
   boost: boostBody,
   ensemble: ensembleBody,
-  page: () => PAGE,
+  cadenza: () => CADENZA,
 };
 
 /** 用户批准计划后开新 Turn 的说明（ADR-0076 §5） */

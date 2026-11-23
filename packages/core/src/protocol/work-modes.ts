@@ -4,7 +4,14 @@
  */
 import type { DurableEvent } from "./events.js";
 
-export const WORK_MODE_NAMES = ["grill-me", "goal", "plan", "boost", "ensemble", "page"] as const;
+export const WORK_MODE_NAMES = [
+  "grill-me",
+  "goal",
+  "plan",
+  "boost",
+  "ensemble",
+  "cadenza",
+] as const;
 
 export type WorkModeName = (typeof WORK_MODE_NAMES)[number];
 
@@ -258,7 +265,7 @@ const USAGE: Record<WorkModeName, string> = {
   plan: "用法：/plan 任务",
   boost: "用法：/boost 任务",
   ensemble: "用法：/ensemble 任务",
-  page: "用法：/page 要求",
+  cadenza: "用法：/cadenza 要求",
 };
 
 /** 子命令：整行恰好是命令名（+ 一个单词）时才算，其余文字都当任务 */
@@ -302,5 +309,5 @@ export const WORK_MODE_COMMANDS: readonly { name: string; summary: string }[] = 
   { name: "/plan", summary: "计划模式" },
   { name: "/boost", summary: "多代理攻坚" },
   { name: "/ensemble", summary: "合奏协作" },
-  { name: "/page", summary: "面板页面" },
+  { name: "/cadenza", summary: "面板页面" },
 ];

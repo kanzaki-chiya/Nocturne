@@ -556,7 +556,7 @@ it("手机斜杠菜单的命令和技能说明都左对齐并单行省略", asyn
   act(() => fireEvent.change(field, { target: { value: "/" } }));
   const summaries = [...container.querySelectorAll(".phone-slash-row > span")];
   const page = [...container.querySelectorAll(".phone-slash-row")].find((row) =>
-    row.textContent?.includes("/page"),
+    row.textContent?.includes("/cadenza"),
   );
   expect(page?.textContent).toContain("面板页面");
   expect(summaries.map((summary) => summary.textContent)).toContain("压缩当前上下文");

@@ -138,7 +138,7 @@ export function SuiteThreadPane({
           plan: "子会话不能使用执行方式",
           boost: "子会话不能使用执行方式",
           ensemble: "子会话不能使用执行方式",
-          page: "子会话不能使用执行方式",
+          cadenza: "子会话不能使用执行方式",
         }}
         todos={view.todos}
         running={running}

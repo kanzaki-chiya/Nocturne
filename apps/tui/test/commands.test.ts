@@ -113,11 +113,11 @@ describe("执行方式命令（ADR-0076）", () => {
     expect(helpLines().join("\n")).toContain("/ensemble");
   });
 
-  it("/page 出现在 TUI 目录和 CLI 帮助里，并可补全", () => {
+  it("/cadenza 出现在 TUI 目录和 CLI 帮助里，并可补全", () => {
     const ctx = { effortLevels: [], providerIds: [] };
-    expect(helpLines().join("\n")).toContain("/page");
-    expect(cliHelpText()).toContain("/page");
-    expect(completeSlash("/pag", ctx).map((item) => item.insert)).toEqual(["/page "]);
+    expect(helpLines().join("\n")).toContain("/cadenza");
+    expect(cliHelpText()).toContain("/cadenza");
+    expect(completeSlash("/cad", ctx).map((item) => item.insert)).toEqual(["/cadenza "]);
   });
 });
 

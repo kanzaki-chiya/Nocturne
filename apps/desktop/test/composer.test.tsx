@@ -500,7 +500,7 @@ describe("Composer 斜杠命令", () => {
       expect.stringContaining("/plan"),
       expect.stringContaining("/boost"),
       expect.stringContaining("/ensemble"),
-      expect.stringContaining("/page"),
+      expect.stringContaining("/cadenza"),
     ]);
     expect(menu.textContent).toContain("面板页面");
     fireEvent.keyDown(field, { key: "Tab" });
