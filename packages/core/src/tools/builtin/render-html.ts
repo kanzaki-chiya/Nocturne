@@ -242,7 +242,9 @@ async function inlineImages(
 export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> = {
   name: "render_html",
   description:
-    "新建或更新单文件 HTML 页面，在隔离沙箱中渲染。仅在图表、对比表、示意图、界面草图、交互小工具、看板或独立文档明显优于文字时，或用户明确要求时使用；普通说明与代码直接用 Markdown。新建时用 display 选方式（更新时忽略）：inline（默认）随回答内嵌，适合图表、示意图、对比表；panel 在右侧面板打开，适合反复修改或边聊边用的小工具、看板、文档。更新传已有 page id，配 edits（小改动优先，按序唯一精确替换）或 html（整份重写），省去 title 沿用原题；需看全文用 read 读结果里的文件路径。沙箱允许内联脚本与样式，阻止跳转/表单/弹窗/下载。本地图片列进 images 并在 html 属性或 url() 写同串即自动内联。需响应式（内嵌桌面约 720px、手机约 360px，高过 420px 自动折叠可展开或全屏）。正文勿复述页面内容。自动注入随深浅色切换的主题 CSS 变量：--bg、--raised、--text、--secondary、--muted、--border、--accent、--ok、--warn、--bad、--sans、--mono。" +
+    "新建或更新单文件 HTML 页面，在隔离沙箱中渲染。仅在图表、对比表、示意图、界面草图、交互小工具、看板或独立文档明显优于文字时，或用户明确要求时使用；普通说明与代码直接用 Markdown。" +
+    '\nWhen creating a page, use display: "inline" (the default) only for small visuals that support the written answer. Use display: "panel" for the requested deliverable itself (such as a diagram, dashboard, tool, or document), and for any page the user is likely to revise or use on its own. When in doubt, use "panel". Updating a page moves it to the panel and ignores the supplied display. Set the page background on body.' +
+    "\n更新传已有 page id，配 edits（小改动优先，按序唯一精确替换）或 html（整份重写），省去 title 沿用原题；需看全文用 read 读结果里的文件路径。沙箱允许内联脚本与样式，阻止跳转/表单/弹窗/下载。本地图片列进 images 并在 html 属性或 url() 写同串即自动内联。需响应式（内嵌桌面约 720px、手机约 360px，高过 420px 自动折叠可展开或全屏）。正文勿复述页面内容。自动注入随深浅色切换的主题 CSS 变量：--bg、--raised、--text、--secondary、--muted、--border、--accent、--ok、--warn、--bad、--sans、--mono。" +
     '\nThe only allowed external host is https://cdnjs.cloudflare.com. Use /ajax/libs/<lib>/<exact version>/<file> URLs and pin exact versions. Use UMD or global builds, or import ES modules from that same host with <script type="module">. Write the parts that do not depend on libraries inline first and show a brief message in the page if a library fails to load. The page cannot use fetch, XMLHttpRequest, or WebSocket with any address.' +
     "\nUse window.nocturne.storage to save page data and window.nocturne.ask to call a model. Check for window.nocturne first and render normally when it is unavailable, without saving or calling a model. Model calls may require user approval. Handle rejected and aborted calls.",
   inputSchema: {
@@ -287,7 +289,7 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
         type: "string",
         enum: ["inline", "panel"],
         description:
-          "新建时的显示方式（默认 inline，更新忽略）：inline 随回复内嵌；panel 显示入口行并在右侧面板打开",
+          'For new pages only. Use "inline" (default) for small visuals that support the answer. Use "panel" for the requested deliverable, pages the user may revise or use on their own, and whenever in doubt. Updates always use "panel".',
       },
       images: {
         type: "array",
@@ -400,8 +402,7 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
       pageId = existing.page;
       const latest = existing.versions.at(-1);
       version = (latest?.version ?? existing.versions.length) + 1;
-      // 更新时沿用第一版的显示方式，忽略本次传入的 display
-      display = existing.display;
+      display = "panel";
       title = input.title !== undefined ? input.title.trim() : existing.title;
 
       if (input.edits !== undefined) {

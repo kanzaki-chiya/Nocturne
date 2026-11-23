@@ -750,7 +750,7 @@ describe("render_html 工具与内嵌页面标记", () => {
       }
     });
 
-    it("新建 id/版本号、edits 顺序替换、html 整份重写、title 沿用、display 继承与忽略、结果含文件路径", async () => {
+    it("新建 id/版本号、edits 顺序替换、html 整份重写、title 沿用、更新忽略 display、结果含文件路径", async () => {
       const root = mkdtempSync(path.join(tmpdir(), "nct-render-ver-"));
       roots.push(root);
       const sessionsDir = path.join(root, "sessions");
@@ -1056,7 +1056,7 @@ describe("render_html 工具与内嵌页面标记", () => {
       }
     });
 
-    it("回退撤销之后的版本，分叉继承分叉点之前的版本", async () => {
+    it("更新写入面板版本，回退和分叉在只剩第一版时恢复内嵌", async () => {
       const root = mkdtempSync(path.join(tmpdir(), "nct-render-rewind-"));
       roots.push(root);
       const sessionsDir = path.join(root, "sessions");
@@ -1070,7 +1070,7 @@ describe("render_html 工具与内嵌页面标记", () => {
                 type: "tool_call",
                 toolCallId: "rh-t1",
                 name: "render_html",
-                input: { title: "看板", html: "<p>v1</p>", display: "panel" },
+                input: { title: "看板", html: "<p>v1</p>", display: "inline" },
               },
               { type: "finish", reason: "tool_calls" },
             ];
@@ -1087,7 +1087,7 @@ describe("render_html 工具与内嵌页面标记", () => {
                 type: "tool_call",
                 toolCallId: "rh-t2",
                 name: "render_html",
-                input: { page: "page-1", edits: [{ old: "v1", new: "v2" }] },
+                input: { page: "page-1", display: "inline", edits: [{ old: "v1", new: "v2" }] },
               },
               { type: "finish", reason: "tool_calls" },
             ];
@@ -1107,9 +1107,23 @@ describe("render_html 工具与内嵌页面标记", () => {
       const session = await runtime.createSession({ model: "fake/fake-model" });
       try {
         await session.submit({ text: "做看板" });
+        const first = replaySessionView(session.durableEvents());
+        expect(first.pages[0]?.display).toBe("inline");
         await session.submit({ text: "改成 v2" });
-        const before = replaySessionView(session.durableEvents());
-        expect(before.pages[0]?.versions).toHaveLength(2);
+        const events = session.durableEvents();
+        const before = replaySessionView(events);
+        expect(before.pages[0]?.display).toBe("panel");
+        expect(before.pages[0]?.versions.map((v) => v.file.inline?.display)).toEqual([
+          "inline",
+          "panel",
+        ]);
+        const completions = events.filter(
+          (event): event is DurableEvent<"tool.completed"> =>
+            event.type === "tool.completed" && event.payload.name === "render_html",
+        );
+        expect(completions[0]?.payload.modelContent).toContain("page-1 v1，内嵌");
+        expect(completions[1]?.payload.modelContent).toContain("page-1 v2，面板");
+        expect(completions[1]?.payload.output).toMatchObject({ display: "panel", version: 2 });
 
         const userEvents = session
           .durableEvents()
@@ -1143,6 +1157,7 @@ describe("render_html 工具与内嵌页面标记", () => {
         try {
           const forkedView = replaySessionView(forkedSession.durableEvents());
           expect(forkedView.pages).toHaveLength(1);
+          expect(forkedView.pages[0]?.display).toBe("inline");
           expect(forkedView.pages[0]?.versions.map((v) => v.version)).toEqual([1]);
           expect(await forkedSession.getPageData("page-1", "key-2")).toBe(2);
           await forkedSession.setPageData("page-1", "key-2", "fork");
@@ -1155,6 +1170,7 @@ describe("render_html 工具与内嵌页面标记", () => {
         await session.rewind(secondUserSeq, "conversation");
         const afterRewind = replaySessionView(session.durableEvents());
         expect(afterRewind.pages).toHaveLength(1);
+        expect(afterRewind.pages[0]?.display).toBe("inline");
         expect(afterRewind.pages[0]?.versions.map((v) => v.version)).toEqual([1]);
         expect(await session.getPageData("page-1", "key-2")).toBe(2);
         await session.deletePageData("page-1", "key-2");
@@ -1177,6 +1193,41 @@ describe("render_html 工具与内嵌页面标记", () => {
       } finally {
         await session.close();
       }
+    });
+
+    it("旧日志中均记为 inline 的版本仍派生为内嵌页面", () => {
+      const events = [1, 2].map((version) => {
+        const event: DurableEvent<"tool.completed"> = {
+          type: "tool.completed",
+          seq: version,
+          sessionId: "s-old-inline",
+          turnId: "t1",
+          time: "2026-11-20T00:00:00.000Z",
+          payload: {
+            callId: `c${version}`,
+            name: "render_html",
+            status: "ok",
+            modelContent: "ok",
+            durationMs: 5,
+            files: [
+              {
+                type: "file",
+                file: `file-${version}.html`,
+                bytes: 32,
+                sha256: "a".repeat(64),
+                label: "图表.html",
+                mimeType: "text/html",
+                source: "upload",
+                inline: { title: "图表", page: "page-1", version, display: "inline" },
+              },
+            ],
+          },
+        };
+        return decodeDurableEvent(encodeDurableEvent(event));
+      });
+      const [page] = replaySessionView(events).pages;
+      expect(page?.display).toBe("inline");
+      expect(page?.versions.map((version) => version.version)).toEqual([1, 2]);
     });
 
     it("旧会话页面派生为单版本 inline 页面且 id 不与新页面冲突；旧版 schema 剥离新字段后仍能解析", () => {

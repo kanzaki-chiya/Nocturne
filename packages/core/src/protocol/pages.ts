@@ -82,7 +82,7 @@ export function appendSessionPageFromFile(
       ? file.inline.version
       : existing.versions.length + 1;
   existing.title = title;
-  // 更新时沿用第一版的显示方式
+  if (resolveInlinePageDisplay(file) === "panel") existing.display = "panel";
   existing.versions.push({ version, file, title, seq });
 }
 
