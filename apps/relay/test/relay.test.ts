@@ -465,6 +465,15 @@ describe("relay", () => {
     expect(indexRes.headers.get("content-security-policy")).toBe(staticCsp(f.origin));
     expect(indexRes.headers.get("content-security-policy")).toContain("frame-src 'self'");
   });
+  it("空壳仅在全屏模式为 body 设置视口最小高度", async () => {
+    const f = await fixture();
+    const sandbox = await (await fetch(`${f.origin}/sandbox.html`)).text();
+    const styles = required(/<style id="__nct_base__">([\s\S]*?)<\/style>/.exec(sandbox)?.[1]);
+    expect(styles).toMatch(
+      /:root\[data-nct-fullscreen="true"\] :where\(body\)\s*\{\s*min-height: 100vh;\s*\}/,
+    );
+    expect(styles.match(/min-height\s*:/g)).toHaveLength(1);
+  });
   it("错误 Origin 的 upgrade 返回 403", async () => {
     const f = await fixture();
     const ws = new WebSocket(`${f.origin.replace("http", "ws")}/v1/host`, {
