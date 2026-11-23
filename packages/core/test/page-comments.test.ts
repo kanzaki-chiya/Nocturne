@@ -190,7 +190,9 @@ describe("pageComments 协议与运行时（ADR-0113）", () => {
         page: "page-1",
         version: 1,
         title: "示意图",
-        comments: [{ path: "body > #card-a", text: "入口", x: 50, y: 80, note: "加粗边框" }],
+        comments: [
+          { id: "c1", path: "body > #card-a", text: "入口", x: 50, y: 80, note: "加粗边框" },
+        ],
       });
       expect(userEntryText(firstUser)).toBe("");
 

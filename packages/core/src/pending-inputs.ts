@@ -70,6 +70,7 @@ export class PendingInputs {
               version: entry.input.pageComments.version,
               title: entry.input.pageComments.title,
               count: entry.input.pageComments.comments.length,
+              items: entry.input.pageComments.comments,
             },
           }
         : {}),

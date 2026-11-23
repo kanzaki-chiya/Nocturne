@@ -324,7 +324,7 @@ import { createApplySubagentChangesTool } from "./tools/builtin/apply-subagent-c
 import { createUpdateGoalTool } from "./tools/builtin/update-goal.js";
 import {
   effectiveEvents,
-  formatPageCommentsBlock,
+  PAGE_COMMENT_ID_PATTERN,
   isWorkModeName,
   PAGE_COMMENT_TEXT_MAX_CHARS,
   workModeCommandName,
@@ -647,6 +647,7 @@ export interface RuntimeSession {
   callPageModel(page: string, input: PageModelInput, signal?: AbortSignal): Promise<string>;
   respondPagePermission(page: string, requestId: string, reply: PagePermissionReply): Promise<void>;
   stopPageModel(page: string): void;
+  resolvePageComment(page: string, comment: string): Promise<void>;
   /** 订阅会话事件（durable + ephemeral），返回退订函数 */
   subscribe(listener: (event: RuntimeEvent) => void): () => void;
   /** 当前工作区的持久输入历史（旧→新）。读取失败时警告并返回空列表。 */
@@ -4102,6 +4103,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           throw new RuntimeCommandError("invalid_command", "pageComments 参数不合法");
         }
         const items = raw.comments.map((item, idx) => {
+          if (item.replyTo !== undefined) {
+            if (
+              typeof item.replyTo !== "string" ||
+              !new RegExp(PAGE_COMMENT_ID_PATTERN).test(item.replyTo) ||
+              typeof item.note !== "string" ||
+              item.note.trim() === ""
+            ) {
+              throw new RuntimeCommandError("invalid_command", "无效的评论回复");
+            }
+            const thread = session
+              .state()
+              .pages.find((page) => page.page === raw.page.trim())
+              ?.comments?.find((comment) => comment.id === item.replyTo);
+            if (thread === undefined || thread.resolved)
+              throw new RuntimeCommandError("invalid_command", "评论不存在或已解决");
+            return { replyTo: item.replyTo, note: item.note.trim() };
+          }
           if (
             typeof item.path !== "string" ||
             typeof item.text !== "string" ||
@@ -4267,13 +4285,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         };
         appended.push({ type: "text", text: workModeBlock(workMode.name, workMode.body) });
       }
-      if (pageComments !== undefined) {
-        appended.push({
-          type: "text",
-          text: formatPageCommentsBlock(pageComments, commentScreenshotIndices),
-        });
-      }
       const prepared: PreparedInput = {
+        ...(commentScreenshotIndices.size > 0
+          ? { pageCommentScreenshotIndices: commentScreenshotIndices }
+          : {}),
         content,
         appended,
         ...(files.length ? { files } : {}),
@@ -4936,6 +4951,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.ensembleQuietReminder,
             prepared.suiteReport,
             prepared.pageComments,
+            prepared.pageCommentScreenshotIndices,
           );
           if (ensembleTurnStarting) {
             ensembleTurnStarting = false;
@@ -5389,6 +5405,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       stopPageModel(page) {
         requireSessionPage(session, page);
         pageModels.stop(page);
+      },
+      async resolvePageComment(page, comment) {
+        assertPageUsable();
+        await session.emit("page.comment_resolved", { page, comment });
       },
       rewindTargets() {
         assertUsable();

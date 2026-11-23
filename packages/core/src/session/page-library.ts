@@ -29,7 +29,7 @@ import { copyPageDataFile } from "./page-data.js";
 import { assertSafeSessionId, readLogReadonly } from "./readonly-log.js";
 import type { SessionStore, SessionSummary } from "./types.js";
 
-const PAGES_CACHE_VERSION = 1;
+const PAGES_CACHE_VERSION = 2;
 const SCAN_CONCURRENCY = 8;
 
 interface SessionPagesCacheFile {
@@ -119,7 +119,8 @@ function isValidSummary(value: unknown): value is SessionPanelPageSummary {
     Array.isArray(v.files) &&
     v.files.every((f) => typeof f === "string" && f.trim() !== "") &&
     typeof v.updatedAt === "string" &&
-    isValidOrigin(v.origin)
+    isValidOrigin(v.origin) &&
+    (v.hasUnresolvedComments === undefined || typeof v.hasUnresolvedComments === "boolean")
   );
 }
 
@@ -256,6 +257,7 @@ function mergeInstancesToLibraryItems(
     file: best.summary.file,
     updatedAt: best.summary.updatedAt,
     projectKey: best.project.key,
+    ...(best.summary.hasUnresolvedComments ? { hasUnresolvedComments: true } : {}),
   }));
 
   merged.sort((a, b) => {

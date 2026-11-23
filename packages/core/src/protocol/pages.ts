@@ -3,8 +3,9 @@
  * 纯函数、无 I/O；不按工具名硬编码，沿用「带有效 inline 标记的成功工具结果」规则。
  */
 import type { DurableEvent } from "./events.js";
+import type { PageCommentReplyOutput, PageCommentThread } from "./page-comments.js";
 import { effectiveEvents } from "./rewind.js";
-import type { FileAttachment, InlinePageDisplay } from "./types.js";
+import type { FileAttachment, InlinePageDisplay, PendingInputItem } from "./types.js";
 
 /** 默认工作区（普通对话）在页面库里的项目键 */
 export const DEFAULT_PAGE_PROJECT_KEY = "default";
@@ -29,6 +30,7 @@ export interface SessionPage {
   /** 页面血缘来源（ADR-0114 §3）；经事件流派生时始终有值 */
   origin?: PageOrigin | undefined;
   versions: SessionPageVersion[];
+  comments?: PageCommentThread[] | undefined;
 }
 
 export interface PageAppendContext {
@@ -50,6 +52,7 @@ export interface SessionPanelPageSummary {
   files: string[];
   updatedAt: string;
   origin: PageOrigin;
+  hasUnresolvedComments?: boolean | undefined;
 }
 
 /** 页面库中的项目条目（ADR-0114 §4；不含本机绝对路径，可安全经远程 RPC 返回） */
@@ -77,6 +80,7 @@ export interface PageLibraryItem {
   file: string;
   updatedAt: string;
   projectKey: string;
+  hasUnresolvedComments?: boolean | undefined;
 }
 
 export interface PageLibraryListResult {
@@ -195,6 +199,107 @@ export function appendSessionPageFromFile(
   existing.versions.push({ version, file, title, seq });
 }
 
+export interface QueuedPageComment extends PageCommentThread {
+  queueKey: string;
+}
+
+/** Queue facts are transient. Keep their keys separate from durable comment IDs. */
+export function projectQueuedPageComments(page: string, inputs: readonly PendingInputItem[]) {
+  const threads: QueuedPageComment[] = [];
+  const replyTargets = new Set<string>();
+  for (const input of inputs) {
+    const summary = input.pageComments;
+    if (summary?.page !== page) continue;
+    summary.items?.forEach((item, index) => {
+      if (item.replyTo !== undefined) {
+        replyTargets.add(item.replyTo);
+        return;
+      }
+      threads.push({
+        ...item,
+        queueKey: `${input.id}:${index}`,
+        version: summary.version,
+        seq: 0,
+        time: input.createdAt,
+        replies: [],
+        pending: true,
+        resolved: false,
+      });
+    });
+  }
+  return { threads, replyTargets };
+}
+
+/** Apply comment facts to pages in effective event order. */
+export function reducePageComments(pages: readonly SessionPage[], event: DurableEvent): void {
+  if (event.type === "message.user" && event.payload.pageComments !== undefined) {
+    const snapshot = event.payload.pageComments;
+    const page = pages.find((entry) => entry.page === snapshot.page);
+    if (page?.display !== "panel") return;
+    const comments = (page.comments ??= []);
+    for (const item of snapshot.comments) {
+      if (item.replyTo === undefined) {
+        comments.push({
+          ...item,
+          version: snapshot.version,
+          seq: event.seq,
+          time: event.time,
+          replies: [],
+          pending: item.id !== undefined,
+          resolved: false,
+        });
+        continue;
+      }
+      const thread = comments.find((entry) => entry.id === item.replyTo);
+      if (thread === undefined) continue;
+      thread.replies.push({
+        by: "user",
+        text: item.note,
+        version: snapshot.version,
+        seq: event.seq,
+        time: event.time,
+      });
+      thread.pending = !thread.resolved;
+    }
+  }
+  if (event.type === "page.comment_resolved") {
+    const thread = pages
+      .find((entry) => entry.page === event.payload.page)
+      ?.comments?.find((entry) => entry.id === event.payload.comment);
+    if (thread !== undefined) {
+      thread.resolved = true;
+      thread.pending = false;
+    }
+  }
+  if (
+    event.type === "tool.completed" &&
+    event.payload.name === "reply_page_comment" &&
+    event.payload.status === "ok"
+  ) {
+    const output = event.payload.output as Partial<PageCommentReplyOutput> | null | undefined;
+    if (
+      typeof output?.page !== "string" ||
+      typeof output.comment !== "string" ||
+      typeof output.text !== "string" ||
+      typeof output.version !== "number"
+    )
+      return;
+    const thread = pages
+      .find((entry) => entry.page === output.page)
+      ?.comments?.find((entry) => entry.id === output.comment);
+    if (thread === undefined) return;
+    thread.replies.push({
+      by: "model",
+      text: output.text,
+      version: output.version,
+      seq: event.seq,
+      time: event.time,
+    });
+    thread.pending = false;
+    if (output.resolve === true) thread.resolved = true;
+  }
+}
+
 /** 从持久事件流按有效事件派生会话页面列表 */
 export function deriveSessionPages(events: readonly DurableEvent[]): SessionPage[] {
   const pages: SessionPage[] = [];
@@ -202,6 +307,7 @@ export function deriveSessionPages(events: readonly DurableEvent[]): SessionPage
   const sessionId = created?.type === "session.created" ? created.sessionId : undefined;
   const forkedFrom = created?.type === "session.created" ? created.payload.forkedFrom : undefined;
   for (const event of effectiveEvents(events)) {
+    reducePageComments(pages, event);
     if (event.type !== "tool.completed" || event.payload.status !== "ok") continue;
     for (const file of filterInlinePageFiles(event.payload.files)) {
       appendSessionPageFromFile(pages, file, event.seq, {
@@ -227,6 +333,7 @@ export function deriveSessionPanelPageSummaries(
   const sessionId = created?.type === "session.created" ? created.sessionId : undefined;
   const forkedFrom = created?.type === "session.created" ? created.payload.forkedFrom : undefined;
   for (const event of effectiveEvents(events)) {
+    reducePageComments(pages, event);
     if (event.type !== "tool.completed" || event.payload.status !== "ok") continue;
     for (const file of filterInlinePageFiles(event.payload.files)) {
       const pageId = resolveInlinePageId(file);
@@ -253,6 +360,9 @@ export function deriveSessionPanelPageSummaries(
       files: page.versions.map((v) => v.file.file),
       updatedAt: updatedByPage.get(page.page) ?? created?.time ?? "",
       origin,
+      ...(page.comments?.some((comment) => comment.id !== undefined && !comment.resolved)
+        ? { hasUnresolvedComments: true }
+        : {}),
     });
   }
   return result;

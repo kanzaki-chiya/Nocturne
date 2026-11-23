@@ -182,13 +182,18 @@ const fileRefSchema = z.object({
   truncated: z.boolean(),
 });
 
-const pageCommentItemSchema = z.object({
-  path: z.string(),
-  text: z.string(),
-  x: z.number(),
-  y: z.number(),
-  note: z.string(),
-});
+const pageCommentItemSchema = z.union([
+  z.object({ id: z.string().optional(), replyTo: z.string().min(1), note: z.string() }),
+  z.object({
+    id: z.string().optional(),
+    replyTo: z.undefined().optional(),
+    path: z.string(),
+    text: z.string(),
+    x: z.number(),
+    y: z.number(),
+    note: z.string(),
+  }),
+]);
 
 const pageCommentsSchema = z.object({
   page: z.string().min(1),
@@ -250,6 +255,7 @@ const payloadSchemas = {
     durationMs: z.number().nonnegative(),
     outcome: z.enum(["ok", "error", "aborted"]),
   }),
+  "page.comment_resolved": z.object({ page: z.string().min(1), comment: z.string().min(1) }),
   "attachment.described": z.object({
     attachmentRef: z.object({
       seq: z.number().int().positive(),
@@ -659,6 +665,7 @@ export const durableEventSchema = z.discriminatedUnion("type", [
   envelope("session.config_changed", payloadSchemas["session.config_changed"]),
   envelope("session.titled", payloadSchemas["session.titled"]),
   envelope("page.model_called", payloadSchemas["page.model_called"]),
+  envelope("page.comment_resolved", payloadSchemas["page.comment_resolved"]),
   envelope("turn.started", payloadSchemas["turn.started"]),
   envelope("message.user", payloadSchemas["message.user"]),
   envelope("message.assistant", payloadSchemas["message.assistant"]),
@@ -738,5 +745,20 @@ export function decodeDurableEvent(line: string): DurableEvent {
 
 /** 稳定序列化：持久化事件只含 JSON 可表达的数据 */
 export function encodeDurableEvent(event: DurableEvent): string {
-  return JSON.stringify(event);
+  if (
+    event.type !== "message.user" ||
+    !event.payload.pageComments?.comments.some((item) => item.replyTo !== undefined)
+  ) {
+    return JSON.stringify(event);
+  }
+  const snapshot = event.payload.pageComments;
+  // The v1 reader requires all four anchor keys. Empty placeholders encode no new location,
+  // and the reply branch in the current decoder drops them.
+  const comments = snapshot.comments.map((item) =>
+    item.replyTo === undefined ? item : { path: "", text: "", x: 0, y: 0, ...item },
+  );
+  return JSON.stringify({
+    ...event,
+    payload: { ...event.payload, pageComments: { ...snapshot, comments } },
+  });
 }

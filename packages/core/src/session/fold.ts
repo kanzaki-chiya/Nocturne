@@ -12,6 +12,7 @@ import {
   effectiveEvents,
   reduceGoal,
   reducePlan,
+  reducePageComments,
   rewindNote,
   type DurableEvent,
   type GoalState,
@@ -100,6 +101,7 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
     )
       continue;
     const turnId = event.turnId;
+    reducePageComments(pages, event);
     switch (event.type) {
       case "session.created": {
         const p = event.payload;

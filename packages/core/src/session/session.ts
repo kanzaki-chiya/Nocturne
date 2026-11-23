@@ -4,6 +4,7 @@
 import { randomBytes } from "node:crypto";
 import {
   encodeDurableEvent,
+  formatPageCommentsBlock,
   stripInlineFromFiles,
   type DurableEvent,
   type DurablePayload,
@@ -157,14 +158,50 @@ export class SessionImpl implements Session {
   ): Promise<DurableEvent<T>> {
     if (this.healthState !== "ok")
       throw new SessionError("session_failed", "会话已失败，不再写入日志");
-    const payload =
-      type === "message.user" &&
-      (rawPayload as DurablePayload<"message.user">).files?.some((f) => f.inline !== undefined)
-        ? ({
-            ...(rawPayload as DurablePayload<"message.user">),
-            files: stripInlineFromFiles((rawPayload as DurablePayload<"message.user">).files),
-          } as DurablePayload<T>)
-        : rawPayload;
+    let payload = rawPayload;
+    if (type === "message.user") {
+      const user = rawPayload as DurablePayload<"message.user">;
+      const comments = user.pageComments;
+      const files = user.files?.some((file) => file.inline !== undefined)
+        ? stripInlineFromFiles(user.files)
+        : user.files;
+      if (files !== user.files) payload = { ...user, files } as DurablePayload<T>;
+      if (comments !== undefined) {
+        let last = 0;
+        // IDs are never reused after rewind, including when a page number is reused.
+        for (const event of this.events) {
+          if (event.type !== "message.user" || event.payload.pageComments?.page !== comments.page)
+            continue;
+          for (const item of event.payload.pageComments.comments) {
+            if (item.id !== undefined) last = Math.max(last, Number(item.id.slice(1)) || 0);
+          }
+        }
+        const snapshot = {
+          ...comments,
+          comments: comments.comments.map((item) => ({ ...item, id: `c${++last}` })),
+        };
+        const threads = this.state().pages.find((page) => page.page === comments.page)?.comments;
+        const block = formatPageCommentsBlock(
+          snapshot,
+          options.pageCommentScreenshotIndices,
+          threads,
+        );
+        payload = {
+          ...user,
+          ...(files !== undefined ? { files } : {}),
+          content: [...user.content, { type: "text", text: block }],
+          pageComments: snapshot,
+        } as DurablePayload<T>;
+      }
+    }
+    if (type === "page.comment_resolved") {
+      const { page, comment } = rawPayload as DurablePayload<"page.comment_resolved">;
+      const thread = this.state()
+        .pages.find((item) => item.page === page)
+        ?.comments?.find((item) => item.id === comment);
+      if (thread === undefined || thread.resolved)
+        throw new SessionError("invalid_command", "评论不存在或已解决");
+    }
     const event = {
       type,
       sessionId: this.id,

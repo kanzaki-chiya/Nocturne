@@ -112,6 +112,7 @@ export type SessionListener = (event: RuntimeEvent) => void;
 
 export interface EmitOptions {
   turnId?: string | undefined;
+  pageCommentScreenshotIndices?: ReadonlySet<number> | undefined;
 }
 
 /**

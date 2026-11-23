@@ -75,12 +75,13 @@ export function effectiveEvents(events: readonly DurableEvent[]): DurableEvent[]
       const target = active.find((e) => e.seq === event.payload.targetSeq);
       active = active.filter(
         (e) =>
-          e.seq < event.payload.targetSeq &&
-          !(
-            e.type === "turn.started" &&
-            target?.turnId !== undefined &&
-            e.turnId === target.turnId
-          ),
+          (e.type === "page.comment_resolved" && event.payload.fork !== true) ||
+          (e.seq < event.payload.targetSeq &&
+            !(
+              e.type === "turn.started" &&
+              target?.turnId !== undefined &&
+              e.turnId === target.turnId
+            )),
       );
     }
     active.push(event);

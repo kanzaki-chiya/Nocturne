@@ -235,14 +235,17 @@ export interface SessionParams {
   sessionId: string;
 }
 
-export interface WirePageComment {
-  path: string;
-  text: string;
-  x: number;
-  y: number;
-  note: string;
-  screenshot?: { data: string; mimeType: string; label?: string };
-}
+export type WirePageComment =
+  | {
+      replyTo?: undefined;
+      path: string;
+      text: string;
+      x: number;
+      y: number;
+      note: string;
+      screenshot?: { data: string; mimeType: string; label?: string };
+    }
+  | { replyTo: string; note: string };
 
 export interface WirePageComments {
   page: string;
@@ -904,6 +907,10 @@ export interface RpcMethods {
     result: null;
   };
   "session.stopPageModel": { params: SessionParams & { page: string }; result: null };
+  "session.resolvePageComment": {
+    params: SessionParams & { page: string; comment: string };
+    result: null;
+  };
   "session.submit": {
     params: SessionParams & WireSubmitFields;
     result: TurnEndReason;
@@ -1270,6 +1277,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "session.callPageModel": true,
   "session.respondPagePermission": true,
   "session.stopPageModel": true,
+  "session.resolvePageComment": true,
   "session.submit": true,
   "session.enqueueInput": true,
   "session.updateInput": true,

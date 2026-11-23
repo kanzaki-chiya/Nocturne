@@ -142,6 +142,7 @@ describe("ToolRegistry", () => {
       "note_write",
       "read",
       "render_html",
+      "reply_page_comment",
       "schedule",
       "shell",
       "todo_write",

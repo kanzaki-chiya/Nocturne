@@ -38,8 +38,9 @@ export interface PreparedInput {
   delegate?: AgentDelegation | undefined;
   /** 执行方式快照（ADR-0076）；说明块在 appended 里 */
   workMode?: WorkModeSnapshot | undefined;
-  /** 面板页面评论快照（ADR-0113）；英文提示块在 appended 里 */
+  /** 面板页面评论快照。写入用户消息时分配 ID 并生成英文块。 */
   pageComments?: PageCommentsSnapshot | undefined;
+  pageCommentScreenshotIndices?: ReadonlySet<number> | undefined;
 }
 
 /** `message.user` 的 content：用户正文 + 追加的快照块（与普通提交同序） */

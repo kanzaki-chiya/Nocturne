@@ -472,6 +472,7 @@ export interface DurablePayloadMap {
   "session.config_changed": SessionConfigChangedPayload;
   "session.titled": SessionTitledPayload;
   "page.model_called": PageModelCalledPayload;
+  "page.comment_resolved": { page: string; comment: string };
   "turn.started": TurnStartedPayload;
   "message.user": MessageUserPayload;
   "attachment.described": AttachmentDescribedPayload;
@@ -594,6 +595,7 @@ export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
   "session.config_changed",
   "session.titled",
   "page.model_called",
+  "page.comment_resolved",
   "turn.started",
   "message.user",
   "attachment.described",

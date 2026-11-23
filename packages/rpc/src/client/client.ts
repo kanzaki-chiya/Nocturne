@@ -236,6 +236,7 @@ export interface RpcSession {
   callPageModel(page: string, input: PageModelInput): Promise<string>;
   respondPagePermission(page: string, requestId: string, reply: PagePermissionReply): Promise<void>;
   stopPageModel(page: string): Promise<void>;
+  resolvePageComment(page: string, comment: string): Promise<void>;
   /** 挂到 Turn 结束，结果与进程内 `submit()` 的 resolve 时机相同 */
   submit(input: SubmitInput): Promise<TurnEndReason>;
   /**
@@ -702,22 +703,28 @@ function wireSubmitInput(input: SubmitInput): RpcParams<"session.submit"> {
           page: input.pageComments.page,
           version: input.pageComments.version,
           title: input.pageComments.title,
-          comments: input.pageComments.comments.map((c) => ({
-            path: c.path,
-            text: c.text,
-            x: c.x,
-            y: c.y,
-            note: c.note,
-            ...(c.screenshot !== undefined
-              ? {
-                  screenshot: {
-                    data: encodeBase64(c.screenshot.data),
-                    mimeType: c.screenshot.mimeType,
-                    ...(c.screenshot.label !== undefined ? { label: c.screenshot.label } : {}),
-                  },
-                }
-              : {}),
-          })),
+          comments: input.pageComments.comments.map((c) =>
+            c.replyTo !== undefined
+              ? { replyTo: c.replyTo, note: c.note }
+              : {
+                  path: c.path,
+                  text: c.text,
+                  x: c.x,
+                  y: c.y,
+                  note: c.note,
+                  ...(c.screenshot !== undefined
+                    ? {
+                        screenshot: {
+                          data: encodeBase64(c.screenshot.data),
+                          mimeType: c.screenshot.mimeType,
+                          ...(c.screenshot.label !== undefined
+                            ? { label: c.screenshot.label }
+                            : {}),
+                        },
+                      }
+                    : {}),
+                },
+          ),
         };
   return {
     ...(input.skill !== undefined ? { skill: input.skill } : {}),
@@ -998,6 +1005,9 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       },
       async stopPageModel(page) {
         await call("session.stopPageModel", { ...p, page });
+      },
+      async resolvePageComment(page, comment) {
+        await call("session.resolvePageComment", { ...p, page, comment });
       },
       submit: async (input) => {
         return await call("session.submit", { ...p, ...wireSubmitInput(input) });

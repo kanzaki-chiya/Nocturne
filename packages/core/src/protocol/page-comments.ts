@@ -1,36 +1,32 @@
-/**
- * 面板页面评论（ADR-0113）：用户消息携带的页面评论快照与追加给模型的英文块。
- * 纯类型与纯函数，无 I/O，不依赖 Node 内置模块。
- */
-
+/** Panel page comment messages and threads (ADR-0113, ADR-0115). */
 export const PAGE_COMMENT_TEXT_MAX_CHARS = 200;
+export const PAGE_COMMENT_ID_PATTERN = "^c[1-9][0-9]*$";
 
-export interface PageCommentItem {
-  /** 从 body 起的 CSS 元素路径（优先用 id，其次标签名加 :nth-of-type） */
+export interface PageCommentAnchor {
   path: string;
-  /** 被点元素的可见文字（截断到 200 字符）；选中了文字时为选中原文；无可见文字时为空串 */
   text: string;
-  /** 点击点相对页面文档左上角的 CSS 像素 X 坐标 */
+  /** Document-relative CSS pixels. */
   x: number;
-  /** 点击点相对页面文档左上角的 CSS 像素 Y 坐标 */
   y: number;
-  /** 用户写的评论 */
+}
+
+export interface PageCommentItem extends PageCommentAnchor {
+  id?: string | undefined;
+  replyTo?: undefined;
   note: string;
 }
 
-/**
- * 随 `message.user.pageComments` 持久化的评论快照（ADR-0113）。
- * 兼容扩展，不提升 formatVersion，旧版本按普通用户消息读取。
- */
+export interface PageCommentReplyInput {
+  id?: string | undefined;
+  replyTo: string;
+  note: string;
+}
+
 export interface PageCommentsSnapshot {
-  /** 页面 id（如 page-1） */
   page: string;
-  /** 添加评论时所在页面的版本号（正整数） */
   version: number;
-  /** 页面标题（用于界面标签展示） */
   title: string;
-  /** 评论列表（至少 1 条） */
-  comments: PageCommentItem[];
+  comments: (PageCommentItem | PageCommentReplyInput)[];
 }
 
 export interface PageCommentScreenshotInput {
@@ -40,7 +36,7 @@ export interface PageCommentScreenshotInput {
 }
 
 export interface PageCommentInput extends PageCommentItem {
-  /** 无可见文字元素且模型支持图片输入时随消息附带的局部截图；不落入 pageComments 字段 */
+  /** Included only for anchors without visible text and models that accept images. */
   screenshot?: PageCommentScreenshotInput | undefined;
 }
 
@@ -48,7 +44,7 @@ export interface PageCommentsInput {
   page: string;
   version: number;
   title: string;
-  comments: PageCommentInput[];
+  comments: (PageCommentInput | PageCommentReplyInput)[];
 }
 
 export interface PageCommentsSummary {
@@ -56,6 +52,33 @@ export interface PageCommentsSummary {
   version: number;
   title: string;
   count: number;
+  /** Pending snapshot without screenshot bytes or durable comment IDs. */
+  items?: PageCommentsSnapshot["comments"] | undefined;
+}
+
+export interface PageCommentReply {
+  by: "user" | "model";
+  text: string;
+  version: number;
+  seq: number;
+  time: string;
+}
+
+export interface PageCommentThread extends PageCommentItem {
+  version: number;
+  seq: number;
+  time: string;
+  replies: PageCommentReply[];
+  pending: boolean;
+  resolved: boolean;
+}
+
+export interface PageCommentReplyOutput {
+  page: string;
+  comment: string;
+  text: string;
+  version: number;
+  resolve: boolean;
 }
 
 /** 输入框上方与用户消息内共用的评论标签文字：「<页面标题> v<n> · <条数>」 */
@@ -76,27 +99,38 @@ function escapeAttr(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
-/**
- * 在 Core 生成追加给模型的英文评论块（ADR-0113）。
- * 写明页面 id、版本号以及每条评论的 path、text、x、y、note，提示用 render_html 更新该页面。
- */
 export function formatPageCommentsBlock(
   snapshot: PageCommentsSnapshot,
   screenshotIndices?: ReadonlySet<number>,
+  threads: readonly PageCommentThread[] = [],
 ): string {
-  const lines: string[] = [
+  const lines = [
     `<page-comments page="${escapeAttr(snapshot.page)}" version="${snapshot.version}" title="${escapeAttr(snapshot.title)}">`,
-    `The user left ${snapshot.comments.length} comment${snapshot.comments.length === 1 ? "" : "s"} on page "${snapshot.page}" (v${snapshot.version}). Update this page by calling \`render_html\` with \`page: "${snapshot.page}"\` (prefer \`edits\` for targeted changes).`,
+    `The user sent ${snapshot.comments.length} page comment item${snapshot.comments.length === 1 ? "" : "s"}.`,
   ];
   snapshot.comments.forEach((item, index) => {
-    lines.push(`${index + 1}. path: ${item.path}`);
-    lines.push(`   text: ${item.text === "" ? "(none)" : item.text}`);
-    lines.push(`   x: ${item.x}, y: ${item.y}`);
-    if (screenshotIndices?.has(index)) {
-      lines.push("   screenshot: attached");
+    const id = item.id === undefined ? "" : `id: ${item.id}, `;
+    if (item.replyTo !== undefined) {
+      lines.push(`${index + 1}. ${id}reply to ${item.replyTo}`);
+      const thread = threads.find((candidate) => candidate.id === item.replyTo);
+      if (thread !== undefined) {
+        lines.push("   Previous messages (by, text):");
+        for (const message of [{ by: "user", text: thread.note }, ...thread.replies]) {
+          lines.push(`   - ${JSON.stringify({ by: message.by, text: message.text })}`);
+        }
+      }
+    } else {
+      lines.push(`${index + 1}. ${id}path: ${item.path}`);
+      lines.push(`   text: ${item.text === "" ? "(none)" : item.text}`);
+      lines.push(`   x: ${item.x}, y: ${item.y}`);
+      if (screenshotIndices?.has(index)) lines.push("   screenshot: attached");
     }
     lines.push(`   note: ${item.note}`);
   });
-  lines.push("</page-comments>");
+  lines.push(
+    `Make the requested page changes with \`render_html\` using \`page: ${JSON.stringify(snapshot.page)}\` (prefer \`edits\` for targeted changes).`,
+    "Then call `reply_page_comment` for each thread to explain what changed. For a reply, use its `reply to` ID as `comment`. Set `resolve: true` when the request is addressed. Leave the thread open if you need an answer from the user.",
+    "</page-comments>",
+  );
   return lines.join("\n");
 }

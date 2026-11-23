@@ -307,6 +307,7 @@ export const REMOTE_METHODS = [
   "session.callPageModel",
   "session.respondPagePermission",
   "session.stopPageModel",
+  "session.resolvePageComment",
   "session.readInputHistory",
   "session.recordInputHistory",
 ] as const satisfies readonly RpcMethodName[];
@@ -2754,6 +2755,13 @@ class Connection implements HubPeer {
         this.session(p).session.stopPageModel(reqString(p, "page"));
         return null;
       },
+      "session.resolvePageComment": async (p) => {
+        await this.session(p).session.resolvePageComment(
+          reqString(p, "page"),
+          reqString(p, "comment"),
+        );
+        return null;
+      },
       "session.submit": async (p) => {
         const { session } = this.session(p);
         const input = parseSubmitInput(p);
@@ -3218,7 +3226,7 @@ function parseAgentProcessInfo(raw: unknown): AgentProcessInfo | undefined {
 function submitAttachmentBytes(input: SubmitInput): number {
   const direct = (input.attachments ?? []).reduce((sum, a) => sum + a.data.byteLength, 0);
   const screenshots = (input.pageComments?.comments ?? []).reduce(
-    (sum, c) => sum + (c.screenshot?.data.byteLength ?? 0),
+    (sum, c) => sum + (c.replyTo === undefined ? (c.screenshot?.data.byteLength ?? 0) : 0),
     0,
   );
   return direct + screenshots;
@@ -3240,6 +3248,9 @@ function parsePageComments(value: unknown): NonNullable<SubmitInput["pageComment
   }
   const comments = o.comments.map((raw: unknown, i) => {
     const c = asParams(raw);
+    if (c.replyTo !== undefined) {
+      return { replyTo: reqString(c, "replyTo"), note: reqString(c, "note") };
+    }
     if (typeof c.path !== "string") {
       throw new InvalidParamsError(`pageComments.comments[${i}].path 必须是字符串`);
     }

@@ -42,7 +42,12 @@ import type {
 import { isDurableEvent, isDurableEventType, isEphemeralEventType } from "./events.js";
 import { todoItemsFromCompletion, type TodoItem } from "./todo.js";
 import { noteItemsFromCompletion, type NoteItem } from "./note.js";
-import { appendSessionPageFromFile, filterInlinePageFiles, type SessionPage } from "./pages.js";
+import {
+  appendSessionPageFromFile,
+  filterInlinePageFiles,
+  reducePageComments,
+  type SessionPage,
+} from "./pages.js";
 import type { PageCommentsSnapshot } from "./page-comments.js";
 import { effectiveEvents, rewindNotification, firstUserText } from "./rewind.js";
 export { firstUserText } from "./rewind.js";
@@ -544,6 +549,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
       if (result.signal !== undefined) task.signal = result.signal;
     }
   }
+  reducePageComments(view.pages, event);
   switch (event.type) {
     case "session.rewound": {
       if (!rebuilding && event.payload.mode !== "files") {

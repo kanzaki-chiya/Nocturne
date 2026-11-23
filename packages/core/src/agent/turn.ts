@@ -112,6 +112,7 @@ export async function runTurn(
   ensembleQuietReminder?: true,
   suiteReport?: SuiteReportDelivery,
   pageComments?: PageCommentsSnapshot,
+  pageCommentScreenshotIndices?: ReadonlySet<number>,
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -187,7 +188,7 @@ export async function runTurn(
         ...(item.pageComments !== undefined ? { pageComments: item.pageComments } : {}),
         steer: true,
       },
-      { turnId },
+      { turnId, pageCommentScreenshotIndices: item.pageCommentScreenshotIndices },
     );
   }
 
@@ -389,7 +390,7 @@ export async function runTurn(
   try {
     // ── 开始 ──
     await session.emit("turn.started", { turnIndex }, { turnId });
-    await session.emit(
+    const userEvent = await session.emit(
       "message.user",
       {
         messageId: id("message"),
@@ -407,7 +408,7 @@ export async function runTurn(
         ...(workMode ? { workMode } : {}),
         ...(pageComments ? { pageComments } : {}),
       },
-      { turnId },
+      { turnId, pageCommentScreenshotIndices },
     );
 
     // UserPromptSubmit Hook（hooks.md 第 1 节）：仅在由用户输入发起时触发，
@@ -463,7 +464,7 @@ export async function runTurn(
         "TurnStart",
         {
           turnId,
-          text: content
+          text: userEvent.payload.content
             .filter((b): b is { type: "text"; text: string } => b.type === "text")
             .map((b) => b.text)
             .join("\n"),

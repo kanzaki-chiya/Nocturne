@@ -146,6 +146,7 @@ export const SESSION_METHODS: Record<
   callPageModel: "session.callPageModel",
   respondPagePermission: "session.respondPagePermission",
   stopPageModel: "session.stopPageModel",
+  resolvePageComment: "session.resolvePageComment",
   readInputHistory: "session.readInputHistory",
   recordInputHistory: "session.recordInputHistory",
   fileIndex: "session.fileIndex",
