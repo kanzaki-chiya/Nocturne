@@ -9,8 +9,8 @@
 中英双语主页结构完全一致，按 23:00–07:00 夜间时间轴组织：
 
 1. **23:00 首屏**：大标题、副标题、按系统切换的主下载按钮（默认 Windows 安装包）与次级平台下拉菜单（macOS、终端 `nctrn`、安卓 APK）、GitHub 链接。
-2. **23:10 / 23:40 / 23:41 滚动演示区（`.story`）**：使用 CSS 滚动驱动动画（`view-timeline`、`animation-timeline`）在同一模拟桌面窗口内依次展示写代码与权限审批、华彩预览、回退与分叉。不支持滚动驱动动画的浏览器以及 `prefers-reduced-motion: reduce` 环境下退化为静态可读版面。
-3. **00:30–06:30 实机截图与能力章节**：依次展示桌面端会话与变更（00:30）、权限审查与确认（01:15）、组曲 / 合奏多成员协作（02:30）、终端 `nctrn` 与手机远程控制（04:00）、定时任务与执行方式（05:30）、用量热力图与扩展生态（06:30）。
+2. **23:10 / 23:40 / 23:41 滚动演示区（`.story`）**：使用 CSS 滚动驱动动画（`view-timeline`、`animation-timeline`）依次演示三段流程——23:10 写代码（工具调用与权限审批）、23:40 让它画出来（选中回复文字引用追问、通过华彩在右侧面板生成页面并直接在图上评论）、23:41 离开电脑接着聊（手机远程打开同一会话，继续发消息与审批工具调用）。不支持滚动驱动动画的浏览器以及 `prefers-reduced-motion: reduce` 环境下退化为静态可读版面。
+3. **00:30–06:30 实机截图与能力章节**：依次展示桌面端会话与右侧「变更」面板（00:30）、权限预设与智能审查确认（01:15）、合奏（`/ensemble`）多成员协作（02:30）、终端 `nctrn` 全屏界面与 `--resume` 恢复（04:00）、定时任务与运行历史（05:30）、服务商预设、用量热力图与能力索引（06:30）。
 4. **07:00 下载收尾与多栏页脚**：全平台下载入口、版本号（`{{version}}`）、GPL-3.0 开源信息，以及按 `site-docs/nav.json` 真实 slug 组织的文档导航和语言互链。
 
 脚本限制由 `scripts/test/build-site.test.mjs` 自动守护：主页只能包含恰好一段内联、无 `src` 的脚本；更新日志页与 `/docs/` 页面不得出现 `<script>` 标签。
@@ -75,10 +75,10 @@ pnpm exec vitest run --root scripts test/build-site.test.mjs
 | 文件（`site/assets/images/`） | 内容 | 主题 | 语言 | 尺寸 |
 |---|---|---|---|---|
 | `desktop-<语言>-<主题>.webp` | 桌面端整窗，会话与右侧变更面板 | 深、浅 | 中、英 | 2880×1800 |
-| `perm-<语言>-<主题>.webp` | 桌面端权限审批卡片与改动预览 | 深、浅 | 中、英 | 2880×1800 |
-| `ensemble-<语言>-<主题>.webp` | 桌面端组曲 / 合奏多成员面板 | 深、浅 | 中、英 | 2880×1800 |
+| `perm-<语言>-<主题>.webp` | 桌面端会话与命令权限审批卡片 | 深、浅 | 中、英 | 2880×1800 |
+| `ensemble-<语言>-<主题>.webp` | 桌面端会话与右侧合奏面板（留言板 / 成员） | 深、浅 | 中、英 | 2880×1800 |
 | `terminal-<语言>-<主题>.webp` | 终端 `nctrn --resume` | 深、浅 | 中、英 | 960×600 |
-| `sched-<语言>-<主题>.webp` | 桌面端定时任务列表与运行详情 | 深、浅 | 中、英 | 2880×1800 |
+| `sched-<语言>-<主题>.webp` | 桌面端定时任务列表与运行历史 | 深、浅 | 中、英 | 2880×1800 |
 | `usage-<语言>-<主题>.webp` | 桌面端「设置 › 用量」统计行和热力图（裁切） | 深、浅 | 中、英 | 1824×809 |
 | `social-<语言>.webp` | 社交预览（深色首屏） | 深 | 中、英 | 1200×630 |
 
@@ -86,21 +86,33 @@ pnpm exec vitest run --root scripts test/build-site.test.mjs
 
 ### 1. 准备隔离 home 与假模型
 
-每种语言使用独立根目录（含隔离 `home`、演示仓库 `echoes`、`wv` 缓存目录）。只在启动脚本里设置 `NOCTURNE_HOME`、`WEBVIEW2_USER_DATA_FOLDER` 与演示用 `SITE_DEMO_KEY`，不要指向真实 `~/.nocturne`。先在当前工作树执行 `pnpm build`。
+每种语言使用独立根目录（含隔离 `home`、演示仓库 `root/echoes`、`wv` 缓存目录）。只在启动脚本里设置 `NOCTURNE_HOME`、`WEBVIEW2_USER_DATA_FOLDER`、`SITE_DEMO_KEY=demo-placeholder`（桌面截图时另设 `NOCTURNE_DESKTOP_BACKEND`、`NOCTURNE_OFFSCREEN=1` 与 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`），不要指向真实 `~/.nocturne`。先在当前工作树执行 `pnpm build`。
 
-隔离 `providers.json` 仅注册本地回环地址的假 OpenAI 兼容服务商（如 `http://127.0.0.1:<空闲端口>/v1`），关闭 `modelsDev` 及用户/项目级外部技能发现，确保不会加载用户真实凭据或技能。演示仓库使用独立目录名（如 `echoes`），内容与命名可保留乐队/专辑/曲名彩蛋，但**不得出现任何歌词**。
+演示仓库 `root/echoes` 放 `package.json`（`version: "1.3.0"`、`type: "module"`、`scripts.test: "node --test"`）、`src/login.mjs`（原为 `return await request()`）、三项回归测试 `test/login.test.mjs`（`timeout can be retried`、`login succeeds`、`network errors remain visible`）与 `CHANGELOG.md`（初始含 `1.3.0` 记录），再 `git init -b main` 提交初始 commit。内容与分支/任务命名可保留乐队/专辑/曲名彩蛋，但**不得出现任何歌词**。
 
-英文版截图按与中文版完全一致的场景重拍一套独立隔离环境：保留桌面端真实中文 UI 标签（软件本身无英文界面），将用户提问、模型回复、代码改动、组曲成员任务与定时任务名称及描述全部改为英文，同样使用本地假模型与隔离数据种子生成。
+桌面五场景的隔离 `home/config.json` 配置如下，确保不加载用户凭据或外部技能：
 
-用量热力图需要多天数据：通过种子脚本在隔离 `home` 下写入跨度约一年的历史会话/子会话日志，每条含 `turn.started`、带 `usage` 的 `message.assistant`（需含 `toolCalls: []`、`finishReason`）和 `turn.completed`。写完用 Core 的 `decodeDurableEvent` 逐行校验，任何一行不合契约整条日志会被统计跳过。定时任务与组曲场景同样通过对应种子或假模型响应写入隔离 `home`。
+- `model: "demo/local"`，`modelsDev: false`，`skills.sources.agents` 与 `skills.sources.claude` 均设为 `false`。
+- `providers` 仅注册一条 `id: "demo"`、`type: "openai-compatible"` 的本地回环服务商（`baseURL: "http://127.0.0.1:<空闲端口>/v1"`、`apiKeyEnv: "SITE_DEMO_KEY"`）；模型 `local` 声明 `contextWindow: 128000`、`maxOutputTokens: 8192`、`capabilities: { toolCalls: true, editTool: "edit" }` 与 `pricing: { input: 0.27, output: 1.1, cacheRead: 0.07 }`（供用量页估算费用）。
+- `permissions: { preset: "smart" }`，并把 `permission.reviewer` 设为 `{ backend: "model", model: { provider: "demo", model: "local" } }`，让智能权限审查走本地假模型。
+
+本地假 OpenAI 兼容 SSE 服务只监听 `127.0.0.1`（支持 `GET /models`、`stream: false` 与 SSE），按 system 提示词和消息路由到五类固定剧本，不请求外网模型：
+
+- **标题生成**（匹配 `你只负责给对话起标题`）：按关键词返回对应会话标题。
+- **权限审查器**（匹配 `你是权限安全审查器`）：返回审查 JSON；命令不含 `--force` 时返回 `requested: true, destroys: false` 自动放行，含 `--force` 时返回 `requested: false, destroys: true` 交由用户确认。
+- **桌面改代码剧本**：依次返回 `read src/login.mjs` → `todo_write`（四项：两项完成、一项进行中、一项待办）→ `edit src/login.mjs`（区分 `TimeoutError` 返回 `{ retry: true }`，其他错误继续抛出）→ `read CHANGELOG.md` → `edit CHANGELOG.md`（补未发布条目）→ `shell node --test test/login.test.mjs` → `todo_write`（四项全部完成）→ 含三行结果对照表与 `3 passed, 0 failed` 的完成说明。
+- **权限审批剧本**：依次返回 `shell node --test` → `read CHANGELOG.md` → `edit CHANGELOG.md`（未发布改为 `1.4.0`）→ `shell git commit -am "release: 1.4.0"` → `shell git tag v1.4.0` → `shell git push --force origin rock-and-roll-all-nite`（触发审查器拦截并停在确认卡片）。
+- **合奏剧本**：收到 `/ensemble` 请求后进入指挥剧本，先 `ensemble_init`（中文标题「迁移设置页表单」，英文 `Migrate settings forms`），再依次 `ensemble_add_member` 注册 `violin-1`、`violin-2`、`cello-1` 三位成员（各带 `owns` / `handsOff` / `doneWhen` 职责），随后用 `ensemble_post` 分派页面迁移、回应 `violin-2` 关于失焦校验的提问、指派 `cello-1` 运行全量测试并在收到回报后总结收尾；成员子会话按 ``You are persistent ensemble member `@...` `` 路由并用 `ensemble_post` 在留言板汇报。
+
+英文版截图按与中文版完全一致的场景在独立隔离环境重拍：保留桌面端真实中文 UI 标签（软件本身无英文界面），将用户提问、模型回复、代码改动说明、合奏成员职责与留言板消息、定时任务名称及指令全部改为英文，同样由本地假模型和隔离种子生成。
 
 ### 2. 启动与进程
 
-用 Node 的 `spawn(..., { detached: true, windowsHide: true, stdio: ["ignore", outFd, errFd] })`（或 `Start-Process -PassThru`）启动本地假模型、独立端口的 Vite（或静态构建后的调试版桌面 exe，不要占用已有开发实例端口 31420）、以及调试版桌面 exe（`NOCTURNE_DESKTOP_BACKEND` 指向工作树 `apps/cli/dist/main.js`，WebView 开启 `--remote-debugging-port=<空闲端口>`）。PID 写入文件，结束时只停这些 PID 及其子进程，不按进程名结束；不碰正在运行的安装版或开发版。启动脚本的子进程会占住输出管道，单独启动，不要和截图命令串在一起。每次操作前核对 CDP 端口对应的 exe 路径。
+用 Node 的 `spawn(..., { detached: true, windowsHide: true, stdio: ["ignore", outFd, errFd] })`（或 `Start-Process -PassThru`）启动本地假模型、独立端口的 Vite（或静态构建后的调试版桌面 exe，不要占用已有开发实例端口 31420）以及调试版桌面 exe（WebView 开启 `--remote-debugging-port=<空闲端口>`）。若需让截图时间戳对齐章节时刻，可把 `NOCTURNE_DESKTOP_BACKEND` 指向一个薄包装脚本（监视 `clock.txt` 覆盖后端 `Date` 后再导入工作树 `apps/cli/dist/main.js`），前端同时通过 CDP `Page.addScriptToEvaluateOnNewDocument` 注入同等偏移的 `Date`（合奏剧本在关键 `ensemble_init` / `ensemble_post` 时顺次推进 `clock.txt`）；不需要对齐时刻时直接指向工作树 `apps/cli/dist/main.js`。PID 写入文件，结束时只停这些 PID 及其子进程，不按进程名结束；不碰正在运行的安装版或开发版。启动脚本的子进程会占住输出管道，单独启动，不要和截图命令串在一起。每次操作前核对 CDP 端口对应的 exe 路径。
 
 ### 3. 桌面五场景（desktop / perm / ensemble / sched / usage）
 
-在调试页的 `localStorage['nocturne.desktop.prefs.v1']` 中设置 `theme`（深浅模式；保持默认「工作台」与「标准」宽度）、`autoUpdate:false`、演示项目路径，刷新后分别切到对应场景。隐藏标题栏或页面中可能暴露的本机盘符路径。每张图同时设置 `data-theme` 和 `Emulation.setEmulatedMedia`，截图前读一次 `body` 背景色确认主题生效；整窗场景均以 1440×900、`deviceScaleFactor: 2` 拍摄（输出 2880×1800）：
+在调试页的 `localStorage['nocturne.desktop.prefs.v1']` 中设置 `theme`（深浅模式；保持默认「工作台」与「标准」宽度）、`autoUpdate: false`、`projects: [<echoes 绝对路径>]`，刷新后分别执行各场景。截图前隐藏页面中所有以盘符开头的叶子节点文字（标题栏本地路径），每种主题同时设置 `Emulation.setEmulatedMedia` 和 `document.documentElement.dataset.theme`，并读取 `body` 背景色确认主题生效。除 `usage` 裁切外，其余四场景均以 1440×900、`deviceScaleFactor: 2` 拍摄整窗（输出 2880×1800）：
 
 ```text
 Emulation.setDeviceMetricsOverride {"width":1440,"height":900,"deviceScaleFactor":2,"mobile":false}
@@ -108,17 +120,19 @@ Emulation.setEmulatedMedia {"features":[{"name":"prefers-color-scheme","value":"
 Page.captureScreenshot {"format":"png","captureBeyondViewport":false}
 ```
 
-- **desktop**：打开演示会话并展开右侧「变更」面板展示 Diff。
-- **perm**：在需要人工确认的命令审批态下截取，保留完整审批卡片与上下文。
-- **ensemble**：切换到侧边栏「组曲」面板，展示多成员并行执行进度与输出摘要。
-- **sched**：切换到侧边栏「定时任务」页面，展示任务列表与单条任务配置/运行记录。
-- **usage**：进「设置 › 用量」，范围选「全部」；以 1440×900、`deviceScaleFactor: 2` 渲染后，对 `.usage-body` 统计行与热力图区域按无裁断边界裁切（输出 1824×809），确保统计数字与图例完整显示且不切入下一节标题。
+- **desktop**：在 `echoes` 新建会话，发送登录超时修复请求（中文「修一个登录超时：超时后允许重试，保留其他错误。改完跑测试。」，英文 `"Fix a login timeout: allow retries on timeout and preserve other errors. Run the tests."`）；等完成回复出现后，点击改动卡片里的「查看变更」（或「右侧面板」→「变更」）加载 `src/login.mjs` 与 `CHANGELOG.md` 的 Diff，若底部 `✓4/4` 任务条已展开则折叠，滚动对话到底部后截深浅双图。
+- **perm**：先在 `echoes` 仓库执行 `git checkout -b rock-and-roll-all-nite`，新建会话发送发布请求（中文「跑完测试，打 tag 推上去」，英文 `"Run the tests, tag 1.4.0, and push"`）；待审查器拦截 `git push --force origin rock-and-roll-all-nite` 并弹出审批卡片后截深浅双图，拍完点击「拒绝并停止」结束回合。
+- **ensemble**：在 `echoes` 新建会话发送合奏请求（中文「/ensemble 把设置页迁移到新的表单组件并补齐测试」，英文 `"/ensemble Migrate the settings pages to the new form components and add tests"`）；待指挥与 `violin-1`、`violin-2`、`cello-1` 完成协作并输出最终总结后，点击对话中生成的合奏卡片按钮（含合奏标题与「合奏」字样）打开右侧合奏面板（留言板 / 成员），截深浅双图。
+- **sched**：先停止桌面端，用种子脚本向隔离 `home` 写入 `schedules.json`（三条任务：`before-dawn` 每天 05:30 启用、`time` 每天 07:00 启用、`weekly-deps` 每周一 09:00 停用；中文名「黎明前巡检」/ `Time` /「依赖周报」，英文名 `Pre-dawn check` / `Time` / `Weekly deps`）与 `schedules/history/before-dawn.jsonl`（七条运行历史，覆盖 `done`、`skipped`/`missed`、`denied: 1`、`error`/`provider_error`）。重启桌面端后点侧边栏「定时任务」→ 选中第一条任务 → 点「历史」标签，截深浅双图。
+- **usage**：同样在桌面端停止时，用种子脚本以演示会话为 `parent` 在隔离 `home/sessions/` 写入近一年多天的子会话 `.jsonl`（每条含 `session.created`、`turn.started`、带 `usage` 与 `toolCalls: []` / `finishReason: "stop"` 的 `message.assistant` 和 `turn.completed`，最长一次额外含 `message.user`；并在热力图第 41 列附近排布月牙与星点），写完用 Core 的 `decodeDurableEvent` 逐行校验，任何一行不合契约整条日志会被统计跳过。重启桌面端后进「设置 › 用量」，范围选「全部」；视口设为 `1188×900`、`deviceScaleFactor: 2`，量取 `.usage-body` 到 `.usage-heat-footer` 的边界并加边距（`x - 16, y - 8, w + 32, bottom - y + 28`），用 `Page.captureScreenshot` 的 `clip`（`scale: 1`）裁切出深浅双图（输出 1824×809），确保统计数字与图例完整显示且不切入下一节标题。
 
 ### 4. 终端
 
-复制隔离 home 到终端专用副本，按深浅分别写 `settings.json` 的 `theme`；只在副本里把日志中的工作区路径替换为 `N:\echo`，首行 `workspaceRoot` 保留实际路径。先确认 N: 未占用，再 `subst N: <示例根目录>`（映射演示仓库上一级，使 `N:\echo` 存在）。英文完成说明要短到终端一行放得下（`nctrn` 按列折行，长英文句会在单词中间断开）。
+终端截图仍使用独立隔离会话，若章节内容未变可直接复用现有 `terminal-{zh,en}-{dark,light}.webp`。重拍该演示会话时：在独立隔离 `home` 的 `providers.json` 注册本地回环的 `demo` 服务商（`baseURL: "http://127.0.0.1:<空闲端口>/v1"`、`apiKeyEnv: "SITE_DEMO_KEY"`，模型 `local` 声明 `contextWindow: 128000`、`toolCalls`、`editTool: "edit"` 与 `pricing`），`config.json` 设 `modelsDev: false`、`skills.sources.agents/claude: false`、权限预设 `auto-edit` 并仅允许 `node --test *`，`settings.json` 设 `model: "demo/local"`；演示仓库 `echo` 放相同的 `src/login.mjs` 与三项 `test/login.test.mjs` 并 `git init`。假 OpenAI SSE 模型依次返回 `read src/login.mjs` → `todo_write`（四项：两项完成、一项进行中、一项待办）→ `edit` → `shell node --test test/login.test.mjs` → 带结果表的完成说明；中文请求「修一个登录超时：超时后允许重试，保留其他错误。改完跑测试。」，英文请求 `"Fix the login timeout: allow retries on timeout and preserve other errors. Run the tests."`（英文完成说明要短到终端一行放得下，`nctrn` 按列折行，长英文句会在单词中间断开）。用 Core 的 `createRuntime({ config, cwd, interactive: false })`、`createSession({ model: "demo/local" })`、`session.submit({ text })` 跑完并关闭。
 
-在桌面 WebView 中注入一个临时 IIFE（Vite lib 构建，入口导入正式 `createTauriHost` 与 `mountTerminal`，不打进主页），清空 body 后挂载终端，设置 `data-theme` 后再挂载以取对应配色。`mountTerminal` 已加载 Unicode 11 宽度表，注入包不用另外注册；挂载前先用 `document.fonts.load` 加载 `--mono` 的常规与粗体字形，否则字宽按回退字体量，框线会错位。shell 用 `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`，cwd `N:/echo`，cols/rows 取 `mountTerminal().size()`，输入 `node <启动器> --resume <会话ID>`（启动器先 `chdir('N:/echo')` 再导入工作树 CLI），等到 `idle` 后截 960×600。拍完用 host API 关闭 PTY，`subst N: /d`。若终端章节与既有 `terminal-en-*.webp` 一致，英文终端图可直接复用。
+复制该隔离 home 到终端专用副本，按深浅分别写 `settings.json` 的 `theme`；只在副本里把日志中的工作区路径替换为 `N:\echo`，首行 `workspaceRoot` 保留实际路径。先确认 N: 未占用，再 `subst N: <示例根目录>`（映射 `echo` 上一级，使 `N:\echo` 存在）。
+
+在桌面 WebView 中注入一个临时 IIFE（Vite lib 构建，入口导入正式 `createTauriHost` 与 `mountTerminal`，不打进主页），清空 body 后挂载终端，设置 `data-theme` 后再挂载以取对应配色。`mountTerminal` 已加载 Unicode 11 宽度表，注入包不用另外注册；挂载前先用 `document.fonts.load` 加载 `--mono` 的常规与粗体字形，否则字宽按回退字体量，框线会错位。shell 用 `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`，cwd `N:/echo`，cols/rows 取 `mountTerminal().size()`，输入 `node <启动器> --resume <会话ID>`（启动器先 `chdir('N:/echo')` 再导入工作树 CLI），等到 `idle` 后截 960×600。拍完用 host API 关闭 PTY，`subst N: /d`。
 
 ### 5. 社交预览与导出验收
 
