@@ -878,6 +878,10 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       quietCheckInFlight = true;
       void maybeSendQuietReminder().finally(() => {
         quietCheckInFlight = false;
+        // 成员 Turn 结束时 notifyMaestroIdle 先于 scheduleQuietCheck 触发，彼时
+        // quietTimer 已排程使 isIdle 为 false，那次空闲通知被吞掉；安静检查提前
+        // 返回（未发提醒）后再无 Turn 会补发，这里补一次（内部先判 isIdle，幂等）。
+        deps.notifyMaestroIdle();
       });
     });
   }

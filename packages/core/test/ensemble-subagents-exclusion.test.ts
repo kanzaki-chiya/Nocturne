@@ -371,6 +371,45 @@ describe("Ensemble 成员不再算作运行中或已结束的子代理（r1114c�
     await coord.endEnsemble();
   });
 
+  it("空闲通知回归：ensemble_init 后无成员、安静检查未发提醒时 onIdle 仍被触发", async () => {
+    const ws = makeTempDir();
+    await initGitRepo(ws);
+    const sessionsDir = makeTempDir("nocturne-r1114c-sessions-");
+
+    const provider = makeProvider(() => [
+      callTool("i1", "ensemble_init", { title: "Idle Notify" }),
+      { type: "finish", reason: "tool_calls" },
+    ]);
+
+    const rt = await createRuntime({
+      cwd: ws,
+      workspaceRoot: ws,
+      sessionsDir,
+      providers: [provider],
+      interactive: true,
+      subagent: { background: true },
+    });
+    const coord = await rt.createSession({ model: "fake/m1", permissionPreset: "bypass" });
+    sessions.push(coord);
+
+    // Turn 落定先排程安静检查（quietTimer 使 isIdle 为 false），那次 notifyIdle 被吞；
+    // 安静检查因无成员且无帖子提前返回、不再产生新 Turn，须由检查收尾补发空闲通知。
+    let idleCount = 0;
+    coord.onIdle(() => {
+      idleCount++;
+    });
+    await coord.submit({ text: "init ensemble", workMode: "ensemble" });
+    await vi.waitFor(
+      () => {
+        expect(idleCount).toBeGreaterThan(0);
+        expect(coord.isIdle()).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
+
+    await coord.endEnsemble();
+  });
+
   it("成员共享父会话授权、sessionGrantRoot 沿父链解析、且成员会话标签权限确认与私信正常", async () => {
     const ws = makeTempDir();
     const outside = makeTempDir("nocturne-outside-");
