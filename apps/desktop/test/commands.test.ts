@@ -197,7 +197,7 @@ describe("completeSlash", () => {
     ]);
     expect(groups[0]?.items.find((item) => item.label === "/fugue")?.summary).toBe("多代理攻坚");
     expect(groups[0]?.items.find((item) => item.label === "/ensemble")?.summary).toBe("合奏协作");
-    expect(groups[0]?.items.find((item) => item.label === "/cadenza")?.summary).toBe("面板页面");
+    expect(groups[0]?.items.find((item) => item.label === "/cadenza")?.summary).toBe("华彩");
     expect(completeSlash("/sw")).toEqual([]);
   });
 

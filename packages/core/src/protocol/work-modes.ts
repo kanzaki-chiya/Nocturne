@@ -326,5 +326,5 @@ export const WORK_MODE_COMMANDS: readonly { name: string; summary: string }[] = 
   { name: "/plan", summary: "计划模式" },
   { name: "/fugue", summary: "多代理攻坚" },
   { name: "/ensemble", summary: "合奏协作" },
-  { name: "/cadenza", summary: "面板页面" },
+  { name: "/cadenza", summary: "华彩" },
 ];

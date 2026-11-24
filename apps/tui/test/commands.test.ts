@@ -120,8 +120,12 @@ describe("执行方式命令（ADR-0076）", () => {
   it("/cadenza 出现在 TUI 目录和 CLI 帮助里，并可补全", () => {
     const ctx = { effortLevels: [], providerIds: [] };
     expect(helpLines().join("\n")).toContain("/cadenza");
+    expect(helpLines().join("\n")).toContain("华彩");
     expect(cliHelpText()).toContain("/cadenza");
-    expect(completeSlash("/cad", ctx).map((item) => item.insert)).toEqual(["/cadenza "]);
+    expect(cliHelpText()).toContain("创建面板页面");
+    const hits = completeSlash("/cad", ctx);
+    expect(hits.map((item) => item.insert)).toEqual(["/cadenza "]);
+    expect(hits[0]?.label).toContain("华彩");
   });
 });
 

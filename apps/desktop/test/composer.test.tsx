@@ -503,7 +503,7 @@ describe("Composer 斜杠命令", () => {
       expect.stringContaining("/cadenza"),
     ]);
     expect(menu.textContent).toContain("多代理攻坚");
-    expect(menu.textContent).toContain("面板页面");
+    expect(menu.textContent).toContain("华彩");
     fireEvent.keyDown(field, { key: "Tab" });
     expect(field.value).toBe("/compact ");
     expect(onSubmit).not.toHaveBeenCalled();
@@ -1078,6 +1078,7 @@ describe("Composer ＋ 菜单、子菜单与执行方式标签", () => {
     expect(plusMenu.textContent).toContain("计划");
     expect(plusMenu.textContent).toContain("多代理攻坚");
     expect(plusMenu.textContent).toContain("合奏");
+    expect(plusMenu.textContent).toContain("华彩");
     expect(within(plusMenu).queryByRole("menuitemradio")).toBeNull();
 
     fireEvent.click(within(plusMenu).getByRole("menuitem", { name: "目标" }));

@@ -563,7 +563,7 @@ it("手机斜杠菜单的命令和技能说明都左对齐并单行省略", asyn
   const page = [...container.querySelectorAll(".phone-slash-row")].find((row) =>
     row.textContent?.includes("/cadenza"),
   );
-  expect(page?.textContent).toContain("面板页面");
+  expect(page?.textContent).toContain("华彩");
   expect(summaries.map((summary) => summary.textContent)).toContain("压缩当前上下文");
   expect(summaries.map((summary) => summary.textContent)).toContain(description);
   for (const summary of summaries) {
