@@ -3,6 +3,7 @@ import { createRef } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildStandaloneInlineHtml,
   createSessionView,
   type FileAttachment,
   type SessionView,
@@ -395,7 +396,7 @@ describe("InlinePage 回复内嵌页面", () => {
     if (!inlineIframe.contentWindow) throw new Error("missing contentWindow");
     const postSpy = vi.spyOn(inlineIframe.contentWindow, "postMessage");
 
-    // 切换主题时推送 nocturne:inline-html:theme 且不卸载原 iframe
+    // 切换主题时推送 nocturne:inline-html:theme（只含 colorScheme 与 fontSize）且不卸载原 iframe
     act(() => {
       document.documentElement.dataset.theme = "light";
     });
@@ -406,7 +407,8 @@ describe("InlinePage 回复内嵌页面", () => {
             typeof args[0] === "object" &&
             args[0] !== null &&
             (args[0] as { type?: string }).type === "nocturne:inline-html:theme" &&
-            (args[0] as { colorScheme?: string }).colorScheme === "light",
+            (args[0] as { colorScheme?: string }).colorScheme === "light" &&
+            !("theme" in (args[0] as Record<string, unknown>)),
         ),
       ).toBe(true);
     });
@@ -459,7 +461,7 @@ describe("InlinePage 回复内嵌页面", () => {
     expect(document.activeElement).toBe(fullBtn);
   });
 
-  it("全屏下载菜单包含 HTML 与图片两项，Esc 先关闭菜单，「下载为 HTML」保持原行为", async () => {
+  it("全屏下载菜单包含 HTML 与图片两项，Esc 先关闭菜单，「下载为 HTML」保存独立 HTML", async () => {
     const view = createSessionView();
     view.entries = [
       makeToolEntry({
@@ -499,8 +501,8 @@ describe("InlinePage 回复内嵌页面", () => {
       filename: "月报.html",
       mimeType: "text/html;charset=utf-8",
     });
-    expect(new TextDecoder("utf-8").decode(saveFile.mock.calls[0]?.[0].bytes)).toContain(
-      "<h1>Chart</h1>",
+    expect(new TextDecoder("utf-8").decode(saveFile.mock.calls[0]?.[0].bytes)).toBe(
+      buildStandaloneInlineHtml("<!doctype html><html><body><h1>Chart</h1></body></html>"),
     );
   });
 

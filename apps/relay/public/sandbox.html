@@ -55,8 +55,41 @@
         const bridgeEl = document.getElementById("__nct_bridge__");
         if (bridgeEl) bridgeEl.remove();
 
-        const SAFE_KEY = /^--[a-zA-Z0-9-]+$/;
         const UNSAFE_VAL = /[{}<>;\r\n]/;
+        const COMPAT_SANS =
+          '"Inter Variable", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif';
+        const COMPAT_MONO =
+          '"JetBrains Mono Variable", "Cascadia Mono", Consolas, "Microsoft YaHei", monospace';
+        const COMPAT_THEMES = {
+          light: {
+            "--bg": "#ffffff",
+            "--raised": "#f4f4f5",
+            "--text": "#0d0d10",
+            "--secondary": "#55555c",
+            "--muted": "#75757d",
+            "--border": "#ececef",
+            "--accent": "#5d50b0",
+            "--ok": "#2a7146",
+            "--warn": "#8a5c10",
+            "--bad": "#b02f3c",
+            "--sans": COMPAT_SANS,
+            "--mono": COMPAT_MONO,
+          },
+          dark: {
+            "--bg": "#141417",
+            "--raised": "#1a1a1f",
+            "--text": "#ededef",
+            "--secondary": "#a0a0a8",
+            "--muted": "#7a7a83",
+            "--border": "#1f1f24",
+            "--accent": "#a8a5ec",
+            "--ok": "#86c69c",
+            "--warn": "#e3bc76",
+            "--bad": "#e8919a",
+            "--sans": COMPAT_SANS,
+            "--mono": COMPAT_MONO,
+          },
+        };
 
         let instanceId = "";
         let rendered = false;
@@ -64,11 +97,11 @@
         let lastHeight = 0;
         let rafId = 0;
 
-        function applyTheme(theme, colorScheme, fontSize) {
-          if (!themeEl) return;
-          const decls = [];
+        function applyTheme(colorScheme, fontSize) {
           const scheme = colorScheme === "light" ? "light" : "dark";
-          decls.push(`color-scheme: ${scheme}`);
+          document.documentElement.setAttribute("data-theme", scheme);
+          if (!themeEl) return;
+          const decls = [`color-scheme: ${scheme}`];
           if (
             typeof fontSize === "string" &&
             !UNSAFE_VAL.test(fontSize) &&
@@ -76,14 +109,10 @@
           ) {
             decls.push(`--nct-fs: ${fontSize.trim()}`);
           }
-          if (theme && typeof theme === "object") {
-            for (const [k, v] of Object.entries(theme)) {
-              if (SAFE_KEY.test(k) && typeof v === "string" && !UNSAFE_VAL.test(v)) {
-                decls.push(`${k}: ${v.trim()}`);
-              }
-            }
+          for (const [k, v] of Object.entries(COMPAT_THEMES[scheme])) {
+            decls.push(`${k}: ${v}`);
           }
-          themeEl.textContent = `:root { ${decls.join("; ")}; }`;
+          themeEl.textContent = `:where(:root) { ${decls.join("; ")}; }`;
         }
 
         function measureAndReport() {
@@ -174,13 +203,14 @@
           if (fullscreen) {
             document.documentElement.setAttribute("data-nct-fullscreen", "true");
           }
-          applyTheme(payload.theme, payload.colorScheme, payload.fontSize);
+          applyTheme(payload.colorScheme, payload.fontSize);
 
           const raw = typeof payload.html === "string" ? payload.html : "";
           const parsed = new DOMParser().parseFromString(raw, "text/html");
 
           for (const attr of Array.from(parsed.documentElement.attributes)) {
-            if (attr.name !== "data-nct-fullscreen") {
+            const lower = attr.name.toLowerCase();
+            if (lower !== "data-nct-fullscreen" && lower !== "data-theme") {
               document.documentElement.setAttribute(attr.name, attr.value);
             }
           }
@@ -1421,7 +1451,7 @@
               request.reject(error);
             }
           } else if (data.type === "nocturne:inline-html:theme") {
-            applyTheme(data.theme, data.colorScheme, data.fontSize);
+            applyTheme(data.colorScheme, data.fontSize);
             scheduleMeasure();
           } else if (data.type === "nocturne:inline-html:comment-mode") {
             if (data.id !== instanceId) return;

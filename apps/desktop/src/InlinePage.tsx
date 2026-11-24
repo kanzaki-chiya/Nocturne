@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  buildStandaloneInlineHtml,
   projectQueuedPageComments,
   resolveInlinePageId,
   type FileAttachment,
@@ -46,24 +47,7 @@ const INLINE_PAGE_INITIAL_HEIGHT = 160;
 const IMAGE_EXPORT_FAILED = "导出失败";
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
 
-/** 注入给内嵌页面的稳定主题变量及对应的宿主 CSS 自定义属性名（ADR-0088） */
-export const INLINE_THEME_SOURCES: readonly (readonly [target: string, source: string])[] = [
-  ["--bg", "--a-panel"],
-  ["--raised", "--a-raised"],
-  ["--text", "--a-text"],
-  ["--secondary", "--a-secondary"],
-  ["--muted", "--a-muted"],
-  ["--border", "--a-border"],
-  ["--accent", "--a-accent"],
-  ["--ok", "--a-success"],
-  ["--warn", "--a-warning"],
-  ["--bad", "--a-error"],
-  ["--sans", "--sans"],
-  ["--mono", "--mono"],
-] as const;
-
 interface ThemePayload {
-  theme: Record<string, string>;
   colorScheme: "light" | "dark";
   fontSize: string;
 }
@@ -76,13 +60,6 @@ interface LoadedHtml {
 export function readInlineTheme(): ThemePayload {
   const root = document.documentElement;
   const computed = window.getComputedStyle(root);
-  const theme: Record<string, string> = {};
-  for (const [target, source] of INLINE_THEME_SOURCES) {
-    const val = computed.getPropertyValue(source).trim();
-    if (val !== "") {
-      theme[target] = val;
-    }
-  }
   const explicit = root.dataset.theme;
   let colorScheme: "light" | "dark";
   if (explicit === "light" || explicit === "dark") {
@@ -96,7 +73,7 @@ export function readInlineTheme(): ThemePayload {
     colorScheme = "dark";
   }
   const fontSize = computed.getPropertyValue("--fs-3").trim() || "14px";
-  return { theme, colorScheme, fontSize };
+  return { colorScheme, fontSize };
 }
 
 export function resolveSandboxFrameSrc(): string {
@@ -358,13 +335,12 @@ function useSandboxedHtmlFrame(opts: {
     const win = iframeRef.current?.contentWindow;
     const currentHtml = htmlRef.current;
     if (!win || currentHtml === undefined) return;
-    const { theme, colorScheme, fontSize } = readInlineTheme();
+    const { colorScheme, fontSize } = readInlineTheme();
     win.postMessage(
       {
         type: "nocturne:inline-html:render",
         id: instanceId,
         html: currentHtml,
-        theme,
         colorScheme,
         fontSize,
         fullscreen,
@@ -378,11 +354,10 @@ function useSandboxedHtmlFrame(opts: {
   const postTheme = useCallback(() => {
     const win = iframeRef.current?.contentWindow;
     if (!win || htmlRef.current === undefined) return;
-    const { theme, colorScheme, fontSize } = readInlineTheme();
+    const { colorScheme, fontSize } = readInlineTheme();
     win.postMessage(
       {
         type: "nocturne:inline-html:theme",
-        theme,
         colorScheme,
         fontSize,
       },
@@ -711,7 +686,7 @@ export function InlinePageFullscreen({
     triggerBytesDownload({
       filename: activeFilename,
       mimeType: "text/html;charset=utf-8",
-      bytes: activeLoaded.bytes,
+      bytes: new TextEncoder().encode(buildStandaloneInlineHtml(activeLoaded.html)),
       saveFile,
       onError: setDownloadError,
     });
@@ -1260,7 +1235,7 @@ export function PagePane({
     triggerBytesDownload({
       filename: activeVer.file.label,
       mimeType: "text/html;charset=utf-8",
-      bytes: loaded.bytes,
+      bytes: new TextEncoder().encode(buildStandaloneInlineHtml(loaded.html)),
       saveFile,
       onError: setDownloadError,
     });

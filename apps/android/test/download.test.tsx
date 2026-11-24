@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { build as viteBuild } from "vite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSessionView } from "@nocturne/core/protocol";
+import { buildStandaloneInlineHtml, createSessionView } from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
 import { Conversation } from "../../desktop/src/Conversation";
@@ -408,7 +408,10 @@ describe("Android native file & image download", () => {
     const payload = saveCalls[0]?.[1] as { name: string; mimeType: string; data: string };
     expect(payload.name).toBe("报表.html");
     expect(payload.mimeType).toContain("text/html");
-    expect(Array.from(decodeBase64(payload.data))).toEqual(Array.from(htmlBytes));
+    const expectedStandalone = new TextEncoder().encode(
+      buildStandaloneInlineHtml("<!doctype html><html><body><h1>报表</h1></body></html>"),
+    );
+    expect(Array.from(decodeBase64(payload.data))).toEqual(Array.from(expectedStandalone));
 
     // 下载为图片：通过 save_file 以 image/png 保存
     const fullIframe = document.body.querySelector<HTMLIFrameElement>(

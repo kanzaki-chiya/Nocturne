@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { INLINE_PAGE_THEMES } from "@nocturne/core/protocol";
 
 interface JsdomInstance {
   window: Window & typeof globalThis & { close(): void };
@@ -444,6 +445,47 @@ describe("sandbox.html 全屏双指缩放", () => {
     h.sendFromParent({ type: "nocturne:inline-html:comment-mode", id: "inst-c", enabled: true });
     expect(h.document.body.style.transform).toBe("");
     expect(h.document.documentElement.hasAttribute("data-nct-zoomed")).toBe(false);
+    h.dom.window.close();
+  });
+});
+
+describe("sandbox.html 深浅色与旧页面兼容层（ADR-0088 修订）", () => {
+  it("render 与 theme 消息设置/热更新 data-theme，忽略宿主自定义颜色且与 protocol 常量一致", () => {
+    const h = createSandboxHarness();
+    h.sendFromParent({
+      type: "nocturne:inline-html:render",
+      id: "inst-theme",
+      html: '<!doctype html><html data-theme="light"><body><p>x</p></body></html>',
+      colorScheme: "dark",
+      fontSize: "15px",
+      theme: { "--bg": "#ff0000" },
+      fullscreen: false,
+    });
+
+    expect(h.document.documentElement.getAttribute("data-theme")).toBe("dark");
+    const themeEl = must(h.document.getElementById("__nct_theme__"), "__nct_theme__");
+    expect(themeEl.textContent).toContain(":where(:root) {");
+    expect(themeEl.textContent).toContain("color-scheme: dark;");
+    expect(themeEl.textContent).toContain("--nct-fs: 15px;");
+    expect(themeEl.textContent).not.toContain("#ff0000");
+    for (const [k, v] of Object.entries(INLINE_PAGE_THEMES.dark)) {
+      expect(themeEl.textContent, `dark ${k}`).toContain(`${k}: ${v};`);
+    }
+
+    h.sendFromParent({
+      type: "nocturne:inline-html:theme",
+      colorScheme: "light",
+      fontSize: "16px",
+      theme: { "--bg": "#00ff00" },
+    });
+
+    expect(h.document.documentElement.getAttribute("data-theme")).toBe("light");
+    expect(themeEl.textContent).toContain("color-scheme: light;");
+    expect(themeEl.textContent).toContain("--nct-fs: 16px;");
+    expect(themeEl.textContent).not.toContain("#00ff00");
+    for (const [k, v] of Object.entries(INLINE_PAGE_THEMES.light)) {
+      expect(themeEl.textContent, `light ${k}`).toContain(`${k}: ${v};`);
+    }
     h.dom.window.close();
   });
 });

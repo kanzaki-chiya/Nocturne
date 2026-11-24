@@ -8,6 +8,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildStandaloneInlineHtml,
   createSessionView,
   reduceSessionView,
   type DurableEvent,
@@ -325,7 +326,9 @@ describe("桌面端页面版本与右侧面板（ADR-0109）", () => {
     await waitFor(() => {
       expect(saveFile).toHaveBeenCalledTimes(1);
     });
-    expect(new TextDecoder().decode(saveFile.mock.calls[0]?.[0].bytes)).toBe("<h1>V1 CONTENT</h1>");
+    expect(new TextDecoder().decode(saveFile.mock.calls[0]?.[0].bytes)).toBe(
+      buildStandaloneInlineHtml("<h1>V1 CONTENT</h1>"),
+    );
 
     // 点击「下一版本」切到第 2 版：右箭头置灰、左箭头可用、v2 入口行选中
     fireEvent.click(screen.getByRole("button", { name: "下一版本" }));
@@ -344,7 +347,9 @@ describe("桌面端页面版本与右侧面板（ADR-0109）", () => {
     await waitFor(() => {
       expect(saveFile).toHaveBeenCalledTimes(2);
     });
-    expect(new TextDecoder().decode(saveFile.mock.calls[1]?.[0].bytes)).toBe("<h1>V2 CONTENT</h1>");
+    expect(new TextDecoder().decode(saveFile.mock.calls[1]?.[0].bytes)).toBe(
+      buildStandaloneInlineHtml("<h1>V2 CONTENT</h1>"),
+    );
 
     // panelSessions 只存打开标记，不存版本号或 HTML 内容
     const rawPrefs = JSON.parse(storage.getItem(PREFS_KEY) ?? "{}") as {
@@ -616,7 +621,9 @@ describe("手机端页面入口行与全屏遮罩版本切换（ADR-0109）", ()
     await waitFor(() => {
       expect(saveFile).toHaveBeenCalledTimes(1);
     });
-    expect(new TextDecoder().decode(saveFile.mock.calls[0]?.[0].bytes)).toBe("<h1>PANEL V1</h1>");
+    expect(new TextDecoder().decode(saveFile.mock.calls[0]?.[0].bytes)).toBe(
+      buildStandaloneInlineHtml("<h1>PANEL V1</h1>"),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
     expect(screen.queryByRole("dialog")).toBeNull();
