@@ -2,16 +2,18 @@ import type { DurableEvent, SessionRewoundPayload } from "./events.js";
 import type { MessageUserPayload } from "./events.js";
 import type { MessageQuote } from "./quotes.js";
 import type { SubjectKind } from "./types.js";
+import { unwrapEnsemblePostText } from "./ensemble.js";
 
 export function firstUserText(
-  payload: Pick<MessageUserPayload, "content" | "quotes">,
+  payload: Pick<MessageUserPayload, "content" | "quotes" | "ensemble">,
 ): string | undefined {
   const start = payload.quotes?.length ? 1 : 0;
   const block = payload.content.slice(start).find((b) => b.type === "text");
   if (block?.type !== "text") return undefined;
   // 第一个非空行：粘贴的长文常以空行开头，只取首行会得到空串，
   // 桌面端会把这样的会话当成空会话隐藏（仍不跳到下一个文本块）
-  for (const raw of block.text.split("\n")) {
+  const text = payload.ensemble === undefined ? block.text : unwrapEnsemblePostText(block.text);
+  for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (line !== "") return line;
   }

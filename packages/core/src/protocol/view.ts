@@ -74,7 +74,7 @@ import type {
 
 // ── 视图类型 ────────────────────────────────────────────────
 
-/** 会话标题与恢复列表：首条用户消息的第一个文本块的原文首行。 */
+/** 会话标题与恢复列表使用 firstUserText 派生首条用户消息的摘要。 */
 
 export interface SessionView {
   backgroundShells: BackgroundShellTask[];

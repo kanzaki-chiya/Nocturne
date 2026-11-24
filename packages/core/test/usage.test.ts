@@ -4,7 +4,13 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createRuntime, createPlatform, loadConfig } from "../src/index.js";
 import { FakeProvider, type FakeScript } from "../src/provider/index.js";
-import { estimateCost, type DurableEvent, type Usage } from "../src/protocol/index.js";
+import {
+  estimateCost,
+  formatEnsemblePostForModel,
+  replaySessionView,
+  type DurableEvent,
+  type Usage,
+} from "../src/protocol/index.js";
 import { createUsageStats } from "../src/usage/index.js";
 
 const usage: Usage = {
@@ -46,6 +52,68 @@ describe("estimateCost", () => {
 });
 
 describe("Runtime.usageStats", () => {
+  it("uses the delivered post's first non-empty body line in usage, session lists and replay", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-usage-ensemble-"));
+    try {
+      const model = { provider: "fake", model: "fake-1" };
+      const runtime = await createRuntime({ cwd: root, sessionsDir: root });
+      const sessionId = "202611240642-abcdef01";
+      const base = { sessionId, time: "2026-11-24T00:00:00.000Z" };
+      const post = formatEnsemblePostForModel({
+        number: 5,
+        from: "violin-1",
+        text: "\n  复核表单校验\n保留失焦时的提示",
+      });
+      const events: DurableEvent[] = [
+        {
+          ...base,
+          type: "session.created",
+          seq: 1,
+          payload: {
+            formatVersion: 1,
+            nocturneVersion: "test",
+            cwd: root,
+            workspaceRoot: root,
+            model,
+            permissionPreset: "default",
+            parent: { sessionId: "202611240642-abcdef00", callId: "ensemble:cello" },
+          },
+        },
+        {
+          ...base,
+          type: "message.user",
+          seq: 2,
+          turnId: "t",
+          payload: {
+            messageId: "post",
+            content: [{ type: "text", text: post }],
+            ensemble: { postNumber: 5, from: "violin-1", fromKind: "member" },
+          },
+        },
+        { ...base, type: "turn.started", seq: 3, turnId: "t", payload: { turnIndex: 1 } },
+        {
+          ...base,
+          time: "2026-11-24T00:02:00.000Z",
+          type: "turn.completed",
+          seq: 4,
+          turnId: "t",
+          payload: { reason: "done", steps: 1, usage: { inputTokens: 100, outputTokens: 20 } },
+        },
+      ];
+      await fs.writeFile(
+        path.join(root, `${sessionId}.jsonl`),
+        events.map((event) => JSON.stringify(event) + "\n").join(""),
+      );
+      const expected = "复核表单校验";
+      const stats = await runtime.usageStats({});
+      expect(stats.longestTurn).toMatchObject({ durationMs: 120_000, sessionTitle: expected });
+      expect((await runtime.listSessions({ includeSubagents: true }))[0]?.firstText).toBe(expected);
+      expect(replaySessionView(events).title).toBe(expected);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("aggregates two real sessions, subagent turns and tools/skills without turn double counting", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-usage-"));
     const sessionsDir = path.join(root, "sessions");

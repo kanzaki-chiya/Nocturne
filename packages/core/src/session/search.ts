@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import type { Platform } from "../platform/index.js";
-import { decodeDurableEvent, userEntryText } from "../protocol/index.js";
+import { decodeDurableEvent, unwrapEnsemblePostText, userEntryText } from "../protocol/index.js";
 import { effectiveEvents } from "../protocol/rewind.js";
 import type { ContentBlock } from "../protocol/types.js";
 import type { DurableEvent } from "../protocol/events.js";
@@ -70,7 +70,9 @@ function textBlocks(content: ContentBlock[]): string {
 
 function eventText(event: DurableEvent): string | undefined {
   if (event.type === "message.user") {
-    return event.payload.ensembleQuietReminder === true ? undefined : userEntryText(event.payload);
+    if (event.payload.ensembleQuietReminder === true) return undefined;
+    const text = userEntryText(event.payload);
+    return event.payload.ensemble === undefined ? text : unwrapEnsemblePostText(text);
   }
   if (event.type === "message.assistant") return textBlocks(event.payload.content);
   if (event.type === "tool.completed") return event.payload.modelContent;
