@@ -522,11 +522,11 @@ describe("SettingsPage", () => {
     const first = render(<SettingsPage {...props(server1.client)} onOpenModels={onOpenModels} />);
     await screen.findByText("安全审查");
     fireEvent.click(row("安全审查").querySelector("button") ?? document.body);
-    await screen.findByRole("dialog", { name: "安全审查" });
-    fireEvent.click(screen.getByRole("button", { name: "决策模型" }));
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    const rvDlg1 = await screen.findByRole("dialog", { name: "安全审查" });
+    fireEvent.click(within(rvDlg1).getByRole("button", { name: "决策模型" }));
+    fireEvent.click(within(rvDlg1).getByRole("button", { name: "保存" }));
     await screen.findByText("先设置决策模型");
-    fireEvent.click(screen.getByRole("button", { name: "设置 › 模型" }));
+    fireEvent.click(within(rvDlg1).getByRole("button", { name: "设置 › 模型" }));
     expect(onOpenModels).toHaveBeenCalledOnce();
     first.unmount();
     server1.close();
@@ -562,13 +562,13 @@ describe("SettingsPage", () => {
     render(<SettingsPage {...props(server2.client)} />);
     await screen.findByText("安全审查");
     fireEvent.click(row("安全审查").querySelector("button") ?? document.body);
-    await screen.findByRole("dialog", { name: "安全审查" });
-    fireEvent.click(screen.getByRole("button", { name: "决策模型" }));
-    expect(screen.getByText("gemini-decision-1")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    await screen.findByText("首次启用 Gemini");
-    expect(screen.getByText(/Google/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    const rvDlg2 = await screen.findByRole("dialog", { name: "安全审查" });
+    fireEvent.click(within(rvDlg2).getByRole("button", { name: "决策模型" }));
+    expect(within(rvDlg2).getByText("gemini-decision-1")).toBeTruthy();
+    fireEvent.click(within(rvDlg2).getByRole("button", { name: "保存" }));
+    await within(rvDlg2).findByText("首次启用 Gemini");
+    expect(within(rvDlg2).getByText(/Google/)).toBeTruthy();
+    fireEvent.click(within(rvDlg2).getByRole("button", { name: "保存" }));
     await waitFor(() => {
       const call = server2.calls.find((c) => c.method === "runtime.updateSettings");
       expect((call?.params.patch as Record<string, unknown>)["permission.reviewer"]).toEqual({
@@ -586,6 +586,218 @@ describe("SettingsPage", () => {
       ).toBe(true);
     });
     server2.close();
+  });
+
+  describe("目标核对（ADR-0119）", () => {
+    const geminiDm = {
+      source: "gemini",
+      endpoint: "ai-studio",
+      model: "gemini-decision-1",
+      credential: { env: "GEMINI_API_KEY" },
+    } as const;
+    const jevDm = {
+      source: "jev",
+      endpoint: "typesafe",
+      model: "jev-latest",
+      credential: { env: "TYPESAFE_API_KEY" },
+    } as const;
+    const goalCheckItem = (backend: "off" | "decision" | "smol"): SettingItem =>
+      ({
+        key: "goalCheck",
+        effective: backend,
+        source: "settings",
+        saved: backend,
+        overridden: false,
+        goalCheck: { effective: { backend }, saved: { backend } },
+      }) as unknown as SettingItem;
+    const dmItem = (dm: typeof geminiDm | typeof jevDm): SettingItem => ({
+      key: "decisionModel",
+      effective: `${dm.source === "gemini" ? "Gemini" : "Jev"} · ${dm.endpoint} · ${dm.model}`,
+      source: "settings",
+      saved: `${dm.source === "gemini" ? "Gemini" : "Jev"} · ${dm.endpoint} · ${dm.model}`,
+      overridden: false,
+      decisionModel: { effective: dm, saved: dm },
+    });
+
+    const goalCheckRow = (): HTMLElement => {
+      const found = screen
+        .getAllByRole("group", { name: "目标核对" })
+        .find((el) => el.classList.contains("srow"));
+      if (found === undefined) throw new Error("目标核对 row not found");
+      return found;
+    };
+
+    it("常规页在安全审查之后显示目标核对分段，无说明文字；选小模型直接保存不弹披露；选决策模型未设时显示跳转按钮", async () => {
+      const onOpenModels = vi.fn();
+      let current: SettingItem[] = [...ITEMS, goalCheckItem("off")];
+      const server = fakeServer(
+        handlers({
+          "runtime.describeSettings": () => current,
+          "runtime.updateSettings": (params: unknown) => {
+            const patch = (
+              params as { patch?: { goalCheck?: { backend?: "off" | "decision" | "smol" } } }
+            ).patch;
+            const next = patch?.goalCheck?.backend;
+            if (next !== undefined) {
+              current = [...ITEMS, goalCheckItem(next)];
+            }
+            return current;
+          },
+        }),
+      );
+      await server.initialize();
+      const { container } = render(
+        <SettingsPage {...props(server.client)} onOpenModels={onOpenModels} />,
+      );
+      await screen.findByText("目标核对");
+      const gcRow = goalCheckRow();
+      const rvRow = row("安全审查");
+      expect(rvRow.nextElementSibling).toBe(gcRow);
+      expect(gcRow.querySelector(".desc")).toBeNull();
+      expect(within(gcRow).queryByRole("button", { name: "设置 › 模型" })).toBeNull();
+
+      // 选小模型：直接保存，不弹披露
+      fireEvent.click(within(gcRow).getByRole("button", { name: "小模型" }));
+      await waitFor(() => {
+        const call = server.calls.find((c) => c.method === "runtime.updateSettings");
+        expect((call?.params.patch as Record<string, unknown>).goalCheck).toEqual({
+          backend: "smol",
+        });
+      });
+      expect(screen.queryByRole("dialog")).toBeNull();
+
+      // 未设置决策模型时选决策模型：保存并显示「设置 › 模型」跳转按钮
+      server.calls.length = 0;
+      fireEvent.click(within(gcRow).getByRole("button", { name: "决策模型" }));
+      await waitFor(() => {
+        const call = server.calls.find((c) => c.method === "runtime.updateSettings");
+        expect((call?.params.patch as Record<string, unknown>).goalCheck).toEqual({
+          backend: "decision",
+        });
+      });
+      const jump = await within(gcRow).findByRole("button", { name: "设置 › 模型" });
+      fireEvent.click(jump);
+      expect(onOpenModels).toHaveBeenCalledOnce();
+      expect(container.querySelector(".srow .desc")).toBeNull();
+      server.close();
+    });
+
+    it("选决策模型且已配置 Google 接收方时：独立使用 goalCheckDisclosureAccepted 并写明免费档条款；Jev 不写免费档条款", async () => {
+      const itemsGoogle: SettingItem[] = [...ITEMS, dmItem(geminiDm), goalCheckItem("off")];
+      const server1 = fakeServer(
+        handlers({
+          "runtime.describeSettings": itemsGoogle,
+          // 即使审查披露已接受 google，目标核对仍须单独披露
+          "runtime.getPreference": (p: unknown) =>
+            (p as { key?: string }).key === "decisionDisclosureAccepted" ? "google" : null,
+          "runtime.updateSettings": [...ITEMS, dmItem(geminiDm), goalCheckItem("decision")],
+          "runtime.setPreference": null,
+        }),
+      );
+      await server1.initialize();
+      const first = render(<SettingsPage {...props(server1.client)} />);
+      await screen.findByText("目标核对");
+      fireEvent.click(within(goalCheckRow()).getByRole("button", { name: "决策模型" }));
+      const dlg = await screen.findByRole("dialog", { name: "目标核对" });
+      expect(within(dlg).getByText("首次启用 Gemini")).toBeTruthy();
+      expect(within(dlg).getByText(/Google 免费档数据会被用于改进产品/)).toBeTruthy();
+      expect(within(dlg).getByText(/60,000/)).toBeTruthy();
+      // 取消不写入
+      fireEvent.click(within(dlg).getByRole("button", { name: "取消" }));
+      expect(server1.calls.some((c) => c.method === "runtime.updateSettings")).toBe(false);
+
+      // 再次点击并确认
+      fireEvent.click(within(goalCheckRow()).getByRole("button", { name: "决策模型" }));
+      const dlg2 = await screen.findByRole("dialog", { name: "目标核对" });
+      fireEvent.click(within(dlg2).getByRole("button", { name: "保存" }));
+      await waitFor(() => {
+        const call = server1.calls.find((c) => c.method === "runtime.updateSettings");
+        expect((call?.params.patch as Record<string, unknown>).goalCheck).toEqual({
+          backend: "decision",
+        });
+      });
+      await waitFor(() => {
+        expect(
+          server1.calls.some(
+            (c) =>
+              c.method === "runtime.setPreference" &&
+              c.params.key === "goalCheckDisclosureAccepted" &&
+              String(c.params.value).includes("google"),
+          ),
+        ).toBe(true);
+      });
+      first.unmount();
+      server1.close();
+
+      // Jev (TypeSafe) 接收方：显示披露但不含 Google 免费档文案
+      const itemsJev: SettingItem[] = [...ITEMS, dmItem(jevDm), goalCheckItem("off")];
+      const server2 = fakeServer(
+        handlers({
+          "runtime.describeSettings": itemsJev,
+          "runtime.getPreference": () => null,
+          "runtime.updateSettings": [...ITEMS, dmItem(jevDm), goalCheckItem("decision")],
+          "runtime.setPreference": null,
+        }),
+      );
+      await server2.initialize();
+      render(<SettingsPage {...props(server2.client)} />);
+      await screen.findByText("目标核对");
+      fireEvent.click(within(goalCheckRow()).getByRole("button", { name: "决策模型" }));
+      const jevDlg = await screen.findByRole("dialog", { name: "目标核对" });
+      expect(within(jevDlg).getByText("首次启用 Jev")).toBeTruthy();
+      expect(within(jevDlg).getByText(/TypeSafe/)).toBeTruthy();
+      expect(within(jevDlg).queryByText(/免费档数据会被用于改进产品/)).toBeNull();
+      fireEvent.click(within(jevDlg).getByRole("button", { name: "保存" }));
+      await waitFor(() => {
+        expect(
+          server2.calls.some(
+            (c) =>
+              c.method === "runtime.setPreference" &&
+              c.params.key === "goalCheckDisclosureAccepted" &&
+              String(c.params.value).includes("typesafe"),
+          ),
+        ).toBe(true);
+      });
+      server2.close();
+    });
+
+    it("目标核对启用决策模型时，在模型页切换决策模型到新接收方触发目标核对披露并记录偏好", async () => {
+      const itemsActive: SettingItem[] = [...ITEMS, goalCheckItem("decision")];
+      const server = fakeServer(
+        handlers({
+          "runtime.describeSettings": itemsActive,
+          "runtime.getPreference": () => null,
+          "runtime.updateSettings": [...ITEMS, dmItem(geminiDm), goalCheckItem("decision")],
+          "runtime.setPreference": null,
+        }),
+      );
+      await server.initialize();
+      render(<SettingsPage {...props(server.client, { section: "models" })} />);
+      await screen.findByText("决策模型");
+      fireEvent.click(row("决策模型").querySelector("button") ?? document.body);
+      const dlg = await screen.findByRole("dialog", { name: "决策模型" });
+      fireEvent.click(within(dlg).getByRole("button", { name: "Gemini" }));
+      fireEvent.click(within(dlg).getByRole("button", { name: "保存" }));
+      await within(dlg).findByText("首次启用 Gemini");
+      expect(within(dlg).getByText(/Google 免费档数据会被用于改进产品/)).toBeTruthy();
+      expect(server.calls.some((c) => c.method === "runtime.updateSettings")).toBe(false);
+      fireEvent.click(within(dlg).getByRole("button", { name: "保存" }));
+      await waitFor(() => {
+        const call = server.calls.find((c) => c.method === "runtime.updateSettings");
+        expect((call?.params.patch as Record<string, unknown>).decisionModel).toEqual(geminiDm);
+      });
+      await waitFor(() => {
+        expect(
+          server.calls.some(
+            (c) =>
+              c.method === "runtime.setPreference" &&
+              c.params.key === "goalCheckDisclosureAccepted" &&
+              String(c.params.value).includes("google"),
+          ),
+        ).toBe(true);
+      });
+      server.close();
+    });
   });
 
   describe("安全审查：追加规则与样例检查（ADR-0057）", () => {

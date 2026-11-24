@@ -62,6 +62,14 @@ import {
 } from "./prefs";
 import { LAYER_TEXT, settingOverrideTitle } from "./setting-source";
 import {
+  GOAL_CHECK_DISCLOSURE_PREF,
+  GOAL_CHECK_OPTIONS,
+  goalCheckSettingPatch,
+  parseGoalCheckAccepted,
+  readGoalCheckBackend,
+  type GoalCheckBackend,
+} from "./goal-check";
+import {
   Button,
   Checkbox,
   DataTable,
@@ -437,6 +445,12 @@ export function SettingsPage({
   const [toast, setToast] = useState<string | null>(null);
   /** 单值项保存中的乐观值；失败时清掉即回到原值 */
   const [pendingPreset, setPendingPreset] = useState<string | null>(null);
+  const [pendingGoalCheck, setPendingGoalCheck] = useState<GoalCheckBackend | null>(null);
+  const [goalCheckDisclosure, setGoalCheckDisclosure] = useState<{
+    config: DecisionModelConfig;
+    recipient: { id: DecisionRecipientId; label: string };
+    accepted: Set<string>;
+  } | null>(null);
   const [dialog, setDialog] = useState<
     null | "defaultModel" | "decisionModel" | "reviewer" | "threshold" | { role: RoleKey }
   >(null);
@@ -591,11 +605,35 @@ export function SettingsPage({
   const decisionModelItem = item("decisionModel");
   const reviewerItem = item("permission.reviewer");
   const reviewerRulesItem = item("permission.reviewerRules");
+  const goalCheckItem = items?.find((x) => (x.key as string) === "goalCheck");
   const thresholdItem = item("compaction.threshold");
   const pruneLimitItem = item("compaction.pruneLimit");
   const shellItem = item("shell");
   const decisionModelCfg = decisionModelItem?.decisionModel?.effective;
   const reviewerCfg = reviewerItem?.reviewer?.effective;
+  const effectiveGoalCheck = readGoalCheckBackend(goalCheckItem);
+  const goalCheckBackend = pendingGoalCheck ?? effectiveGoalCheck;
+
+  const pickGoalCheck = async (next: GoalCheckBackend) => {
+    if (next === goalCheckBackend || client === undefined) return;
+    if (next === "decision" && decisionModelCfg !== undefined) {
+      const raw = await client.runtime
+        .getPreference(GOAL_CHECK_DISCLOSURE_PREF)
+        .catch(() => undefined);
+      const accepted = parseGoalCheckAccepted(raw);
+      const recipient = decisionRecipient(decisionModelCfg);
+      if (!accepted.has(recipient.id)) {
+        setGoalCheckDisclosure({ config: decisionModelCfg, recipient, accepted });
+        return;
+      }
+    }
+    setPendingGoalCheck(next);
+    try {
+      await save("goalCheck", "目标核对", goalCheckSettingPatch(next));
+    } finally {
+      setPendingGoalCheck(null);
+    }
+  };
 
   // ── 通知（ADR-0056）：生效值读自 describeSettings，逐项保存 ──
   const notifyEnabled = item("notifications.enabled")?.effective !== "false";
@@ -757,6 +795,31 @@ export function SettingsPage({
                     >
                       编辑
                     </Button>
+                  </SettingsRow>
+                  <SettingsRow
+                    label="目标核对"
+                    overrideTitle={settingOverrideTitle(goalCheckItem)}
+                    error={errs("goalCheck")}
+                  >
+                    {goalCheckBackend === "decision" && decisionModelCfg === undefined && (
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          onOpenModels?.();
+                        }}
+                      >
+                        设置 › 模型
+                      </Button>
+                    )}
+                    <SegmentedControl
+                      aria-label="目标核对"
+                      value={goalCheckBackend}
+                      disabled={pendingGoalCheck !== null}
+                      options={GOAL_CHECK_OPTIONS}
+                      onChange={(next) => {
+                        void pickGoalCheck(next);
+                      }}
+                    />
                   </SettingsRow>
                   {shellItem !== undefined && (
                     <SettingsRow
@@ -1368,11 +1431,33 @@ export function SettingsPage({
           }}
         />
       )}
+      {goalCheckDisclosure !== null && client !== undefined && (
+        <GoalCheckDisclosureDialog
+          config={goalCheckDisclosure.config}
+          recipient={goalCheckDisclosure.recipient}
+          onClose={() => {
+            setGoalCheckDisclosure(null);
+          }}
+          onConfirm={async () => {
+            const err = await save("goalCheck", "目标核对", goalCheckSettingPatch("decision"));
+            if (err === undefined) {
+              const next = new Set(goalCheckDisclosure.accepted);
+              next.add(goalCheckDisclosure.recipient.id);
+              await client.runtime
+                .setPreference(GOAL_CHECK_DISCLOSURE_PREF, [...next].join(","))
+                .catch(() => undefined);
+              setGoalCheckDisclosure(null);
+            }
+            return err;
+          }}
+        />
+      )}
       {dialog === "decisionModel" && client !== undefined && (
         <DecisionModelDialog
           client={client}
           providers={reviewerProviders}
           current={decisionModelItem?.decisionModel?.saved ?? decisionModelCfg}
+          goalCheckActive={effectiveGoalCheck === "decision"}
           onClose={() => {
             setDialog(null);
           }}
@@ -1876,16 +1961,69 @@ function parseAcceptedRecipients(
 const DEFAULT_DECISION_MODELS = new Set(["gemini-decision-1", "jev-1.13-free", "jev-latest"]);
 const DEFAULT_DECISION_ENVS = new Set(["GEMINI_API_KEY", "OPENCODE_API_KEY", "TYPESAFE_API_KEY"]);
 
+function GoalCheckDisclosureBanner({
+  config,
+  recipient,
+}: {
+  config: DecisionModelConfig;
+  recipient: { id: DecisionRecipientId; label: string };
+}) {
+  return (
+    <div className="pbanner">
+      <div className="pbanner-title">
+        {config.source === "gemini" ? "首次启用 Gemini" : "首次启用 Jev"}
+      </div>
+      <span>
+        目标核对将把目标原文、完成清单与证据，以及脱敏后的工具调用记录与输出（总计 60,000
+        字内，不含用户消息、项目指令与图片）发送给 {recipient.label}
+        ，可能包含任务代码或命令输出。
+        {recipient.id === "google" ? "Google 免费档数据会被用于改进产品。" : ""}
+        点「保存」表示同意。
+      </span>
+    </div>
+  );
+}
+
+function GoalCheckDisclosureDialog({
+  config,
+  recipient,
+  onClose,
+  onConfirm,
+}: {
+  config: DecisionModelConfig;
+  recipient: { id: DecisionRecipientId; label: string };
+  onClose: () => void;
+  onConfirm: () => Promise<string | undefined>;
+}) {
+  const { busy, error, run } = useDialogSave();
+  return (
+    <Dialog
+      title="目标核对"
+      width={520}
+      error={error}
+      busy={busy}
+      onClose={onClose}
+      onSave={() => {
+        run(onConfirm);
+      }}
+    >
+      <GoalCheckDisclosureBanner config={config} recipient={recipient} />
+    </Dialog>
+  );
+}
+
 function DecisionModelDialog({
   client,
   providers,
   current,
+  goalCheckActive = false,
   onClose,
   onSave,
 }: {
   client: RpcClient;
   providers: string[];
   current: DecisionModelConfig | undefined;
+  goalCheckActive?: boolean | undefined;
   onClose: () => void;
   onSave: (
     patch: SettingsPatch,
@@ -1918,7 +2056,30 @@ function DecisionModelDialog({
       : "GEMINI_API_KEY",
   );
   const [secretKey, setSecretKey] = useState("");
+  const [acceptedGoalCheckRecipients, setAcceptedGoalCheckRecipients] =
+    useState<Set<string> | null>(null);
+  const [goalCheckDisclosure, setGoalCheckDisclosure] = useState<{
+    config: DecisionModelConfig;
+    recipient: { id: DecisionRecipientId; label: string };
+  } | null>(null);
   const { busy, error, setError, run } = useDialogSave();
+
+  useEffect(() => {
+    if (!goalCheckActive) return;
+    let cancelled = false;
+    client.runtime
+      .getPreference(GOAL_CHECK_DISCLOSURE_PREF)
+      .catch(() => undefined)
+      .then((raw) => {
+        if (!cancelled) setAcceptedGoalCheckRecipients(parseGoalCheckAccepted(raw));
+      })
+      .catch(() => {
+        if (!cancelled) setAcceptedGoalCheckRecipients(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, goalCheckActive]);
 
   const canBorrowProvider =
     source === "jev" && jevEndpoint === "opencode-zen" && providers.length > 0;
@@ -2021,9 +2182,47 @@ function DecisionModelDialog({
       setError(built);
       return;
     }
+    const nextConfig = built.patch.decisionModel ?? undefined;
+    if (goalCheckActive && nextConfig !== undefined && goalCheckDisclosure === null) {
+      const recipient = decisionRecipient(nextConfig);
+      if (acceptedGoalCheckRecipients !== null) {
+        if (!acceptedGoalCheckRecipients.has(recipient.id)) {
+          setGoalCheckDisclosure({ config: nextConfig, recipient });
+          return;
+        }
+      } else {
+        run(async () => {
+          const raw = await client.runtime
+            .getPreference(GOAL_CHECK_DISCLOSURE_PREF)
+            .catch(() => undefined);
+          const accepted = parseGoalCheckAccepted(raw);
+          setAcceptedGoalCheckRecipients(accepted);
+          if (!accepted.has(recipient.id)) {
+            setGoalCheckDisclosure({ config: nextConfig, recipient });
+            return undefined;
+          }
+          const err = await onSave(built.patch, built.options);
+          if (err === undefined) setSecretKey("");
+          return err;
+        });
+        return;
+      }
+    }
+    const acceptingRecipient =
+      goalCheckActive && goalCheckDisclosure !== null ? goalCheckDisclosure.recipient : undefined;
     run(async () => {
       const err = await onSave(built.patch, built.options);
-      if (err === undefined) setSecretKey("");
+      if (err === undefined) {
+        setSecretKey("");
+        if (acceptingRecipient !== undefined) {
+          const next = new Set(acceptedGoalCheckRecipients ?? []);
+          next.add(acceptingRecipient.id);
+          setAcceptedGoalCheckRecipients(next);
+          await client.runtime
+            .setPreference(GOAL_CHECK_DISCLOSURE_PREF, [...next].join(","))
+            .catch(() => undefined);
+        }
+      }
       return err;
     });
   };
@@ -2051,109 +2250,118 @@ function DecisionModelDialog({
       onClose={onClose}
       onSave={submit}
     >
-      <Field label="来源">
-        {seg(
-          "来源",
-          source,
-          [
-            ["unset", "未设置"],
-            ["gemini", "Gemini"],
-            ["jev", "Jev"],
-          ] as const,
-          switchSource,
-        )}
-      </Field>
-      {source !== "unset" && (
+      {goalCheckDisclosure !== null ? (
+        <GoalCheckDisclosureBanner
+          config={goalCheckDisclosure.config}
+          recipient={goalCheckDisclosure.recipient}
+        />
+      ) : (
         <>
-          <Field label="接入点">
-            {source === "gemini"
-              ? seg(
-                  "接入点",
-                  geminiEndpoint,
-                  GEMINI_DECISION_ENDPOINTS.map((e) => [e.v, e.label] as const),
+          <Field label="来源">
+            {seg(
+              "来源",
+              source,
+              [
+                ["unset", "未设置"],
+                ["gemini", "Gemini"],
+                ["jev", "Jev"],
+              ] as const,
+              switchSource,
+            )}
+          </Field>
+          {source !== "unset" && (
+            <>
+              <Field label="接入点">
+                {source === "gemini"
+                  ? seg(
+                      "接入点",
+                      geminiEndpoint,
+                      GEMINI_DECISION_ENDPOINTS.map((e) => [e.v, e.label] as const),
+                      (v) => {
+                        setGeminiEndpoint(v);
+                        setError(null);
+                      },
+                    )
+                  : seg(
+                      "接入点",
+                      jevEndpoint,
+                      JEV_ENDPOINTS.map((e) => [e.v, e.label] as const),
+                      switchJevEndpoint,
+                    )}
+                {((source === "gemini" && geminiEndpoint === "custom") ||
+                  (source === "jev" && jevEndpoint === "custom")) && (
+                  <input
+                    id="dm-url"
+                    aria-label="自定义地址"
+                    className="input lg mono"
+                    spellCheck={false}
+                    value={baseURL}
+                    onChange={(e) => {
+                      setBaseURL(e.target.value);
+                    }}
+                  />
+                )}
+              </Field>
+              <Field label="模型" htmlFor="dm-model">
+                <input
+                  id="dm-model"
+                  className="input lg mono"
+                  spellCheck={false}
+                  value={model}
+                  onChange={(e) => {
+                    setModel(e.target.value);
+                  }}
+                />
+              </Field>
+              <Field label="凭据">
+                {seg(
+                  "凭据",
+                  canBorrowProvider ? credKind : credKind === "provider" ? "env" : credKind,
+                  [
+                    ...(canBorrowProvider ? [["provider", "沿用服务商"] as const] : []),
+                    ["env", "环境变量"] as const,
+                    ["stored", "单独密钥"] as const,
+                  ],
                   (v) => {
-                    setGeminiEndpoint(v);
+                    setCredKind(v);
                     setError(null);
                   },
-                )
-              : seg(
-                  "接入点",
-                  jevEndpoint,
-                  JEV_ENDPOINTS.map((e) => [e.v, e.label] as const),
-                  switchJevEndpoint,
                 )}
-            {((source === "gemini" && geminiEndpoint === "custom") ||
-              (source === "jev" && jevEndpoint === "custom")) && (
-              <input
-                id="dm-url"
-                aria-label="自定义地址"
-                className="input lg mono"
-                spellCheck={false}
-                value={baseURL}
-                onChange={(e) => {
-                  setBaseURL(e.target.value);
-                }}
-              />
-            )}
-          </Field>
-          <Field label="模型" htmlFor="dm-model">
-            <input
-              id="dm-model"
-              className="input lg mono"
-              spellCheck={false}
-              value={model}
-              onChange={(e) => {
-                setModel(e.target.value);
-              }}
-            />
-          </Field>
-          <Field label="凭据">
-            {seg(
-              "凭据",
-              canBorrowProvider ? credKind : credKind === "provider" ? "env" : credKind,
-              [
-                ...(canBorrowProvider ? [["provider", "沿用服务商"] as const] : []),
-                ["env", "环境变量"] as const,
-                ["stored", "单独密钥"] as const,
-              ],
-              (v) => {
-                setCredKind(v);
-                setError(null);
-              },
-            )}
-            {credKind === "provider" && canBorrowProvider && (
-              <Dropdown
-                label="沿用服务商"
-                appearance="lg"
-                value={credProvider}
-                options={providers.map((p) => ({ value: p, label: p }))}
-                onChange={setCredProvider}
-              />
-            )}
-            {(credKind === "env" || (credKind === "provider" && !canBorrowProvider)) && (
-              <input
-                className="input lg mono"
-                spellCheck={false}
-                value={credEnv}
-                aria-label="环境变量"
-                onChange={(e) => {
-                  setCredEnv(e.target.value);
-                }}
-              />
-            )}
-            {credKind === "stored" && (
-              <input
-                className="input lg mono"
-                type="password"
-                autoComplete="off"
-                value={secretKey}
-                aria-label="单独密钥"
-                onChange={(e) => {
-                  setSecretKey(e.target.value);
-                }}
-              />
-            )}
-          </Field>
+                {credKind === "provider" && canBorrowProvider && (
+                  <Dropdown
+                    label="沿用服务商"
+                    appearance="lg"
+                    value={credProvider}
+                    options={providers.map((p) => ({ value: p, label: p }))}
+                    onChange={setCredProvider}
+                  />
+                )}
+                {(credKind === "env" || (credKind === "provider" && !canBorrowProvider)) && (
+                  <input
+                    className="input lg mono"
+                    spellCheck={false}
+                    value={credEnv}
+                    aria-label="环境变量"
+                    onChange={(e) => {
+                      setCredEnv(e.target.value);
+                    }}
+                  />
+                )}
+                {credKind === "stored" && (
+                  <input
+                    className="input lg mono"
+                    type="password"
+                    autoComplete="off"
+                    value={secretKey}
+                    aria-label="单独密钥"
+                    onChange={(e) => {
+                      setSecretKey(e.target.value);
+                    }}
+                  />
+                )}
+              </Field>
+            </>
+          )}
         </>
       )}
     </Dialog>

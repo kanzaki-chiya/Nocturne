@@ -29,8 +29,15 @@ import { ModelPicker } from "./model-picker.js";
 import { PickList } from "./pick-list.js";
 import { PageShell, type ShellNotice, type ShellRow, type ShellSpan } from "./page/page-shell.js";
 import { DecisionModelDialog } from "./decision-model-dialog.js";
+import { GoalCheckDialog } from "./goal-check-dialog.js";
 import { ReviewerDialog } from "./reviewer-dialog.js";
 import { ThemePage } from "./theme-page.js";
+import {
+  GOAL_CHECK_DISCLOSURE_PREF,
+  goalCheckSettingPatch,
+  readGoalCheckBackend,
+  type GoalCheckBackend,
+} from "../goal-check.js";
 
 const SOURCES: Record<SettingItem["source"], string> = {
   default: "默认",
@@ -68,8 +75,15 @@ const EXPLAIN: Record<string, string> = {
   decisionModel: "安全审查使用的决策模型（Gemini 或 Jev）；Enter 打开设置",
 };
 
-type Nested = "theme" | "shell" | "reviewer" | "decisionModel" | "threshold" | ModelRole;
+type Nested =
+  "theme" | "shell" | "reviewer" | "goalCheck" | "decisionModel" | "threshold" | ModelRole;
 const FULL_PAGE: readonly Nested[] = ["theme", "shell", ...ROLES];
+
+const GOAL_CHECK_LABELS: Record<GoalCheckBackend, string> = {
+  off: "关闭",
+  decision: "决策模型",
+  smol: "小模型",
+};
 
 function legacyReviewer(value: string | undefined): SecurityReviewerConfig | undefined {
   if (!value) return undefined;
@@ -162,17 +176,17 @@ export function SettingsPage({
       cancelled = true;
     };
   }, [runtime, workspaceRoot]);
-  const item = (key: SettingItem["key"]) => items.find((entry) => entry.key === key);
+  const item = (key: string) => items.find((entry) => (entry.key as string) === key);
   const fail = (text: string) => {
     setNotice({ text: `保存失败：${text}`, tone: "error" });
   };
 
-  const source = (key: SettingItem["key"]): string => {
+  const source = (key: string): string => {
     const entry = item(key);
     if (!entry) return "默认";
     return entry.overridden ? `已保存，被 ${SOURCES[entry.source]} 覆盖` : SOURCES[entry.source];
   };
-  const trail = (key: SettingItem["key"]) => ({
+  const trail = (key: string) => ({
     text: source(key),
     tone: item(key)?.overridden ? ("warning" as const) : ("muted" as const),
   });
@@ -264,6 +278,7 @@ export function SettingsPage({
   const effectiveReviewer =
     item("permission.reviewer")?.reviewer?.effective ??
     legacyReviewer(item("permission.reviewer")?.effective);
+  const effectiveGoalCheck = readGoalCheckBackend(item("goalCheck"));
   const model = item("defaultModel")?.effective;
   const effort = item("reasoningEffort")?.effective ?? "off";
   const themeLabel = THEME_LABELS[palette.id];
@@ -285,6 +300,12 @@ export function SettingsPage({
       ],
       trail: [trail("permission.reviewer")],
       search: `安全审查 ${EXPLAIN.reviewer}`,
+    },
+    {
+      id: "goalCheck",
+      group: "session",
+      cells: [{ text: "目标核对" }, { text: GOAL_CHECK_LABELS[effectiveGoalCheck] }],
+      search: "目标核对",
     },
     {
       id: "defaultModel",
@@ -412,33 +433,37 @@ export function SettingsPage({
       ? "默认权限预设"
       : id === "reviewer"
         ? "安全审查"
-        : id === "defaultModel"
-          ? "默认模型与档位"
-          : id === "theme"
-            ? "主题"
-            : id === "shell"
-              ? "Shell"
-              : id === "threshold"
-                ? "压缩阈值"
-                : id === "decisionModel"
-                  ? "决策模型"
-                  : ROLE_LABELS[id as ModelRole];
-  const keyOf = (id: string): SettingItem["key"] | undefined =>
+        : id === "goalCheck"
+          ? "目标核对"
+          : id === "defaultModel"
+            ? "默认模型与档位"
+            : id === "theme"
+              ? "主题"
+              : id === "shell"
+                ? "Shell"
+                : id === "threshold"
+                  ? "压缩阈值"
+                  : id === "decisionModel"
+                    ? "决策模型"
+                    : ROLE_LABELS[id as ModelRole];
+  const keyOf = (id: string): string | undefined =>
     id === "preset"
       ? "permissions.preset"
       : id === "reviewer"
         ? "permission.reviewer"
-        : id === "decisionModel"
-          ? "decisionModel"
-          : id === "defaultModel"
-            ? "defaultModel"
-            : id === "shell"
-              ? "shell"
-              : id === "threshold"
-                ? "compaction.threshold"
-                : ROLES.includes(id as ModelRole)
-                  ? (`modelRoles.${id}` as SettingItem["key"])
-                  : undefined;
+        : id === "goalCheck"
+          ? "goalCheck"
+          : id === "decisionModel"
+            ? "decisionModel"
+            : id === "defaultModel"
+              ? "defaultModel"
+              : id === "shell"
+                ? "shell"
+                : id === "threshold"
+                  ? "compaction.threshold"
+                  : ROLES.includes(id as ModelRole)
+                    ? (`modelRoles.${id}` as SettingItem["key"])
+                    : undefined;
 
   const describe = (row: ShellRow | undefined): ShellSpan[][] => {
     if (row === undefined) return [];
@@ -577,7 +602,10 @@ export function SettingsPage({
           }}
         />
       </Box>
-      {nested === "threshold" || nested === "reviewer" || nested === "decisionModel" ? (
+      {nested === "threshold" ||
+      nested === "reviewer" ||
+      nested === "goalCheck" ||
+      nested === "decisionModel" ? (
         <Box position="absolute" width={width} height={height}>
           {nested === "threshold" ? (
             <CompactionThresholdDialog
@@ -598,18 +626,66 @@ export function SettingsPage({
             <DecisionModelDialog
               runtime={runtime}
               initial={item("decisionModel")?.decisionModel?.saved ?? effectiveDecisionModel}
+              goalCheckActive={effectiveGoalCheck === "decision"}
               width={width}
               height={height}
               onCancel={() => {
                 setNested(undefined);
               }}
               onMouseFrame={onMouseFrame}
-              onApply={async (selected, key) => {
+              onApply={async (selected, key, acceptedGoalCheckRecipient) => {
                 const failure = await commit(
                   { decisionModel: selected },
                   key === undefined ? undefined : { decisionModelKey: key },
                 );
                 if (failure !== undefined) return failure;
+                if (acceptedGoalCheckRecipient !== undefined) {
+                  try {
+                    const prev = (runtime.getPreference(GOAL_CHECK_DISCLOSURE_PREF) ?? "")
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter((s) => s !== "");
+                    if (!prev.includes(acceptedGoalCheckRecipient)) {
+                      prev.push(acceptedGoalCheckRecipient);
+                    }
+                    await runtime.setPreference(GOAL_CHECK_DISCLOSURE_PREF, prev.join(","));
+                  } catch (cause) {
+                    return message(cause);
+                  }
+                }
+                setNested(undefined);
+                return undefined;
+              }}
+            />
+          ) : nested === "goalCheck" ? (
+            <GoalCheckDialog
+              runtime={runtime}
+              initial={effectiveGoalCheck}
+              decisionModel={effectiveDecisionModel}
+              width={width}
+              height={height}
+              onOpenDecisionModel={() => {
+                setNested("decisionModel");
+              }}
+              onCancel={() => {
+                setNested(undefined);
+              }}
+              onMouseFrame={onMouseFrame}
+              onApply={async (backend, acceptedRecipient) => {
+                const failure = await commit(goalCheckSettingPatch(backend));
+                if (failure !== undefined) return failure;
+                if (acceptedRecipient !== undefined) {
+                  try {
+                    const prev = (runtime.getPreference(GOAL_CHECK_DISCLOSURE_PREF) ?? "")
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter((s) => s !== "");
+                    if (!prev.includes(acceptedRecipient)) prev.push(acceptedRecipient);
+                    await runtime.setPreference(GOAL_CHECK_DISCLOSURE_PREF, prev.join(","));
+                  } catch (cause) {
+                    return message(cause);
+                  }
+                }
                 setNested(undefined);
                 return undefined;
               }}

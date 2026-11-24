@@ -316,7 +316,7 @@ describe("ADR-0045 设置页", () => {
   it("主题 ←→ 即时生效并写入偏好；写入失败回退主题", async () => {
     const ok = page();
     await ok.ready();
-    await ok.down(3);
+    await ok.down(4);
     expect(selected(ok.lastFrame())).toContain("主题");
     await ok.input("\x1b[C");
     expect(ok.preview).toHaveBeenLastCalledWith("light");
@@ -326,7 +326,7 @@ describe("ADR-0045 设置页", () => {
     ok.unmount();
     const bad = page({ themeFailure: true });
     await bad.ready();
-    await bad.down(3);
+    await bad.down(4);
     await bad.input("\x1b[C");
     await waitFor(() => (bad.lastFrame() ?? "").includes("保存失败：pref failure"));
     expect(bad.preview).toHaveBeenLastCalledWith("dark");
@@ -336,7 +336,7 @@ describe("ADR-0045 设置页", () => {
   it("压缩阈值：对话框保存即落盘，取消不写", async () => {
     const screen = page();
     await screen.ready();
-    await screen.down(5);
+    await screen.down(6);
     expect(selected(screen.lastFrame())).toContain("压缩阈值");
     await screen.input("\r");
     expect(screen.lastFrame()).toContain("[* 百分比]");
@@ -358,7 +358,7 @@ describe("ADR-0045 设置页", () => {
   it("压缩阈值保存失败留在对话框；窄屏非法百分比不能保存，取消先确认放弃", async () => {
     const failing = page({ failure: true });
     await failing.ready();
-    await failing.down(5);
+    await failing.down(6);
     await failing.input("\r");
     await changedFrame(failing, () => failing.stdin.write("\t"));
     await changedFrame(failing, () => failing.stdin.write("\t"));
@@ -369,7 +369,7 @@ describe("ADR-0045 设置页", () => {
     failing.unmount();
     const screen = page({ width: 36, height: 15, ascii: true });
     await screen.ready();
-    await screen.down(5);
+    await screen.down(6);
     await screen.input("\r");
     expect(screen.lastFrame()?.split("\n")).toHaveLength(15);
     await changedFrame(screen, () => screen.stdin.write("\r"));
@@ -432,10 +432,82 @@ describe("ADR-0045 设置页", () => {
     screen.unmount();
   });
 
+  it("目标核对：小模型直接保存；决策模型启用且已配 Google 时触发首次披露并写 goalCheckDisclosureAccepted", async () => {
+    const geminiDm = {
+      source: "gemini",
+      endpoint: "ai-studio",
+      model: "gemini-decision-1",
+      credential: { env: "GEMINI_API_KEY" },
+    } as const;
+    const screen = page({
+      extraItems: [
+        {
+          key: "decisionModel",
+          effective: "Gemini · ai-studio · gemini-decision-1",
+          saved: "Gemini · ai-studio · gemini-decision-1",
+          source: "settings",
+          overridden: false,
+          decisionModel: { effective: geminiDm, saved: geminiDm },
+        },
+        {
+          key: "goalCheck",
+          effective: "off",
+          saved: "off",
+          source: "default",
+          overridden: false,
+        } as unknown as SettingItem,
+      ],
+    });
+    await screen.ready();
+    await screen.down(2);
+    expect(selected(screen.lastFrame())).toContain("目标核对");
+    await screen.input("\r");
+    expect(screen.lastFrame()).toContain("/settings · 目标核对");
+    await screen.input("\x1b[C"); // 决策模型
+    await screen.click("save");
+    expect(screen.lastFrame()).toContain("首次启用 Gemini");
+    expect(screen.lastFrame()).toContain("Google 免费档数据会被用于改进产品");
+    expect(screen.update).not.toHaveBeenCalled();
+    await screen.click("save");
+    await waitFor(() => screen.update.mock.calls.length === 1);
+    expect(screen.update).toHaveBeenCalledWith({ goalCheck: { backend: "decision" } });
+    await waitFor(() => screen.preference.mock.calls.length === 1);
+    expect(screen.preference).toHaveBeenCalledWith("goalCheckDisclosureAccepted", "google");
+    screen.unmount();
+  });
+
+  it("目标核对启用决策模型时，修改决策模型到新接收方触发目标核对披露", async () => {
+    const screen = page({
+      extraItems: [
+        {
+          key: "goalCheck",
+          effective: "decision",
+          saved: "decision",
+          source: "settings",
+          overridden: false,
+        } as unknown as SettingItem,
+      ],
+    });
+    await screen.ready();
+    await screen.click("row:decisionModel");
+    await screen.click("row:decisionModel");
+    expect(screen.lastFrame()).toContain("/settings · 决策模型");
+    await screen.input("\x1b[C"); // Gemini
+    await screen.click("save");
+    expect(screen.lastFrame()).toContain("首次启用 Gemini");
+    expect(screen.lastFrame()).toContain("Google 免费档数据会被用于改进产品");
+    expect(screen.update).not.toHaveBeenCalled();
+    await screen.click("save");
+    await waitFor(() => screen.update.mock.calls.length === 1);
+    await waitFor(() => screen.preference.mock.calls.length === 1);
+    expect(screen.preference).toHaveBeenCalledWith("goalCheckDisclosureAccepted", "google");
+    screen.unmount();
+  });
+
   it("Shell 与模型角色：选定后立即写入，看图以外可清除", async () => {
     const screen = page();
     await screen.ready();
-    await screen.down(4);
+    await screen.down(5);
     await screen.input("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("选择 shell"));
     await flush();
@@ -459,7 +531,7 @@ describe("ADR-0045 设置页", () => {
   it("Enter 进入主题页，选定后写入偏好并回到设置页", async () => {
     const screen = page();
     await screen.ready();
-    await screen.down(3);
+    await screen.down(4);
     await screen.input("\r");
     await waitFor(() => (screen.lastFrame() ?? "").includes("选择主题"));
     await flush();

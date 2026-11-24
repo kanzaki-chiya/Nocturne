@@ -1143,7 +1143,9 @@ it("常规与服务商设置打开时，窗口按钮保持可访问并执行宿�
       <App host={host} />
     </WindowFrame>,
   );
-  const brand = document.querySelector(".window-titlebar .window-brand");
+  const titlebar = document.querySelector<HTMLElement>(".window-titlebar");
+  if (titlebar === null) throw new Error("找不到窗口标题栏");
+  const brand = titlebar.querySelector(".window-brand");
   expect(brand?.textContent).toBe("Nocturne");
   const brandMark = brand?.querySelector("svg");
   expect(brandMark?.getAttribute("width")).toBe("16");
@@ -1157,7 +1159,7 @@ it("常规与服务商设置打开时，窗口按钮保持可访问并执行宿�
       ["最大化", "toggle_maximize"],
       ["关闭", "close"],
     ] as const) {
-      const button = screen.getByRole("button", { name });
+      const button = within(titlebar).getByRole("button", { name });
       expect(button.closest('[inert], [aria-hidden="true"]')).toBeNull();
       expect(button.closest(".window-titlebar")).not.toBeNull();
       windowCalls.length = 0;

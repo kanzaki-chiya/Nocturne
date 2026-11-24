@@ -300,6 +300,7 @@ export function summarizeToolInput(
   const ensemble = name === undefined ? undefined : ensembleToolSummary(name, input);
   if (ensemble !== undefined) return ensemble;
   if (name === "note_write") return noteWriteSummary(input, output);
+  if (name === "update_goal") return "";
   if (name === "task") return inputString(input, "task") ?? "";
   if (name === "mcp_search") return inputString(input, "query") ?? "";
   if (name === "render_html")

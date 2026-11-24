@@ -7,7 +7,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { sessionUsageSoFar, type SessionView } from "@nocturne/core/protocol";
+import { sessionCacheUsageSoFar, type SessionView } from "@nocturne/core/protocol";
 import type { ContextSummary, RpcSession } from "@nocturne/rpc/client";
 import { ContextPanel, number, percent } from "./context-panel";
 import { useSessionRefresh } from "./use-session-refresh";
@@ -138,7 +138,7 @@ export function ContextUsage({
   const used = context
     ? percent(context.report.estimatedTokens, context.report.budgetTokens)
     : null;
-  const usage = sessionUsageSoFar(view);
+  const usage = sessionCacheUsageSoFar(view);
   const cache =
     usage.cacheReadTokens === undefined || usage.inputTokens <= 0
       ? null

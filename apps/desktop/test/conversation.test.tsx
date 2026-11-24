@@ -2621,7 +2621,7 @@ describe("Conversation 工具行与拒绝", () => {
     expect(container.querySelector(".tool-dir")).toBeNull();
   });
 
-  it("update_goal 工具行显示「目标」", () => {
+  it("update_goal 工具行显示「目标」；通过时不加东西", () => {
     const view = createSessionView();
     view.entries = [
       tool({
@@ -2629,8 +2629,11 @@ describe("Conversation 工具行与拒绝", () => {
         input: { status: "met" },
         result: {
           status: "ok",
-          modelContent: "目标已完成",
-          output: { status: "met" },
+          modelContent: "Goal marked as met.",
+          output: {
+            status: "met",
+            check: { backend: "decision", model: "gemini-decision-1", result: "passed" },
+          },
           error: undefined,
           truncated: false,
           spillPath: undefined,
@@ -2640,6 +2643,97 @@ describe("Conversation 工具行与拒绝", () => {
     ];
     const { container } = mount(view);
     expect(container.querySelector(".tool-name")?.textContent).toBe("目标");
+    expect(container.querySelector(".tool-res")?.textContent).toBe("完成");
+    expect(container.textContent).not.toContain("核对");
+    fireEvent.click(container.querySelector("summary") ?? document.body);
+    expect(container.textContent).not.toContain("核对不可用");
+  });
+
+  it("update_goal 核对未通过（goal_unverified）：收起淡色中性行，展开列出未通过项与覆盖缺口", () => {
+    const view = createSessionView();
+    view.entries = [
+      tool({
+        name: "update_goal",
+        status: "error",
+        input: {
+          status: "met",
+          checklist: [
+            { item: "修改代码", evidence: "已修改 foo.ts" },
+            { item: "运行测试", evidence: "测试全部通过" },
+          ],
+        },
+        result: {
+          status: "error",
+          modelContent: "Goal check rejected item 2 and coverage.",
+          output: {
+            status: "met",
+            checklist: [
+              { item: "修改代码", evidence: "已修改 foo.ts" },
+              { item: "运行测试", evidence: "测试全部通过" },
+            ],
+            check: {
+              backend: "smol",
+              result: "rejected",
+              items: [
+                { index: 1, passed: true },
+                { index: 2, passed: false, note: "修改后未重跑测试" },
+              ],
+              coverage: false,
+            },
+          },
+          error: { code: "goal_unverified", message: "Goal verification failed" },
+          truncated: false,
+          spillPath: undefined,
+          durationMs: 120,
+        },
+      }),
+    ];
+    const { container } = mount(view);
+    const article = screen.getByRole("article", { name: "工具 update_goal" });
+    expect(article.querySelector(".tool-res.err")).toBeNull();
+    expect(article.querySelector(".tool-res.recoverable")?.textContent).toBe("核对未通过");
+    expect(article.textContent).not.toContain("失败");
+    expect(article.textContent).not.toContain("goal_unverified");
+    const details = container.querySelector<HTMLDetailsElement>(".tool-details");
+    expect(details?.open).toBe(false);
+
+    fireEvent.click(article.querySelector("summary") ?? document.body);
+    expect(details?.open).toBe(true);
+    const items = Array.from(article.querySelectorAll(".todo-text"), (el) => el.textContent);
+    expect(items).toEqual(["运行测试：修改后未重跑测试", "清单未覆盖目标的全部要求"]);
+  });
+
+  it("update_goal 核对不可用：收起不加东西，展开区显示原因", () => {
+    const view = createSessionView();
+    view.entries = [
+      tool({
+        name: "update_goal",
+        input: { status: "met" },
+        result: {
+          status: "ok",
+          modelContent: "Goal marked as met.",
+          output: {
+            status: "met",
+            check: {
+              backend: "decision",
+              result: "unavailable",
+              reason: "决策模型未设置",
+            },
+          },
+          error: undefined,
+          truncated: false,
+          spillPath: undefined,
+          durationMs: 10,
+        },
+      }),
+    ];
+    mount(view);
+    const article = screen.getByRole("article", { name: "工具 update_goal" });
+    expect(article.querySelector(".tool-res")?.textContent).toBe("完成");
+    expect(article.textContent).not.toContain("决策模型未设置");
+    fireEvent.click(article.querySelector("summary") ?? document.body);
+    expect(article.textContent).toContain("核对不可用");
+    expect(article.textContent).toContain("决策模型未设置");
   });
   it("工作区内路径相对化、区外绝对化；10 秒以上才显示时长", () => {
     const view = createSessionView();

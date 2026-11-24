@@ -1,6 +1,7 @@
 /** 逐行 CLI 可静态加载的纯文本入口，不导入 React 或 Ink。 */
 import {
   estimateCost,
+  sessionCacheUsageSoFar,
   sessionUsageSoFar,
   type ModelPricing,
   type PricingSource,
@@ -23,6 +24,9 @@ export function costLines(
   const vendorTag = (source: PricingSource | undefined) =>
     source === "vendor" ? "（厂商价）" : "";
   const usage = sessionUsageSoFar(view);
+  const cache = sessionCacheUsageSoFar(view, usage);
+  const cacheRate =
+    cache.inputTokens > 0 ? ((cache.cacheReadTokens ?? 0) / cache.inputTokens) * 100 : 0;
   const ref = view.config.model;
   const money = (n: number) => `$${n >= 100 ? Math.round(n) : n.toFixed(2)}`;
   const tokens = (n: number) => n.toLocaleString("en-US");
@@ -30,7 +34,7 @@ export function costLines(
   return [
     "当前会话",
     `  ${ref ? `${ref.provider}/${ref.model}` : "—"} · ${view.turnCount} 轮`,
-    `  输入 ${tokens(usage.inputTokens)} · 缓存读取 ${tokens(usage.cacheReadTokens ?? 0)} · 命中率 ${usage.inputTokens ? (((usage.cacheReadTokens ?? 0) / usage.inputTokens) * 100).toFixed(1) : "0.0"}%`,
+    `  输入 ${tokens(usage.inputTokens)} · 缓存读取 ${tokens(usage.cacheReadTokens ?? 0)} · 命中率 ${cacheRate.toFixed(1)}%`,
     `  输出 ${tokens(usage.outputTokens)} · 预估费用 ${cost ? `${money(cost.total)}${vendorTag(price?.pricingSource)}` : "未计价"}`,
     "",
     "近 30 天 · 本机全部会话（含子代理）",

@@ -320,9 +320,9 @@ export function UsageView({
     [stats, sort],
   );
   const total = stats?.totals;
-  const cacheRate = total?.inputTokens
-    ? ((total.cacheReadTokens ?? 0) / total.inputTokens) * 100
-    : 0;
+  const cacheRate =
+    (stats?.cacheHitRate ??
+      (total?.inputTokens ? (total.cacheReadTokens ?? 0) / total.inputTokens : 0)) * 100;
   const composition = total
     ? [
         {

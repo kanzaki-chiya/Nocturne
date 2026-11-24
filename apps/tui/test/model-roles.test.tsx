@@ -69,7 +69,7 @@ async function page(roles: Partial<Record<ModelRole, string>> = {}) {
       runtime,
       session,
       width: 110,
-      height: 24,
+      height: 26,
       onClose: close,
       onMouseFrame: (frame) => {
         mouse = frame;

@@ -7,6 +7,11 @@ import { shellToolStatus } from "../background-shell.js";
 import { useEffect, useState } from "react";
 
 import { questionToolLines } from "../question-format.js";
+import {
+  goalCheckFailedItems,
+  goalCheckUnavailableReason,
+  isGoalUnverified,
+} from "../goal-check.js";
 import { webFetchSummary } from "../web-fetch.js";
 import {
   attachmentLine,
@@ -129,7 +134,10 @@ export function ToolRow({
         ))}
       </Box>
     );
-  const b = badge(entry.status, spinner, env, theme);
+  const goalUnverified = isGoalUnverified(entry);
+  const b = goalUnverified
+    ? { glyph: env.ascii ? "*" : "•", color: theme.muted, word: "核对未通过" }
+    : badge(entry.status, spinner, env, theme);
   const name = entry.name ?? "?";
   const shownName = entry.target?.name ?? entry.name ?? "?";
   const shownInput = entry.target !== undefined ? entry.target.input : entry.input;
@@ -279,14 +287,34 @@ function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): Reac
   const single = diffs?.length === 1 && diffs[0]?.label === "" ? diffs[0].diff : undefined;
   const spill = result.spillPath;
   const webSummary = webFetchSummary(entry);
+  const goalUnverified = isGoalUnverified(entry);
+  const goalFailed = goalUnverified ? goalCheckFailedItems(entry) : [];
+  const goalUnavailable = goalCheckUnavailableReason(entry);
   const suppressModelContent =
-    entry.status === "ok" &&
-    (noteItemsFromEntry(entry) !== undefined ||
-      ((entry.target?.name ?? entry.name) === "ensemble_read" &&
-        ensembleReadPostsFromOutput(result.output) !== undefined));
+    (goalUnverified && goalFailed.length > 0) ||
+    (entry.status === "ok" &&
+      (noteItemsFromEntry(entry) !== undefined ||
+        ((entry.target?.name ?? entry.name) === "ensemble_read" &&
+          ensembleReadPostsFromOutput(result.output) !== undefined)));
   return (
     <Box flexDirection="column">
-      {webSummary !== undefined ? (
+      {goalUnavailable !== undefined ? (
+        <Text dimColor wrap="truncate">
+          {`  ${truncateLine(`核对不可用：${goalUnavailable}`, Math.max(8, width - 2), g.ellipsis)}`}
+        </Text>
+      ) : null}
+      {goalUnverified && goalFailed.length > 0 ? (
+        goalFailed.map((item, i) => (
+          <Text key={i} dimColor wrap="truncate">
+            {"  "}
+            {truncateLine(
+              `× ${item.label}${item.note !== undefined ? `：${item.note}` : ""}`,
+              Math.max(8, width - 2),
+              g.ellipsis,
+            )}
+          </Text>
+        ))
+      ) : webSummary !== undefined ? (
         <Text
           dimColor
           wrap="truncate"
@@ -324,7 +352,7 @@ function ToolResult({ entry, width }: { entry: ToolEntry; width: number }): Reac
           </Text>
         ))
       ) : null}
-      {result.error !== undefined ? (
+      {result.error !== undefined && !goalUnverified ? (
         <Text color={theme.error} wrap="truncate">
           {"  "}
           {truncateLine(

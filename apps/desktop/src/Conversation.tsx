@@ -220,6 +220,7 @@ import {
   stepTurnIndex,
 } from "./turn-rail";
 import { TurnRail } from "./TurnRail";
+import { goalCheckFailedItems, goalCheckUnavailableReason, isGoalUnverified } from "./goal-check";
 import "./conversation.css";
 
 export { toolMeta };
@@ -2584,8 +2585,11 @@ export function toolResultText(entry: ToolEntry): { text: string; error?: boolea
   return { text: duration === undefined ? base : `${base} · ${duration}` };
 }
 
-/** 可恢复的守卫错误：保护机制在起作用，模型重新读取就能继续，行尾用中性淡色，不标红。 */
-export const RECOVERABLE_TOOL_ERRORS: ReadonlySet<string> = new Set(["stale_file"]);
+/** 可恢复的守卫错误：保护机制在起作用，模型重新读取或补证据就能继续，行尾用中性淡色，不标红。 */
+export const RECOVERABLE_TOOL_ERRORS: ReadonlySet<string> = new Set([
+  "stale_file",
+  "goal_unverified",
+]);
 
 function isRecoverableToolErrorCode(code: string | undefined): boolean {
   return code !== undefined && RECOVERABLE_TOOL_ERRORS.has(code);
@@ -2624,6 +2628,9 @@ function toolErrorSummary(entry: ToolEntry, cwd: string): string {
   const error = entry.result?.error;
   if (error?.code === "stale_file") {
     return hasStaleDiff(entry) ? "文件已变化，已附上变更" : "文件已变化，需重新读取";
+  }
+  if (error?.code === "goal_unverified") {
+    return "核对未通过";
   }
   if (error?.code === "timeout") return timeoutSummary(entry);
   const message = error?.message.trim() ?? "";
@@ -2974,11 +2981,16 @@ function ToolDetails({
   const command = typeof input?.command === "string" ? input.command : undefined;
   const rawInput = rawInputOf(entry);
   const hasDetails = detailRows(rawInput).length > 0 || detailRows(output).length > 0;
+  const goalUnverified = isGoalUnverified(entry);
+  const goalFailed = goalUnverified ? goalCheckFailedItems(entry) : [];
+  const goalUnavailableReason = goalCheckUnavailableReason(entry);
   const body =
     result?.error !== undefined
       ? isTimeout
         ? timeoutBody(result.modelContent)
-        : result.error.message
+        : goalUnverified
+          ? result.modelContent || result.error.message
+          : result.error.message
       : entry.status === "running"
         ? entry.liveOutput
         : (result?.modelContent ?? "");
@@ -2991,8 +3003,26 @@ function ToolDetails({
           <span>{subagent.reason}</span>
         </div>
       )}
+      {goalUnavailableReason !== undefined && (
+        <div className="tool-info">
+          <span>核对不可用</span>
+          <span>{goalUnavailableReason}</span>
+        </div>
+      )}
       {!hasDiff &&
-        (command !== undefined ? (
+        (goalUnverified && goalFailed.length > 0 ? (
+          <ul className="tool-payload todo-list note-list">
+            {goalFailed.map((item, index) => (
+              <li key={index}>
+                <span className="todo-mark">×</span>
+                <span className="todo-text">
+                  {item.label}
+                  {item.note !== undefined ? `：${item.note}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : command !== undefined ? (
           <div className="tool-payload tool-shell">
             <pre className="tool-command">
               <span>$ </span>

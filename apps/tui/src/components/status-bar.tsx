@@ -20,7 +20,7 @@ import { useTheme } from "../theme.js";
 
 import type { ModelInfo } from "@nocturne/core";
 import {
-  sessionUsageSoFar,
+  sessionCacheUsageSoFar,
   thinkingPhrase,
   type RuntimeStatus,
   type SessionView,
@@ -171,7 +171,7 @@ export function StatusBar({
     dir !== "" ? { text: dir, color: theme.secondary, highlight: false } : undefined;
   if (dirSeg !== undefined) segments.push(dirSeg);
   const cacheSeg: Segment = {
-    text: formatCacheHitRate(sessionUsageSoFar(view)),
+    text: formatCacheHitRate(sessionCacheUsageSoFar(view)),
     color: theme.muted,
     highlight: false,
   };

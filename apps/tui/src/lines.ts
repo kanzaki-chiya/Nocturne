@@ -21,6 +21,12 @@ import {
 } from "@nocturne/core/protocol";
 
 import { questionToolLines } from "./question-format.js";
+import {
+  goalCheckFailedItems,
+  goalCheckFromEntry,
+  goalCheckUnavailableReason,
+  isGoalUnverified,
+} from "./goal-check.js";
 import { webFetchSummary } from "./web-fetch.js";
 import {
   attachmentLine,
@@ -450,8 +456,10 @@ function layoutEntryBody(
             ...(i === 0 ? { toggle } : {}),
           })),
         ];
-      const mark =
-        entry.status === "ok"
+      const goalUnverified = isGoalUnverified(entry);
+      const mark = goalUnverified
+        ? dot
+        : entry.status === "ok"
           ? ascii
             ? "+"
             : "✓"
@@ -530,10 +538,12 @@ function layoutEntryBody(
       const notStarted = subagentStartRejected(entry);
       const status = notStarted
         ? "未启动"
-        : (shellToolStatus(entry, options.entries ?? [], options.backgroundShells) ??
-          backgroundToolStatus(entry, options.entries ?? []) ??
-          ensembleReadCountText(entry) ??
-          entry.status);
+        : goalUnverified
+          ? "核对未通过"
+          : (shellToolStatus(entry, options.entries ?? [], options.backgroundShells) ??
+            backgroundToolStatus(entry, options.entries ?? []) ??
+            ensembleReadCountText(entry) ??
+            entry.status);
       const grantSuffix = entry.permission?.source === "grant" ? "（已授权）" : "";
       const twoTone = toolTwoToneSummaryParts(
         shownName,
@@ -575,7 +585,13 @@ function layoutEntryBody(
               : shownName === "mcp_search"
                 ? `${mark} 搜索 MCP 工具：${summary} ${status}`
                 : `${mark} ${shownName === undefined ? "?" : toolDisplayName(shownName)}${subagentModel(entry)}${summaryPart} ${status}`;
-        lines = [...review, ...rows(entry.key, `${head}${grantSuffix}`, width, { toggle })];
+        lines = [
+          ...review,
+          ...rows(entry.key, `${head}${grantSuffix}`, width, {
+            toggle,
+            ...(goalUnverified ? { dim: true } : {}),
+          }),
+        ];
       }
       if (
         entry.name === "shell" &&
@@ -661,17 +677,32 @@ function layoutEntryBody(
         shownName === "ensemble_read" && entry.status === "ok"
           ? ensembleReadPostsFromOutput(entry.result?.output)
           : undefined;
+      const goalFailed = goalUnverified ? goalCheckFailedItems(entry) : [];
+      const goalUnavailable = goalCheckUnavailableReason(entry);
       const formattedResult =
         notes !== undefined
           ? notes.map((item) => `${item.n}. ${item.text}`).join("\n")
           : boardPosts !== undefined
             ? boardPosts.map((post) => `${ensemblePostHead(post)}\n${post.text}`).join("\n\n")
-            : undefined;
+            : goalUnverified && goalFailed.length > 0
+              ? goalFailed
+                  .map(
+                    (item) => `× ${item.label}${item.note !== undefined ? `：${item.note}` : ""}`,
+                  )
+                  .join("\n")
+              : undefined;
       const content = diffExpanded
         ? (formattedResult ?? entry.result?.modelContent)
-        : notStarted || formattedResult !== undefined
+        : notStarted || goalUnverified || formattedResult !== undefined
           ? undefined
           : (webFetchSummary(entry) ?? entry.result?.modelContent);
+      if (diffExpanded && goalUnavailable !== undefined) {
+        lines.push(
+          ...rows(`${entry.key}:goal-check`, `  核对不可用：${goalUnavailable}`, width, {
+            dim: true,
+          }),
+        );
+      }
       if (content !== undefined && content !== "") {
         if (diffExpanded)
           lines.push(...reasoningBody(`${entry.key}:out`, content, width, { wordWrap: false }));
@@ -907,7 +938,7 @@ export function transcriptBlocks(src: TranscriptSource): LineBlock[] {
   function entryBlock(entry: ViewEntry): LineBlock {
     const revision =
       entry.kind === "tool"
-        ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}:${shellToolStatus(entry, src.entries, src.live.backgroundShells) ?? backgroundToolStatus(entry, src.entries) ?? ensembleReadCountText(entry) ?? ""}:${noteItemsFromEntry(entry)?.length ?? ""}:${src.shellOutputs?.get(entry.callId) ?? ""}`
+        ? `${entry.status}:${entry.liveOutput.length}:${entry.result?.modelContent.length ?? 0}:${goalCheckFromEntry(entry)?.result ?? ""}:${shellToolStatus(entry, src.entries, src.live.backgroundShells) ?? backgroundToolStatus(entry, src.entries) ?? ensembleReadCountText(entry) ?? ""}:${noteItemsFromEntry(entry)?.length ?? ""}:${src.shellOutputs?.get(entry.callId) ?? ""}`
         : entry.kind === "assistant"
           ? `${entry.text.length}:${entry.reasoning.length}:${
               src.reasoning

@@ -1,6 +1,7 @@
 import { Box, Text, useInput, type DOMElement } from "ink";
 import { useEffect, useRef, useState } from "react";
 import {
+  decisionModelRecipient,
   GEMINI_DECISION_ENDPOINTS,
   JEV_ENDPOINTS,
   validateSettingsPatch,
@@ -9,6 +10,7 @@ import {
   type JevEndpoint,
   type Runtime,
 } from "@nocturne/core";
+import { GOAL_CHECK_DISCLOSURE_PREF, parseGoalCheckAccepted } from "../goal-check.js";
 import { DialogFrame } from "./dialog/dialog-frame.js";
 import { Buttons } from "./dialog/buttons.js";
 import { Segmented } from "./dialog/segmented.js";
@@ -28,6 +30,7 @@ const DEFAULT_ENVS = new Set(["GEMINI_API_KEY", "OPENCODE_API_KEY", "TYPESAFE_AP
 export function DecisionModelDialog({
   runtime,
   initial,
+  goalCheckActive = false,
   width,
   height,
   onApply,
@@ -36,11 +39,13 @@ export function DecisionModelDialog({
 }: {
   runtime: Runtime;
   initial: DecisionModelConfig | undefined;
+  goalCheckActive?: boolean | undefined;
   width: number;
   height: number;
   onApply: (
     decisionModel: DecisionModelConfig | null,
     decisionModelKey?: string,
+    acceptedGoalCheckRecipient?: string,
   ) => Promise<string | undefined>;
   onCancel: () => void;
   onMouseFrame?: ((frame: DialogMouseFrame | undefined) => void) | undefined;
@@ -75,6 +80,11 @@ export function DecisionModelDialog({
   const [models, setModels] = useState<string[]>();
   const [providers, setProviders] = useState<{ id: string; host?: string | undefined }[]>([]);
   const [notice, setNotice] = useState<string>();
+  const [disclosure, setDisclosure] = useState<{
+    config: DecisionModelConfig;
+    recipientId: string;
+    recipientDisplay: string;
+  }>();
   const [cursor, setCursor] = useState(0);
   const boxes = useRef(new Map<string, DOMElement>());
   const request = useRef<AbortController | undefined>(undefined);
@@ -214,7 +224,7 @@ export function DecisionModelDialog({
     }
   };
 
-  const apply = () => {
+  const apply = (confirmed = false) => {
     const built = buildConfig();
     if (typeof built === "string") {
       setNotice(built);
@@ -226,15 +236,38 @@ export function DecisionModelDialog({
       setNotice("请填写有效的接入点、模型和凭据");
       return;
     }
+    let acceptedGoalCheckRecipient: string | undefined;
+    if (goalCheckActive && built !== null) {
+      const recipient = decisionModelRecipient(built);
+      const acceptedRecipients = parseGoalCheckAccepted(
+        runtime.getPreference(GOAL_CHECK_DISCLOSURE_PREF),
+      );
+      if (!confirmed && !acceptedRecipients.has(recipient.id)) {
+        setDisclosure({
+          config: built,
+          recipientId: recipient.id,
+          recipientDisplay:
+            built.endpoint === "custom" ? (built.baseURL ?? "自定义地址") : recipient.label,
+        });
+        setFocus("save");
+        return;
+      }
+      if (confirmed) acceptedGoalCheckRecipient = recipient.id;
+    }
     if (saving.current) return;
     saving.current = true;
     const key =
       built !== null && "stored" in built.credential && secret.trim() !== ""
         ? secret.trim()
         : undefined;
-    void onApply(built, key).then((failure) => {
+    const applied =
+      acceptedGoalCheckRecipient === undefined
+        ? onApply(built, key)
+        : onApply(built, key, acceptedGoalCheckRecipient);
+    void applied.then((failure) => {
       saving.current = false;
       if (failure === undefined || !mounted.current) return;
+      setDisclosure(undefined);
       setNotice(`保存失败：${failure}`);
     });
   };
@@ -247,8 +280,10 @@ export function DecisionModelDialog({
   };
 
   const activate = (id: string) => {
-    if (id === "cancel") onCancel();
-    else if (id === "save") apply();
+    if (id === "cancel") {
+      if (disclosure !== undefined) setDisclosure(undefined);
+      else onCancel();
+    } else if (id === "save") apply(disclosure !== undefined);
     else if (id === "source") setFocus(source === "unset" ? "save" : "endpoint");
     else if (id === "endpoint") {
       if (isCustom) {
@@ -275,11 +310,20 @@ export function DecisionModelDialog({
     (input, key) => {
       if (nested !== undefined) return;
       if (key.escape) {
-        onCancel();
+        if (disclosure !== undefined) setDisclosure(undefined);
+        else onCancel();
         return;
       }
       if (key.ctrl && input === "s") {
-        apply();
+        apply(disclosure !== undefined);
+        return;
+      }
+      if (disclosure !== undefined) {
+        if (key.leftArrow || key.rightArrow || key.tab) {
+          setFocus(focus === "cancel" ? "save" : "cancel");
+        } else if (key.return) {
+          activate(focus);
+        }
         return;
       }
       if (key.upArrow || key.downArrow || key.tab) {
@@ -378,7 +422,10 @@ export function DecisionModelDialog({
 
   const framed = width >= 44 && height >= 12;
   const dialogWidth = Math.min(width, 64);
-  const dialogHeight = Math.min(height, Math.max(10, fields.length * 2 + 6));
+  const dialogHeight = Math.min(
+    height,
+    disclosure !== undefined ? 13 : Math.max(10, fields.length * 2 + 6),
+  );
   const left = Math.max(0, Math.floor((width - dialogWidth) / 2));
   const top = Math.max(0, Math.floor((height - dialogHeight) / 2));
   const innerWidth = Math.max(10, dialogWidth - (framed ? 4 : 2));
@@ -397,7 +444,8 @@ export function DecisionModelDialog({
       onMouseFrame(undefined);
       return;
     }
-    const hitBoxes: DialogMouseFrame["boxes"] = order.flatMap((id) => {
+    const targets = disclosure !== undefined ? ["cancel", "save"] : order;
+    const hitBoxes: DialogMouseFrame["boxes"] = targets.flatMap((id) => {
       const node = boxes.current.get(id);
       if (!node) return [];
       const rect = screenRect(node);
@@ -532,76 +580,106 @@ export function DecisionModelDialog({
           {picker ?? (
             <>
               <Box flexDirection="column" flexGrow={1} overflow="hidden">
-                {fields.slice(start, start + visibleCount).map((id, index) => (
-                  <Box
-                    key={id}
-                    flexDirection="column"
-                    flexShrink={0}
-                    ref={(node) => {
-                      onBox(id, node);
-                    }}
-                  >
-                    <Text color={theme.muted} wrap="truncate">
-                      {labels[id]}
+                {disclosure !== undefined ? (
+                  <>
+                    <Text>
+                      {disclosure.config.source === "gemini" ? "首次启用 Gemini" : "首次启用 Jev"}
                     </Text>
-                    {id === "source" || id === "endpoint" || id === "credential" ? (
-                      <Segmented
-                        options={
-                          id === "source"
-                            ? ["未设置", "Gemini", "Jev"]
-                            : id === "endpoint"
-                              ? endpointOptions
-                              : credOptions
-                        }
-                        selected={
-                          id === "source"
-                            ? SOURCES.indexOf(source)
-                            : id === "endpoint"
-                              ? endpointIndex
-                              : credIndex
-                        }
-                        focused={focus === id}
-                        width={innerWidth}
-                        maxLines={1}
-                      />
-                    ) : (
-                      <TextInput
-                        value={values[id] ?? ""}
-                        cursor={Math.min(cursor, Array.from(values[id] ?? "").length)}
-                        focused={focus === id}
-                        width={innerWidth}
-                      />
-                    )}
-                    {focus === id && editing ? (
-                      <InputCursor
-                        active
-                        prefix=""
-                        text=""
-                        width={innerWidth}
-                        x={
-                          left +
-                          (framed ? 2 : 0) +
-                          2 +
-                          inputWindow(
-                            effectiveCredKind === "stored" && id === "value"
-                              ? "*".repeat(Array.from(secret).length)
-                              : textValue,
-                            Math.min(cursor, Array.from(textValue).length),
-                            innerWidth,
-                          ).column
-                        }
-                        y={top + (framed ? 1 : 0) + 2 + index * 2 - height}
-                      />
+                    <Text>
+                      目标核对将发送目标原文、完成清单与证据，以及脱敏后的工具调用记录与输出（60,000
+                      字内，不含用户消息、项目指令与图片）。
+                    </Text>
+                    <Text>接收方：{disclosure.recipientDisplay}；可能包含任务代码或命令输出。</Text>
+                    {disclosure.recipientId === "google" ? (
+                      <Text>Google 免费档数据会被用于改进产品。</Text>
                     ) : null}
-                  </Box>
-                ))}
+                    <Text>确认后保存即生效。</Text>
+                  </>
+                ) : (
+                  fields.slice(start, start + visibleCount).map((id, index) => (
+                    <Box
+                      key={id}
+                      flexDirection="column"
+                      flexShrink={0}
+                      ref={(node) => {
+                        onBox(id, node);
+                      }}
+                    >
+                      <Text color={theme.muted} wrap="truncate">
+                        {labels[id]}
+                      </Text>
+                      {id === "source" || id === "endpoint" || id === "credential" ? (
+                        <Segmented
+                          options={
+                            id === "source"
+                              ? ["未设置", "Gemini", "Jev"]
+                              : id === "endpoint"
+                                ? endpointOptions
+                                : credOptions
+                          }
+                          selected={
+                            id === "source"
+                              ? SOURCES.indexOf(source)
+                              : id === "endpoint"
+                                ? endpointIndex
+                                : credIndex
+                          }
+                          focused={focus === id}
+                          width={innerWidth}
+                          maxLines={1}
+                        />
+                      ) : (
+                        <TextInput
+                          value={values[id] ?? ""}
+                          cursor={Math.min(cursor, Array.from(values[id] ?? "").length)}
+                          focused={focus === id}
+                          width={innerWidth}
+                        />
+                      )}
+                      {focus === id && editing ? (
+                        <InputCursor
+                          active
+                          prefix=""
+                          text=""
+                          width={innerWidth}
+                          x={
+                            left +
+                            (framed ? 2 : 0) +
+                            2 +
+                            inputWindow(
+                              effectiveCredKind === "stored" && id === "value"
+                                ? "*".repeat(Array.from(secret).length)
+                                : textValue,
+                              Math.min(cursor, Array.from(textValue).length),
+                              innerWidth,
+                            ).column
+                          }
+                          y={top + (framed ? 1 : 0) + 2 + index * 2 - height}
+                        />
+                      ) : null}
+                    </Box>
+                  ))
+                )}
               </Box>
               {notice ? (
                 <Text color={theme.warning} wrap="truncate">
                   {notice}
                 </Text>
               ) : null}
-              <Buttons focused={focus} readonly={false} width={innerWidth} onBox={onBox} />
+              <Buttons
+                focused={focus}
+                readonly={false}
+                width={innerWidth}
+                onBox={onBox}
+                {...(disclosure !== undefined
+                  ? {
+                      items: [
+                        ["cancel", "取消"],
+                        ["save", "确认启用"],
+                      ] as const,
+                    }
+                  : {})}
+              />
             </>
           )}
         </DialogFrame>
