@@ -34,7 +34,7 @@
   - 分类、热力图与代码高亮：`--a-cat1`..`--a-cat5`、`--a-termYellow` / `--a-termYellowBright`、`--cm-*`（CodeMirror 与 `.syntax-*` 代码高亮共用）；热力图五档由 `--a-accent` 与 `--a-panel` 按比例混色。
 - **底色与描边规则**：
   - 状态色作文字或图标时，搭配对应的浅底（`--a-warning-bg`、`--a-error-bg`、`--a-success-bg`、`--a-accent-subtle`）或弱混色底，不用高饱和实心色块铺满整行（主按钮与聚焦态除外）。
-  - 对话内提示条、权限确认卡、文件变更增删行统一用浅色底或整圈弱描边表达级别，不用左侧粗色条。
+  - 对话内提示条、文件变更增删行统一用浅色底或整圈弱描边表达级别，不用左侧粗色条；权限确认卡使用 `--a-panel` 面板底与 `--a-border-strong` 描边，仅通过警示色图标与审查结论圆点表达级别。
 
 ---
 
@@ -97,14 +97,14 @@
 | `--radius-2` | 按钮、输入框、下拉框、菜单项、导航行、chip、小卡片、代码块、待发行（`6px`） |
 | `--radius-send` | 桌面端输入框实心发送/中断按钮专用圆角（`7px`） |
 | `--radius-3` | 对话框、弹层、菜单面板、用户气泡、提示卡、diff 卡片、手机卡片与抽屉（`8px`） |
-| `--radius-composer` | 输入框外框专用圆角（`10px`） |
+| `--radius-composer` | 输入框外框与权限确认卡圆角（`10px`） |
 | `--radius-pill` | 胶囊标签、开关轨道、状态圆点、圆形图标按钮 |
 
 - **阴影**（定义于 `design/tokens.json` 的 `shadow` 分组）：
   - `--shadow-popover`：菜单、下拉、上下文面板；
   - `--shadow-dialog`：模态对话框、抽屉；
   - `--shadow-edge`：覆盖式侧面板左缘阴影；
-  - `--shadow-focus`：键盘 `:focus-visible` 与输入框 `:focus` 聚焦环。权限确认卡与提问卡被程序聚焦（`tabIndex={-1}`）时去掉浏览器默认 outline，`:focus-within` 用 `--a-accent` 边框加 `--shadow-focus` 外圈。
+  - `--shadow-focus`：键盘 `:focus-visible` 与输入框 `:focus` 聚焦环。提问卡被程序聚焦（`tabIndex={-1}`）时去掉浏览器默认 outline，`:focus-within` 用 `--a-accent` 边框加 `--shadow-focus` 外圈；权限确认卡 `:focus-within` 仅将边框切为 `--a-accent-border`，不加 `--shadow-focus` 外圈（卡片内按钮保留 `:focus-visible` 焦点环）。
 
 ---
 
@@ -117,9 +117,10 @@
   - `.btn-primary`：实心强调色主按钮（同一区域最多一个）；
   - `.btn-ghost`：无边框弱按钮；
   - `.btn-danger`：常规态与次按钮相同，悬停变红；
+  - `.btn-danger-text`：无边框、常态错误色文字，悬停 `--a-error-bg` 底（用于权限确认卡「拒绝并停止」等需要明确警示但不与主操作争重的破坏性选项）；
   - `.btn-danger-solid`：破坏性确认弹窗内的实心红按钮；
   - 尺寸变体：`.btn-sm`（`--ctl-h-sm`）、`.btn-lg`（`--ctl-h-lg`），触控端按钮高度用 `--ctl-h-touch`。
-- **`src/ui/` 组件**：各页面一律用这组组件（`Button`、`IconButton`、`Icon`、`Switch`、`Checkbox`、`SegmentedControl`、`Badge`），不单独写局部按钮、开关、复选框、分段控件或徽标样式。`IconButton` 必填 `aria-label`；`Button` 的 `danger-solid` 只用于最后一步确认，另有 `ghost-danger` 变体。
+- **`src/ui/` 组件**：各页面一律用这组组件（`Button`、`IconButton`、`Icon`、`Switch`、`Checkbox`、`SegmentedControl`、`Badge`），不单独写局部按钮、开关、复选框、分段控件或徽标样式。`IconButton` 必填 `aria-label`；`Button` 的 `danger-solid` 只用于最后一步确认，另有 `ghost-danger` 与 `danger-text` 变体。
 - **图标（`<Icon>`）**：界面图标统一使用 MingCute 线性图标（`mingcute_icon` 2.9.72，`_line.svg` 填充路径），由公共组件 `apps/desktop/src/ui/Icon.tsx`（`<Icon name="..." size={...} />`）渲染，继承 `currentColor`，默认 `aria-hidden`。桌面端三档尺寸定义在 `design/tokens.json` 的 `control` 分组：侧栏导航、设置页导航、工具栏和图标按钮用 `--icon-md`（`ICON_MD`，16px），部分较大场景保留 `--icon-lg`（`ICON_LG`，18px），小字旁边（工具行、标签、下拉箭头、折叠箭头）用 `--icon-sm`（`ICON_SM`，14px）；手机网页沿用现有显示尺寸。窗口控制按钮、品牌标记、数据图形及终端和代码查看器内部内容除外。
 - **图标按钮（`.ib`）**：宽高 `--ctl-h-md`（`.ib.sm` 为 `--ctl-h-sm`），圆角 `--radius-2`，激活态加 `.on` 或 `aria-pressed="true"`。图标按钮的 `title` 与 `aria-label` 只写动作名，不写状态或行为解释。
 - **折叠箭头（`.fold-arrow`）**：统一使用 `<Icon name="right_small" size={ICON_SM} className="fold-arrow" />` 配合 CSS `transform: rotate(...)` 过渡（对话流内用户触发的 `<details>` 为 `--dur-fold`），不混用文本三角字符或 `summary::before` 伪元素。折叠时朝右（`0deg`）；展开时指向展开出的内容——按钮在内容上方时朝下（`.fold-arrow.down` 或 `details[open] > summary > .fold-arrow`，`90deg`），按钮在内容下方时朝上（`.fold-arrow.up`，`-90deg`）。下拉触发器统一使用 `<Icon name="down_small" size={ICON_SM} />`，不算折叠箭头。
