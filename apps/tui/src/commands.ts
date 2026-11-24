@@ -429,7 +429,8 @@ export function contextLines(session: RuntimeSession): string[] {
   const { report, overBudget } = session.describeContext();
   // ADR-0046 §5：history 段在下一级缩进列出对话历史细分（为 0 的项省略）
   const lines = report.sections.flatMap((s) => {
-    const row = `  ${s.name.padEnd(12)} ${String(s.chars).padStart(7)} chars  ~${s.estimatedTokens} tok  ${s.source}${s.truncated === true ? "  [已截断]" : ""}`;
+    const label = s.name === "subdirInstructions" ? "子目录说明".padEnd(7) : s.name.padEnd(12);
+    const row = `  ${label} ${String(s.chars).padStart(7)} chars  ~${s.estimatedTokens} tok  ${s.source}${s.truncated === true ? "  [已截断]" : ""}`;
     const breakdown = s.breakdown;
     if (breakdown === undefined) return [row];
     const sub = (["user", "assistant", "tool", "summary"] as const)

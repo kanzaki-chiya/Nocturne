@@ -29,12 +29,13 @@ const SECTIONS: Record<Section["name"], { label: string; color: string }> = {
   skills: { label: "技能目录", color: "var(--a-accentAlt)" },
   hooks: { label: "Hook", color: "var(--a-muted)" },
   environment: { label: "环境", color: "var(--a-muted)" },
+  subdirInstructions: { label: "子目录说明", color: "var(--a-secondary)" },
   notes: { label: "笔记", color: "var(--a-muted)" },
   todos: { label: "任务清单", color: "var(--a-muted)" },
   history: { label: "对话历史", color: "var(--a-accent)" },
 };
 /** 来源是路径的行：只放进悬停提示，不占行内宽度 */
-const PATH_SOURCES = new Set(["instructions", "environment"]);
+const PATH_SOURCES = new Set(["instructions", "environment", "subdirInstructions"]);
 const HISTORY = [
   { key: "user", label: "用户消息", color: "var(--a-success)" },
   { key: "assistant", label: "助手回答", color: "var(--a-warning)" },

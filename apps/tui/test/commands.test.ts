@@ -444,6 +444,31 @@ describe("TUI /context 面板（ADR-0046 第 5 节）", () => {
     expect(contextLines(session).join("\n")).toContain("other              0 chars  ~65 tok");
   });
 
+  it("摘要处的子目录说明使用中文标签并带来源路径", () => {
+    const original = contextSession().describeContext();
+    const session = fakeSession({
+      describeContext: () => ({
+        ...original,
+        report: {
+          ...original.report,
+          sections: [
+            ...original.report.sections,
+            {
+              name: "subdirInstructions",
+              source: "pkg/a/AGENTS.md",
+              chars: 160,
+              estimatedTokens: 40,
+            },
+          ],
+        },
+      }),
+    });
+    expect(contextLines(session)).toContain(
+      "  子目录说明       160 chars  ~40 tok  pkg/a/AGENTS.md",
+    );
+    expect(contextLines(contextSession()).some((line) => line.includes("子目录说明"))).toBe(false);
+  });
+
   it("无 breakdown（旧报告）时只渲染分区行", () => {
     const text = contextLines(contextSession()).join("\n");
     expect(text).toContain("history");

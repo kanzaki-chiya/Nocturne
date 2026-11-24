@@ -169,6 +169,32 @@ describe("上下文 breakdown", () => {
     expect(fill(1400, 0)).toBeCloseTo(100);
   });
 
+  it("摘要处的子目录说明显示为独立统计行，来源位于悬停提示", () => {
+    const { container } = render(
+      <ContextPanel
+        context={{
+          ...context,
+          report: {
+            ...context.report,
+            sections: [
+              {
+                name: "subdirInstructions",
+                source: "pkg/a/AGENTS.md",
+                chars: 160,
+                estimatedTokens: 40,
+              },
+              ...context.report.sections,
+            ],
+          },
+        }}
+      />,
+    );
+    const label = screen.getByText("子目录说明");
+    expect(label.getAttribute("title")).toBe("pkg/a/AGENTS.md");
+    expect(label.closest("div")?.textContent).toContain("40");
+    expect(container.querySelectorAll('[data-segment="subdirInstructions"]')).toHaveLength(1);
+  });
+
   it("项目说明和环境的路径只在悬停提示里", () => {
     render(
       <ContextPanel
