@@ -288,10 +288,11 @@ it("loads instructions in a task child with its own history", async () => {
   ]);
   expect(notes(provider.requests.at(-1)?.messages ?? [])).toEqual([]);
   expect(session.durableEvents().some((e) => e.type === "instructions.loaded")).toBe(false);
-  expect(
-    session.durableEvents().find((e) => e.type === "tool.completed" && e.payload.name === "task")
-      ?.payload.status,
-  ).toBe("ok");
+  const completion = session
+    .durableEvents()
+    .filter((e) => e.type === "tool.completed")
+    .find((e) => e.payload.name === "task");
+  expect(completion?.payload.status).toBe("ok");
 });
 
 it("decodes instruction snapshots with additive fields and keeps an old log request byte-for-byte", () => {
@@ -314,7 +315,15 @@ it("decodes instruction snapshots with additive fields and keeps an old log requ
   );
   if (event.type !== "message.user") throw new Error("Expected old user event");
   const built = buildContext({
-    history: [{ kind: "user", turnId: "turn", seq: event.seq, content: event.payload.content }],
+    history: [
+      {
+        kind: "user",
+        turnId: "turn",
+        seq: event.seq,
+        messageId: event.payload.messageId,
+        content: event.payload.content,
+      },
+    ],
     events: [event],
     model,
     tools: [],
