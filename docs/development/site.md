@@ -1,8 +1,19 @@
 # 项目主页
 
-主页地址是 <https://nocturne.koxia.cn/>，中文默认，英文位于 `/en/`。深色优先，经 `prefers-color-scheme` 跟随系统切换浅色；主题变量、页头页脚只在 `base.css`，主页和更新日志页另加 `site.css`，有深浅两版的截图用 `<picture>` 的浅色 `source` 切换。纯静态 HTML + CSS，无运行时 JavaScript、统计、第三方脚本或 cookie。
+主页地址是 <https://nocturne.koxia.cn/>，中文默认，英文位于 `/en/`。深色优先，经 `prefers-color-scheme` 跟随系统切换浅色；主题变量、字体声明与共用页头页脚放在 `base.css`，主页（含滚动驱动时间轴与各章节）和更新日志页另加 `site.css`，有深浅两版的截图用 `<picture>` 的浅色 `source` 切换。全站为静态 HTML + CSS，不含统计、第三方脚本或 cookie；**仅主页允许一段内联、无 `src` 的 `<script>`**，用于在客户端按操作系统切换下载主按钮文案与链接（禁用 JavaScript 时页面保持完整可用，默认提供 Windows 安装包，其余平台入口仍通过次级链接可达）；用户文档页与更新日志页禁止任何脚本。
 
-官网配色取桌面端「工作台」主题的 token，对应关系以 `base.css` 为准。
+官网配色取桌面端「工作台」主题的 token，并在 `base.css` 补充主页夜间时间轴所需的深浅双套变量（对应关系以 `base.css` 为准）。
+
+## 主页结构与脚本规则
+
+中英双语主页结构完全一致，按 23:00–07:00 夜间时间轴组织：
+
+1. **23:00 首屏**：大标题、副标题、按系统切换的主下载按钮（默认 Windows 安装包）与次级平台下拉菜单（macOS、终端 `nctrn`、安卓 APK）、GitHub 链接。
+2. **23:10 / 23:40 / 23:41 滚动演示区（`.story`）**：使用 CSS 滚动驱动动画（`view-timeline`、`animation-timeline`）在同一模拟桌面窗口内依次展示写代码与权限审批、华彩预览、回退与分叉。不支持滚动驱动动画的浏览器以及 `prefers-reduced-motion: reduce` 环境下退化为静态可读版面。
+3. **00:30–06:30 实机截图与能力章节**：依次展示桌面端会话与变更（00:30）、权限审查与确认（01:15）、组曲 / 合奏多成员协作（02:30）、终端 `nctrn` 与手机远程控制（04:00）、定时任务与执行方式（05:30）、用量热力图与扩展生态（06:30）。
+4. **07:00 下载收尾与多栏页脚**：全平台下载入口、版本号（`{{version}}`）、GPL-3.0 开源信息，以及按 `site-docs/nav.json` 真实 slug 组织的文档导航和语言互链。
+
+脚本限制由 `scripts/test/build-site.test.mjs` 自动守护：主页只能包含恰好一段内联、无 `src` 的脚本；更新日志页与 `/docs/` 页面不得出现 `<script>` 标签。
 
 ## 目录与构建
 
@@ -63,67 +74,68 @@ pnpm exec vitest run --root scripts test/build-site.test.mjs
 
 | 文件（`site/assets/images/`） | 内容 | 主题 | 语言 | 尺寸 |
 |---|---|---|---|---|
-| `desktop-<语言>-<主题>.webp` | 桌面端整窗，变更面板打开 | 深、浅 | 中、英 | 1440×900 |
+| `desktop-<语言>-<主题>.webp` | 桌面端整窗，会话与右侧变更面板 | 深、浅 | 中、英 | 2880×1800 |
+| `perm-<语言>-<主题>.webp` | 桌面端权限审批卡片与改动预览 | 深、浅 | 中、英 | 2880×1800 |
+| `ensemble-<语言>-<主题>.webp` | 桌面端组曲 / 合奏多成员面板 | 深、浅 | 中、英 | 2880×1800 |
 | `terminal-<语言>-<主题>.webp` | 终端 `nctrn --resume` | 深、浅 | 中、英 | 960×600 |
-| `phone-<语言>-<主题>.webp` | 手机会话 | 深、浅 | 中、英 | 390×844 |
-| `context-<主题>.webp` | 上下文用量浮层（裁切） | 深、浅 | 中 | 720×340 |
-| `usage-<主题>.webp` | 用量统计行和热力图（裁切） | 深、浅 | 中 | 885×418 |
-| `social-<语言>.webp` | 社交预览 | 深 | 中、英 | 1200×630 |
+| `sched-<语言>-<主题>.webp` | 桌面端定时任务列表与运行详情 | 深、浅 | 中、英 | 2880×1800 |
+| `usage-<语言>-<主题>.webp` | 桌面端「设置 › 用量」统计行和热力图（裁切） | 深、浅 | 中、英 | 1824×809 |
+| `social-<语言>.webp` | 社交预览（深色首屏） | 深 | 中、英 | 1200×630 |
 
 每张 WebP 不超过 300 KB；HTML 写真实 `width`、`height`、`alt`，深色图放 `<img>`，浅色图放 `<source media="(prefers-color-scheme: light)">`。不再使用的图片删除。
 
 ### 1. 准备隔离 home 与假模型
 
-每种语言一个独立根目录，内含 `home`、`echo`、`relay-data`。只在启动脚本里设置 `NOCTURNE_HOME`、`WEBVIEW2_USER_DATA_FOLDER`、`SITE_DEMO_KEY=demo-placeholder`，不要指向真实 `~/.nocturne`。先在当前工作树 `pnpm build`。
+每种语言使用独立根目录（含隔离 `home`、演示仓库 `echoes`、`wv` 缓存目录）。只在启动脚本里设置 `NOCTURNE_HOME`、`WEBVIEW2_USER_DATA_FOLDER` 与演示用 `SITE_DEMO_KEY`，不要指向真实 `~/.nocturne`。先在当前工作树执行 `pnpm build`。
 
-隔离 `providers.json` 只有一个 `demo` 服务商（`baseURL: http://127.0.0.1:18652/v1`、`apiKeyEnv: SITE_DEMO_KEY`），模型 `local` 声明 `contextWindow: 128000`、`toolCalls`、`editTool: "edit"`，并填一组 `pricing` 让用量页能估算费用。`config.json` 关闭 `modelsDev`，`skills.sources.agents/claude` 设为 false，权限预设 `auto-edit`，只为 `node --test *` 加允许规则；`settings.json` 使用 `model: "demo/local"`。这样不会加载用户技能或凭据。
+隔离 `providers.json` 仅注册本地回环地址的假 OpenAI 兼容服务商（如 `http://127.0.0.1:<空闲端口>/v1`），关闭 `modelsDev` 及用户/项目级外部技能发现，确保不会加载用户真实凭据或技能。演示仓库使用独立目录名（如 `echoes`），内容与命名可保留乐队/专辑/曲名彩蛋，但**不得出现任何歌词**。
 
-假 OpenAI SSE 模型只监听回环地址，依次返回 `read src/login.mjs` → `todo_write`（四项，两项完成、一项进行中）→ `edit` → `shell node --test test/login.test.mjs` → 带结果表的完成说明，不请求外网模型。echo 中放登录函数（原为 `return await request()`）和三项回归测试并 `git init`。中文请求「修一个登录超时：超时后允许重试，保留其他错误。改完跑测试。」，英文请求 “Fix the login timeout: allow retries on timeout and preserve other errors. Run the tests.”。英文完成说明要短到终端一行放得下：nctrn 按列折行，长英文句会在单词中间断开。用 Core 的 `createRuntime({config,cwd,interactive:false})`、`createSession({model:'demo/local'})`、`session.submit({text})` 跑完并关闭；侧栏只保留这一个 echo 项目和这一条会话。
+英文版截图按与中文版完全一致的场景重拍一套独立隔离环境：保留桌面端真实中文 UI 标签（软件本身无英文界面），将用户提问、模型回复、代码改动、组曲成员任务与定时任务名称及描述全部改为英文，同样使用本地假模型与隔离数据种子生成。
 
-用量热力图需要多天数据：另写约一年的子会话日志（`session.created.payload.parent` 指向演示会话），每条含 `turn.started`、带 `usage` 的 `message.assistant`（需 `toolCalls: []`、`finishReason`）和 `turn.completed`。用量统计扫描全部日志，子会话不进侧栏。写完用 Core 的 `decodeDurableEvent` 逐行校验，任何一行不合契约整条日志会被统计跳过。
-
-手机经本地中继打开同一会话：种子同时生成主机与手机两份 P-256 身份，主机私钥用 DPAPI 写进隔离 `credentials.json`，`remote.json` 与中继 `relay-data.json` 登记这对设备。这些是一次性演示身份，不是真实凭据。
+用量热力图需要多天数据：通过种子脚本在隔离 `home` 下写入跨度约一年的历史会话/子会话日志，每条含 `turn.started`、带 `usage` 的 `message.assistant`（需含 `toolCalls: []`、`finishReason`）和 `turn.completed`。写完用 Core 的 `decodeDurableEvent` 逐行校验，任何一行不合契约整条日志会被统计跳过。定时任务与组曲场景同样通过对应种子或假模型响应写入隔离 `home`。
 
 ### 2. 启动与进程
 
-用 Node 的 `spawn(..., { detached: true, windowsHide: true, stdio: ["ignore", outFd, errFd] })`（或 `Start-Process -PassThru`）依次启动：当前工作树 `apps/desktop` 的 Vite（`--port 31420 --strictPort`，注意 `stdin` 需设为 `"ignore"`，否则在无控制台的后台进程中 Vite 读 stdin 会因 `EPIPE` 退出）、`apps/relay/dist/main.mjs serve --listen 127.0.0.1:18787 --web-root apps/desktop/dist-web`、调试版桌面 exe（`NOCTURNE_DESKTOP_BACKEND` 指向工作树 `apps/cli/dist/main.js`，WebView 加 `--remote-debugging-port=19334`；注意调试 exe 需是 `devUrl` 指向 `http://localhost:31420` 的构建，而不是设置了 `NOCTURNE_TAURI_CDP=1` 内嵌静态 `frontendDist` 的构建）、独立 user-data-dir 的 headless Edge（`--remote-debugging-port=19444`）。PID 写入文件，结束时只停这些 PID 及其子进程，不按进程名结束；先确认端口空闲，不碰正在运行的安装版或开发版。启动脚本的子进程会占住输出管道，单独启动，不要和截图命令串在一起。每次操作前核对 CDP 端口对应的 exe 路径。
+用 Node 的 `spawn(..., { detached: true, windowsHide: true, stdio: ["ignore", outFd, errFd] })`（或 `Start-Process -PassThru`）启动本地假模型、独立端口的 Vite（或静态构建后的调试版桌面 exe，不要占用已有开发实例端口 31420）、以及调试版桌面 exe（`NOCTURNE_DESKTOP_BACKEND` 指向工作树 `apps/cli/dist/main.js`，WebView 开启 `--remote-debugging-port=<空闲端口>`）。PID 写入文件，结束时只停这些 PID 及其子进程，不按进程名结束；不碰正在运行的安装版或开发版。启动脚本的子进程会占住输出管道，单独启动，不要和截图命令串在一起。每次操作前核对 CDP 端口对应的 exe 路径。
 
-### 3. 桌面、上下文与用量
+### 3. 桌面五场景（desktop / perm / ensemble / sched / usage）
 
-在调试页的 `localStorage['nocturne.desktop.prefs.v1']` 中设置 `theme`（深浅模式；不写 `themePreset`、`contentWidth`，保持默认「工作台」与「标准」）、`autoUpdate:false`、`projects:[<echo 绝对路径>]`（与会话日志里的路径完全一致，否则侧栏会出现两个 echo），刷新后打开演示会话，点「右侧面板」再点「变更」。隐藏所有以盘符开头的叶子节点文字（标题栏的本地路径）。每张图同时设置 `data-theme` 和 `Emulation.setEmulatedMedia`，截图前读一次 `body` 背景色确认主题生效：
+在调试页的 `localStorage['nocturne.desktop.prefs.v1']` 中设置 `theme`（深浅模式；保持默认「工作台」与「标准」宽度）、`autoUpdate:false`、演示项目路径，刷新后分别切到对应场景。隐藏标题栏或页面中可能暴露的本机盘符路径。每张图同时设置 `data-theme` 和 `Emulation.setEmulatedMedia`，截图前读一次 `body` 背景色确认主题生效；整窗场景均以 1440×900、`deviceScaleFactor: 2` 拍摄（输出 2880×1800）：
 
 ```text
-Emulation.setDeviceMetricsOverride {"width":1440,"height":900,"deviceScaleFactor":1,"mobile":false}
+Emulation.setDeviceMetricsOverride {"width":1440,"height":900,"deviceScaleFactor":2,"mobile":false}
 Emulation.setEmulatedMedia {"features":[{"name":"prefers-color-scheme","value":"dark"}]}
 Page.captureScreenshot {"format":"png","captureBeyondViewport":false}
 ```
 
-上下文用量：点输入框旁 `aria-label` 以「上下文用量」开头（后接百分比，如 `上下文用量 20%`）的按钮，等浮层 `.context-usage-popover` 加载完；按 720:340 从浮层上沿上方约 12px 裁到窗口底，用 `clip` 的 `scale` 缩到 720×340。用量：进「设置 › 用量」，范围选「全部」；视口 1188×900 时统计行仍是一行五列，把 `.usage-body` 整宽连同统计行、下方图例用 `clip` 的 `scale` 缩到 885×418，上沿在页头范围切换和「刷新」按钮之下，下沿不要切到下一节标题「Token 构成与费用」，数字不能被裁断。
+- **desktop**：打开演示会话并展开右侧「变更」面板展示 Diff。
+- **perm**：在需要人工确认的命令审批态下截取，保留完整审批卡片与上下文。
+- **ensemble**：切换到侧边栏「组曲」面板，展示多成员并行执行进度与输出摘要。
+- **sched**：切换到侧边栏「定时任务」页面，展示任务列表与单条任务配置/运行记录。
+- **usage**：进「设置 › 用量」，范围选「全部」；以 1440×900、`deviceScaleFactor: 2` 渲染后，对 `.usage-body` 统计行与热力图区域按无裁断边界裁切（输出 1824×809），确保统计数字与图例完整显示且不切入下一节标题。
 
 ### 4. 终端
 
-复制隔离 home 到终端专用副本，按深浅分别写 `settings.json` 的 `theme`；只在副本里把日志中的工作区路径替换为 `N:\echo`，首行 `workspaceRoot` 保留实际路径。先确认 N: 未占用，再 `subst N: <示例根目录>`（映射 echo 的上一级，使 `N:\echo` 存在）。
+复制隔离 home 到终端专用副本，按深浅分别写 `settings.json` 的 `theme`；只在副本里把日志中的工作区路径替换为 `N:\echo`，首行 `workspaceRoot` 保留实际路径。先确认 N: 未占用，再 `subst N: <示例根目录>`（映射演示仓库上一级，使 `N:\echo` 存在）。英文完成说明要短到终端一行放得下（`nctrn` 按列折行，长英文句会在单词中间断开）。
 
-在桌面 WebView 中注入一个临时 IIFE（Vite lib 构建，入口导入正式 `createTauriHost` 与 `mountTerminal`，不打进主页），清空 body 后挂载终端，设置 `data-theme` 后再挂载以取对应配色。`mountTerminal` 已加载 Unicode 11 宽度表，注入包不用另外注册；挂载前先用 `document.fonts.load` 加载 `--mono` 的常规与粗体字形，否则字宽按回退字体量，框线会错位。shell 用 `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`，cwd `N:/echo`，cols/rows 取 `mountTerminal().size()`，输入 `node <启动器> --resume <会话ID>`（启动器先 `chdir('N:/echo')` 再导入工作树 CLI），等到 `idle` 后截 960×600。拍完用 host API 关闭 PTY，`subst N: /d`。
+在桌面 WebView 中注入一个临时 IIFE（Vite lib 构建，入口导入正式 `createTauriHost` 与 `mountTerminal`，不打进主页），清空 body 后挂载终端，设置 `data-theme` 后再挂载以取对应配色。`mountTerminal` 已加载 Unicode 11 宽度表，注入包不用另外注册；挂载前先用 `document.fonts.load` 加载 `--mono` 的常规与粗体字形，否则字宽按回退字体量，框线会错位。shell 用 `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`，cwd `N:/echo`，cols/rows 取 `mountTerminal().size()`，输入 `node <启动器> --resume <会话ID>`（启动器先 `chdir('N:/echo')` 再导入工作树 CLI），等到 `idle` 后截 960×600。拍完用 host API 关闭 PTY，`subst N: /d`。若终端章节与既有 `terminal-en-*.webp` 一致，英文终端图可直接复用。
 
-### 5. 手机
-
-headless Edge 设置 390×844、`mobile:true`，打开中继页面，把种子里的手机身份和主机记录写入 IndexedDB `nocturne-remote`。手机网页启动时按 `localStorage['nocturne.phone.theme']` 应用主题，缺省 `system` 会删掉 `data-theme` 并跟随浏览器（headless 默认浅色）；配色预设按 `nocturne.phone.themePresets` / `nocturne.phone.themeHost`，不写即默认「工作台」。每种主题都先写 `nocturne.phone.theme`、再设 `prefers-color-scheme`、再刷新，进入 echo 和演示会话，等完成文本、输入框和字体就绪后截图，并用背景色确认主题。
-
-### 6. 导出与验收
+### 5. 社交预览与导出验收
 
 ```powershell
 ffmpeg -i desktop-zh-dark.png -c:v libwebp -quality 86 desktop-zh-dark.webp
+ffmpeg -i perm-zh-dark.png -c:v libwebp -quality 86 perm-zh-dark.webp
+ffmpeg -i ensemble-zh-dark.png -c:v libwebp -quality 86 ensemble-zh-dark.webp
+ffmpeg -i sched-zh-dark.png -c:v libwebp -quality 86 sched-zh-dark.webp
 ffmpeg -i terminal-zh-dark.png -c:v libwebp -quality 88 terminal-zh-dark.webp
-ffmpeg -i phone-zh-dark.png -c:v libwebp -quality 88 phone-zh-dark.webp
-ffmpeg -i context-dark.png -c:v libwebp -quality 90 context-dark.webp
-ffmpeg -i usage-dark.png -c:v libwebp -quality 90 usage-dark.webp
-ffmpeg -i desktop-zh-dark.png -vf 'scale=1008:630,pad=1200:630:96:0:color=0x0b0b0d' -c:v libwebp -quality 86 social-zh.webp
+ffmpeg -i usage-zh-dark.png -c:v libwebp -quality 90 usage-zh-dark.webp
 ```
 
-逐张打开检查：没有真实路径/密钥，主题正确，终端无错位，整图无外部窗口，大小达标。
+`social-zh.webp` 与 `social-en.webp` 在静态站点构建后，使用 headless Edge 以 `1200×630` 深色模式访问本地静态预览的 `/` 和 `/en/` 首屏截取并转为 WebP（`-quality 88`），确保与当前首屏视觉一致。
 
-构建后用独立 headless Edge 和 CDP 拍整页：宽 1440、1024、800、400，中英文和更新日志页，深浅色。headless 窗口有最小宽度，必须用 `Emulation.setDeviceMetricsOverride`（或 iframe）设视口，否则窄屏结果不可信；主题用 `Emulation.setEmulatedMedia`。等待 `document.fonts.ready` 和所有图片 decode，确认 `scrollWidth <= innerWidth`、所有图片 `naturalWidth > 0`，用 `Page.getLayoutMetrics` 的内容高度作为截图 clip。headless Edge 建议加 `--disable-extensions --disable-background-timer-throttling --disable-renderer-backgrounding --disable-gpu`；截图和 Lighthouse 顺序执行，避免它们导航同一目标。
+逐张打开检查：没有真实路径/密钥，无歌词，主题正确，终端无错位，整图无外部窗口，单张文件不超过 300 KB。
+
+构建后用只监听 `127.0.0.1` 的静态服务和独立 headless Edge（CDP）逐章验收：中文、英文各在 1440×900 深色、1440×900 浅色、390×844 深色下截取首屏与每一章，另在禁用 JavaScript 和 `prefers-reduced-motion: reduce` 下检查首屏及演示区退化，同时抽检更新日志页与 `/docs/`。headless 窗口有最小宽度，必须用 `Emulation.setDeviceMetricsOverride` 设视口，主题与减弱动效用 `Emulation.setEmulatedMedia`。等待 `document.fonts.ready` 和所有图片加载完成，确认 `scrollWidth <= innerWidth`、所有图片 `naturalWidth > 0`。headless Edge 建议加 `--disable-extensions --disable-background-timer-throttling --disable-renderer-backgrounding --disable-gpu`；截图和 Lighthouse 顺序执行，避免它们导航同一目标。
 
 ```powershell
 pnpm dlx lighthouse@13.0.1 http://127.0.0.1:18643/ --port=19445 '--only-categories=accessibility,seo' --output=json --output-path=site-audit.json
