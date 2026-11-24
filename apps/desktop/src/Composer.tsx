@@ -16,7 +16,6 @@ import {
   pageCommentsLabel,
   parseFileRefs,
   parseWorkModeSlash,
-  type ImageMimeType,
   type ExternalAgentOverview,
   type McpServerViewState,
   type MessageQuote,
@@ -44,7 +43,19 @@ import {
 } from "./file-refs";
 import { BrandIcon } from "./BrandIcon";
 import { ChoiceMenu, Menu, MenuHeading, MenuItem, MenuSeparator, MenuSubmenu } from "./Menu";
-import { IMAGE_TYPES, mimeTypeForImageName, type PickedImage } from "./picked-images";
+import type { PickedImage } from "./picked-images";
+import { DraftAttachments } from "./DraftAttachments";
+import {
+  createDraftAttachments,
+  materializeAttachment,
+  readClipboardAttachments,
+  readDroppedAttachments,
+  revokeDraftAttachments,
+  toSubmitAttachments,
+  type DraftAttachment,
+  type NewAttachmentFile,
+  type SubmitAttachment,
+} from "./draft-attachments";
 import "./composer.css";
 import { PendingInputs } from "./PendingInputs";
 import type { PrefsStore } from "./prefs";
@@ -62,8 +73,7 @@ import {
   WORK_MODE_ITEMS,
   type InputLabelData,
 } from "./input-labels";
-import { ImageViewerBoundary, useImageViewer, type ViewerImageItem } from "./ImageViewer";
-import { fileIconText, formatBytes } from "./web/phone-images";
+import { ImageViewerBoundary } from "./ImageViewer";
 
 export interface ChoiceOption {
   value: string;
@@ -148,7 +158,7 @@ export interface ComposerSubmit {
    * 与 text 相同时可以不传。
    */
   draftText?: string;
-  attachments: { data: Uint8Array; mimeType: string; label: string; source?: "paste" | "upload" }[];
+  attachments: SubmitAttachment[];
   /** 面板页面评论（ADR-0113） */
   pageComments?: PageCommentsInput;
   /** 引用回复片段（ADR-0116） */
@@ -247,26 +257,6 @@ export interface ComposerProps {
   placeholder?: string;
 }
 
-interface Attachment {
-  name: string;
-  data: Uint8Array;
-  mimeType: string;
-  url: string;
-  source?: "paste" | "upload";
-}
-
-function materializeAttachment(attachment: ComposerSubmit["attachments"][number]): Attachment {
-  return {
-    name: attachment.label,
-    data: attachment.data,
-    mimeType: attachment.mimeType,
-    url: URL.createObjectURL(
-      new Blob([attachment.data as BlobPart], { type: attachment.mimeType }),
-    ),
-    ...(attachment.source ? { source: attachment.source } : {}),
-  };
-}
-
 type MenuKind = "plus" | "model" | "effort" | "preset" | "dir" | "branch";
 type PopupKind = "slash" | "refs" | "history";
 
@@ -350,7 +340,7 @@ export function Composer({
   const [showTypedWorkMode, setShowTypedWorkMode] = useState(false);
   const [workMode, setWorkMode] = useState<WorkModeName | null>(initialWorkMode ?? null);
   const [skillQuery, setSkillQuery] = useState("");
-  const [attachments, setAttachments] = useState<Attachment[]>(() =>
+  const [attachments, setAttachments] = useState<DraftAttachment[]>(() =>
     (initialAttachments ?? []).map(materializeAttachment),
   );
   const [focused, setFocused] = useState(false);
@@ -404,7 +394,7 @@ export function Composer({
   const skillAnchor = useDraftSkillAnchor(textarea, draftSkill);
   const workModeRef = useRef<WorkModeName | null>(workMode);
   workModeRef.current = workMode;
-  const attachmentsRef = useRef<Attachment[]>([]);
+  const attachmentsRef = useRef<DraftAttachment[]>([]);
   const revision = useRef(0);
   const pendingCaret = useRef<number | null>(null);
   const mounted = useRef(true);
@@ -758,28 +748,10 @@ export function Composer({
   };
 
   // ── 附件 ──
-  const addImages = useCallback(
-    (
-      files: { name: string; data: Uint8Array; mimeType?: string; source?: "paste" | "upload" }[],
-    ) => {
-      const added: Attachment[] = [];
-      for (const file of files) {
-        const mimeType =
-          (file.mimeType === "" ? undefined : file.mimeType) ??
-          mimeTypeForImageName(file.name) ??
-          "application/octet-stream";
-        added.push({
-          name: file.name,
-          ...(file.source ? { source: file.source } : {}),
-          data: file.data,
-          mimeType,
-          url: URL.createObjectURL(new Blob([file.data as BlobPart], { type: mimeType })),
-        });
-      }
-      if (added.length > 0) setAttachments((current) => [...current, ...added]);
-    },
-    [],
-  );
+  const addImages = useCallback((files: readonly NewAttachmentFile[]) => {
+    const added = createDraftAttachments(files);
+    if (added.length > 0) setAttachments((current) => [...current, ...added]);
+  }, []);
 
   const removeAttachment = (index: number) => {
     setAttachments((current) => {
@@ -791,7 +763,7 @@ export function Composer({
 
   useEffect(
     () => () => {
-      for (const attachment of attachmentsRef.current) URL.revokeObjectURL(attachment.url);
+      revokeDraftAttachments(attachmentsRef.current);
     },
     [],
   );
@@ -871,12 +843,7 @@ export function Composer({
         ? { pageComments: toPageCommentsInput(firstCommentGroup) }
         : {}),
       ...(quoteSnapshot !== undefined ? { quotes: quoteSnapshot } : {}),
-      attachments: snapshot.map((attachment) => ({
-        data: attachment.data,
-        mimeType: attachment.mimeType,
-        label: attachment.name,
-        ...(attachment.source ? { source: attachment.source } : {}),
-      })),
+      attachments: toSubmitAttachments(snapshot),
     };
     // 同一轮事件里清空。不等 Core 接受；拒收再放回。连发时第二次读到的是空草稿。
     historyIndex.current = null;
@@ -1171,55 +1138,27 @@ export function Composer({
   // ── 粘贴 / 拖入文件 ──
   const onPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
     if (!allowAttachments) return;
-    const items = Array.from(event.clipboardData.items);
-    const files = items.flatMap((item) => {
-      if (item.kind !== "file") return [];
-      const file = item.getAsFile();
-      return file === null ? [] : [file];
+    const parsed = readClipboardAttachments(event.clipboardData, {
+      literalPaste: literalPaste.current,
+      nextPasteNumber: () => pasteNumber.current++,
     });
-    if (files.length === 0) {
-      const text = event.clipboardData.getData("text/plain");
-      if (!literalPaste.current && new TextEncoder().encode(text).byteLength >= 32768) {
-        event.preventDefault();
-        addImages([
-          {
-            name: `pasted-${pasteNumber.current++}.txt`,
-            data: new TextEncoder().encode(text),
-            mimeType: "text/plain",
-            source: "paste",
-          },
-        ]);
-      }
-      literalPaste.current = false;
-      return;
-    }
+    literalPaste.current = false;
+    if (!parsed.handled) return;
     event.preventDefault();
-    const supported = files;
-    void Promise.all(
-      supported.map(async (file) => ({
-        name: file.name || "粘贴图片",
-        data: new Uint8Array(await file.arrayBuffer()),
-        mimeType: file.type as ImageMimeType,
-      })),
-    ).then(addImages);
+    if (Array.isArray(parsed.files)) {
+      addImages(parsed.files);
+    } else {
+      void parsed.files.then(addImages);
+    }
   };
 
   const onDrop = (event: ReactDragEvent<HTMLDivElement>) => {
     if (!allowAttachments) return;
     event.preventDefault();
     setDragOver(false);
-    const files = Array.from(event.dataTransfer.files);
-    if (files.length === 0) return;
-    const images = files;
-    void Promise.all(
-      images.map(async (file) => ({
-        name: file.name,
-        data: new Uint8Array(await file.arrayBuffer()),
-        mimeType: ((IMAGE_TYPES as readonly string[]).includes(file.type)
-          ? file.type
-          : mimeTypeForImageName(file.name)) as ImageMimeType,
-      })),
-    ).then(addImages);
+    const dropped = readDroppedAttachments(event.dataTransfer);
+    if (dropped === null) return;
+    void dropped.then(addImages);
   };
 
   // ── 输入区渲染辅助 ──
@@ -1967,86 +1906,6 @@ export function Composer({
           {shownError}
         </div>
       )}
-    </div>
-  );
-}
-
-function DraftAttachments({
-  attachments,
-  onRemove,
-}: {
-  attachments: readonly Attachment[];
-  onRemove: (index: number) => void;
-}) {
-  const openViewer = useImageViewer();
-  const [brokenUrls, setBrokenUrls] = useState<Set<string>>(() => new Set());
-  const openAt = (targetUrl: string, opener: HTMLElement) => {
-    const items: ViewerImageItem[] = [];
-    let initialIndex = 0;
-    for (const att of attachments) {
-      if (!att.mimeType.startsWith("image/") || brokenUrls.has(att.url)) continue;
-      if (att.url === targetUrl) initialIndex = items.length;
-      items.push({
-        src: att.url,
-        filename: att.name,
-        alt: att.name,
-        blob: new Blob([att.data as BlobPart], { type: att.mimeType }),
-      });
-    }
-    openViewer(items, initialIndex, opener);
-  };
-  return (
-    <div className="atts">
-      {attachments.map((attachment, index) => {
-        const isImg = attachment.mimeType.startsWith("image/");
-        const broken = brokenUrls.has(attachment.url);
-        return (
-          <span className="thumb2" key={`${attachment.name}:${index}`}>
-            {isImg ? (
-              broken ? (
-                <img src={attachment.url} alt={attachment.name} />
-              ) : (
-                <button
-                  type="button"
-                  className="thumb2-open"
-                  aria-label={attachment.name}
-                  onClick={(event) => {
-                    openAt(attachment.url, event.currentTarget);
-                  }}
-                >
-                  <img
-                    src={attachment.url}
-                    alt={attachment.name}
-                    onError={() => {
-                      setBrokenUrls((prev) => {
-                        const next = new Set(prev);
-                        next.add(attachment.url);
-                        return next;
-                      });
-                    }}
-                  />
-                </button>
-              )
-            ) : (
-              <span className="ficon" aria-hidden="true">
-                {fileIconText(attachment.name)}
-              </span>
-            )}
-            <span className="fname">{attachment.name}</span>
-            <span className="fsize">{formatBytes(attachment.data.byteLength)}</span>
-            <button
-              type="button"
-              className="x"
-              aria-label={`移除 ${attachment.name}`}
-              onClick={() => {
-                onRemove(index);
-              }}
-            >
-              <Icon name="close" size={ICON_SM} />
-            </button>
-          </span>
-        );
-      })}
     </div>
   );
 }

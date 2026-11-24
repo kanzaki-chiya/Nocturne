@@ -52,90 +52,9 @@
   background: var(--a-sel);
 }
 
-/* ── 附件缩略图 ── */
+/* ── 附件缩略图（公共样式见 draft-attachments.css） ── */
 .composer .atts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
   padding: 10px 16px 0;
-}
-
-.composer .thumb2 {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-1);
-  color: var(--a-secondary);
-  background: var(--a-side);
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
-  padding: 3px 6px 3px 3px;
-  max-width: 220px;
-  min-width: 0;
-}
-
-.composer .thumb2 img {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-1);
-  object-fit: cover;
-  display: block;
-}
-
-.composer .thumb2 .thumb2-open {
-  display: inline-flex;
-  flex: none;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-1);
-  background: transparent;
-  cursor: zoom-in;
-}
-
-.composer .thumb2 .thumb2-open:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-focus);
-}
-
-.composer .thumb2 .ficon {
-  width: 28px;
-  height: 28px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-1);
-  background: var(--a-border);
-  color: var(--a-secondary);
-  font-size: var(--fs-file-badge);
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
-
-.composer .thumb2 .fname {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.composer .thumb2 .fsize {
-  flex: none;
-  color: var(--a-muted);
-}
-
-.composer .thumb2 .x {
-  margin-left: 2px;
-  background: none;
-  border: none;
-  color: var(--a-muted);
-  font-size: var(--fs-1);
-  cursor: pointer;
-  padding: 2px;
-}
-
-.composer .thumb2 .x:hover {
-  color: var(--a-error);
 }
 
 /* ── 文本区（镜像高亮 @ 引用） ── */
