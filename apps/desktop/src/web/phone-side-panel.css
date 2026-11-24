@@ -312,11 +312,16 @@
 .phone-side-panel .sp-sub .conversation {
   font-size: var(--fs-2);
 }
-.phone-side-panel .sp-sub .ask-actions {
+.phone-side-panel .sp-sub .ask .ask-t {
   flex-wrap: wrap;
 }
-.phone-side-panel .sp-sub .ask-kbd {
-  display: none;
+.phone-side-panel .sp-sub .ask .ask-source {
+  flex: 1 1 0;
+}
+.phone-side-panel .sp-sub .ask .ask-why {
+  flex: 0 0 100%;
+  margin-left: 0;
+  margin-top: var(--space-1);
 }
 .phone-side-panel .shell-pane {
   flex: 1;

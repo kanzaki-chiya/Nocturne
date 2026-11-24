@@ -3907,6 +3907,23 @@ function permissionWhy(pending: PendingPermission): string {
   }
 }
 
+function permissionWhyKind(pending: PendingPermission): "unsure" | "block" | "allow" | "rule" {
+  switch (pending.review?.verdict) {
+    case "unsure":
+      return "unsure";
+    case "block":
+      return "block";
+    case "allow":
+      return "allow";
+    default:
+      return "rule";
+  }
+}
+
+function isDenyActionItem(item: PermissionActionItem): boolean {
+  return item.kind === "option" && (item.option === "deny" || item.option === "deny_stop");
+}
+
 /** Lock only transport submission; the pending request remains owned by SessionView. */
 function useReply<Reply>(send: (reply: Reply) => Promise<void>) {
   const locked = useRef(false);
@@ -4050,6 +4067,9 @@ export function PermissionCard({
       actionItems.push({ kind: "rule", label: "改成规则…" });
     }
   }
+  const allowItems = actionItems.filter((item) => !isDenyActionItem(item));
+  const denyItems = actionItems.filter((item) => isDenyActionItem(item));
+  const orderedItems = [...allowItems, ...denyItems];
   const ruleValidation =
     rulePattern !== null && shellSubject !== undefined
       ? validateShellRulePattern(
@@ -4076,8 +4096,8 @@ export function PermissionCard({
     }
     return list;
   }, [ruleValidation, shellSubject, shellKind, shellHistory]);
-  const actionItemsRef = useRef(actionItems);
-  actionItemsRef.current = actionItems;
+  const actionItemsRef = useRef(orderedItems);
+  actionItemsRef.current = orderedItems;
   const replyRef = useRef(reply);
   replyRef.current = reply;
   const setFeedbackRef = useRef(setFeedback);
@@ -4171,76 +4191,147 @@ export function PermissionCard({
 
   const operation = permissionOperation(pending);
   const why = permissionWhy(pending);
+  const whyKind = permissionWhyKind(pending);
   const sourceText = [source?.profile, source?.taskSummary]
     .filter((part): part is string => part !== undefined && part !== "")
     .join(" · ");
   const hover = [pending.reason, pending.review?.reason].filter(Boolean).join("；");
   const networks = pending.subjects.filter((subject) => subject.kind === "network");
+  const renderActionButton = (item: PermissionActionItem, allowIndex?: number) => {
+    if (item.kind === "rule") {
+      return (
+        <Button
+          key="turn_into_rule"
+          variant="default"
+          disabled={busy}
+          onClick={() => {
+            if (pending.ruleSuggestion !== undefined) {
+              setRulePattern(pending.ruleSuggestion.pattern);
+            }
+          }}
+        >
+          {item.label}
+        </Button>
+      );
+    }
+    const option = item.option;
+    const label =
+      option === "allow_always" && pending.subjects[0]?.kind === "app"
+        ? `始终允许 ${pending.subjects[0].app?.name ?? pending.subjects[0].target}`
+        : option === "allow_session" && networks.length
+          ? `本会话允许访问 ${networks.map((subject) => subject.target).join("、")}`
+          : permissionLabels[option];
+    const variant =
+      allowIndex === 0
+        ? "primary"
+        : option === "deny_stop"
+          ? "danger-text"
+          : option === "deny"
+            ? "ghost"
+            : "default";
+    return (
+      <Button
+        key={option}
+        variant={variant}
+        disabled={busy}
+        onClick={() => {
+          if (
+            option === "deny" &&
+            !(
+              pending.subjects.length > 0 &&
+              pending.subjects.every((subject) => subject.kind === "app")
+            )
+          )
+            setFeedback("");
+          else void reply(permissionReplies[option]);
+        }}
+      >
+        {label}
+      </Button>
+    );
+  };
   return (
     <section className="ask v2" aria-label="权限确认" aria-busy={busy} tabIndex={-1} ref={cardRef}>
       <div className="ask-t" title={hover}>
-        需要确认<span className="muted-value">{operation}</span>
+        <Icon name="safe_shield" size={ICON_MD} className="ask-ico" />
+        <span className="ask-op">{operation}</span>
         {sourceText !== "" && (
-          <span className="muted-value ask-source" title={sourceText}>
+          <span className="ask-source" title={sourceText}>
             {sourceText}
           </span>
         )}
-        <span className="ask-why">{why}</span>
+        <span className={`ask-why ask-why-${whyKind}`}>
+          <span className="ask-why-dot" aria-hidden="true" />
+          {why}
+        </span>
       </div>
-      <ul className="ask-subjects">
-        {pending.subjects.map((subject, index) => {
-          if (subject.kind === "app") {
-            const name = subject.appUnresolved
-              ? subject.app?.pid !== undefined
-                ? `PID ${subject.app.pid}`
-                : /^PID \d+$/u.test(subject.target)
-                  ? subject.target
-                  : "操作软件"
-              : (subject.app?.name ?? subject.target);
-            const title = subject.app?.title ?? subject.detail;
-            const icon = subject.app?.icon ?? icons.get(subject.target);
+      {pending.subjects.length > 0 ? (
+        <ul className="ask-subjects">
+          {pending.subjects.map((subject, index) => {
+            if (subject.kind === "app") {
+              const name = subject.appUnresolved
+                ? subject.app?.pid !== undefined
+                  ? `PID ${subject.app.pid}`
+                  : /^PID \d+$/u.test(subject.target)
+                    ? subject.target
+                    : "操作软件"
+                : (subject.app?.name ?? subject.target);
+              const title = subject.app?.title ?? subject.detail;
+              const icon = subject.app?.icon ?? icons.get(subject.target);
+              return (
+                <li key={index} className="ask-app">
+                  <span className="app-ic" style={{ background: icon ? "transparent" : "#1f7a46" }}>
+                    {icon ? <img src={`data:image/png;base64,${icon}`} alt="" /> : (name[0] ?? "A")}
+                  </span>
+                  <span className="app-name">{name}</span>
+                  {!subject.appUnresolved &&
+                    !subject.app?.packageFamilyName &&
+                    subject.target !== name && <span className="exe">{subject.target}</span>}
+                  {title !== undefined && title !== "" && <span className="title">{title}</span>}
+                </li>
+              );
+            }
+            if (subject.kind === "schedule") {
+              return (
+                <li key={index} className="ask-schedule">
+                  <span className="ask-target">{subject.target}</span>
+                  {subject.detail !== undefined && subject.detail !== "" ? (
+                    <FoldedPlainText text={subject.detail} />
+                  ) : null}
+                </li>
+              );
+            }
+            if (subject.kind === "shell") {
+              const prefix = `${subject.shell ?? shellKind ?? "shell"} › `;
+              const tail =
+                subject.resolved !== undefined && subject.resolved !== subject.target
+                  ? `${subject.target} → ${subject.resolved}`
+                  : subject.target;
+              const full = `${prefix}${tail}`;
+              return (
+                <li key={index} title={subject.detail ?? full}>
+                  <span className="ask-sh">{prefix}</span>
+                  {tail}
+                </li>
+              );
+            }
+            const shown =
+              subject.kind === "network" ? subject.target : displayPath(subject.target, cwd);
+            const full =
+              subject.resolved !== undefined && subject.resolved !== subject.target
+                ? `${shown} → ${subject.resolved}`
+                : shown;
             return (
-              <li key={index} className="ask-app">
-                <span className="app-ic" style={{ background: icon ? "transparent" : "#1f7a46" }}>
-                  {icon ? <img src={`data:image/png;base64,${icon}`} alt="" /> : (name[0] ?? "A")}
-                </span>
-                <span className="app-name">{name}</span>
-                {!subject.appUnresolved &&
-                  !subject.app?.packageFamilyName &&
-                  subject.target !== name && <span className="exe">{subject.target}</span>}
-                {title !== undefined && title !== "" && <span className="title">{title}</span>}
+              <li key={index} title={subject.detail ?? full}>
+                {full}
               </li>
             );
-          }
-          if (subject.kind === "schedule") {
-            return (
-              <li key={index} className="ask-schedule">
-                <span className="ask-target">{subject.target}</span>
-                {subject.detail !== undefined && subject.detail !== "" ? (
-                  <FoldedPlainText text={subject.detail} />
-                ) : null}
-              </li>
-            );
-          }
-          const shown =
-            subject.kind === "shell"
-              ? `${subject.shell ?? shellKind ?? "shell"} › ${subject.target}`
-              : subject.kind === "network"
-                ? subject.target
-                : displayPath(subject.target, cwd);
-          const full =
-            subject.resolved !== undefined && subject.resolved !== subject.target
-              ? `${shown} → ${subject.resolved}`
-              : shown;
-          return (
-            <li key={index} title={subject.detail ?? full}>
-              {full}
-            </li>
-          );
-        })}
-      </ul>
+          })}
+        </ul>
+      ) : null}
       {rulePattern !== null ? (
         <form
+          className="ask-form"
           onSubmit={(event) => {
             event.preventDefault();
             if (!ruleValidation?.ok || busy) return;
@@ -4301,67 +4392,16 @@ export function PermissionCard({
         </form>
       ) : feedback === null ? (
         <div className="ask-actions">
-          {actionItems.map((item) => {
-            if (item.kind === "rule") {
-              return (
-                <Button
-                  key="turn_into_rule"
-                  variant="default"
-                  disabled={busy}
-                  onClick={() => {
-                    if (pending.ruleSuggestion !== undefined) {
-                      setRulePattern(pending.ruleSuggestion.pattern);
-                    }
-                  }}
-                >
-                  {item.label}
-                </Button>
-              );
-            }
-            const option = item.option;
-            const label =
-              option === "allow_always" && pending.subjects[0]?.kind === "app"
-                ? `始终允许 ${pending.subjects[0].app?.name ?? pending.subjects[0].target}`
-                : option === "allow_session" && networks.length
-                  ? `本会话允许访问 ${networks.map((subject) => subject.target).join("、")}`
-                  : permissionLabels[option];
-            return (
-              <Button
-                key={option}
-                variant={
-                  option === options[0] && (option === "allow_once" || option === "allow_session")
-                    ? "primary"
-                    : option === "deny_stop"
-                      ? "danger"
-                      : "default"
-                }
-                disabled={busy}
-                onClick={() => {
-                  if (
-                    option === "deny" &&
-                    !(
-                      pending.subjects.length > 0 &&
-                      pending.subjects.every((subject) => subject.kind === "app")
-                    )
-                  )
-                    setFeedback("");
-                  else void reply(permissionReplies[option]);
-                }}
-              >
-                {label}
-              </Button>
-            );
-          })}
-          <KeyHint
-            className="ask-kbd"
-            groups={[
-              { keys: ["1", String(actionItems.length)], range: true, label: "选择" },
-              { keys: ["Esc"], label: "拒绝" },
-            ]}
-          />
+          {allowItems.map((item, index) => renderActionButton(item, index))}
+          {denyItems.length > 0 ? (
+            <div className="ask-actions-deny">
+              {denyItems.map((item) => renderActionButton(item))}
+            </div>
+          ) : null}
         </div>
       ) : (
         <form
+          className="ask-form"
           onSubmit={(event) => {
             event.preventDefault();
             const value = feedback.trim();

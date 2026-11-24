@@ -1096,86 +1096,125 @@
 .conversation .ask {
   max-width: var(--w-thread);
   margin: 0 auto;
-  padding: 10px 12px;
-  /* 描边统一用 --a-border，保留警告浅底表达需要确认 */
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-3);
-  background: linear-gradient(var(--a-warning-bg), var(--a-warning-bg)), var(--a-panel);
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-composer);
+  background: var(--a-panel);
+  transition: border-color var(--dur-hover-in);
   overflow-wrap: anywhere;
 }
-/* 卡片出现时被程序聚焦（tabIndex -1）：去掉浏览器默认焦点框，改用与提问卡一致的强调色边框和外圈 */
+/* 卡片出现时被程序聚焦（tabIndex -1）：去掉浏览器默认焦点框，只把边框换成浅强调色 */
 .conversation .ask:focus-within {
-  border-color: var(--a-accent);
-  box-shadow: var(--shadow-focus);
+  border-color: var(--a-accent-border);
 }
 .conversation .ask:focus {
   outline: none;
 }
 .conversation .ask + .ask {
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
-.conversation .ask-t {
+.ask .ask-t {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  gap: var(--space-2);
   min-width: 0;
   white-space: nowrap;
-  font-size: var(--fs-1);
-  font-weight: var(--fw-semibold);
+}
+.ask .ask-ico {
+  flex: none;
   color: var(--a-warning);
 }
-.conversation .ask-t > .muted-value:not(.ask-source),
-.conversation .ask-why {
+.ask .ask-op {
   flex: none;
+  font-size: var(--fs-2);
+  font-weight: var(--fw-semibold);
+  color: var(--a-text);
+  white-space: nowrap;
 }
-.conversation .ask-source {
+.ask .ask-source {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--fs-1);
+  font-weight: var(--fw-regular);
+  color: var(--a-muted);
 }
-.conversation .ask-why {
-  margin-left: 10px;
+.ask .ask-why {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   font-weight: var(--fw-regular);
   font-size: var(--fs-1);
   color: var(--a-muted);
 }
-.conversation .ask p {
-  margin: 6px 0;
+.ask .ask-why-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--a-faint);
 }
-.conversation .ask-subjects {
+.ask .ask-why-unsure .ask-why-dot {
+  background: var(--a-warning);
+}
+.ask .ask-why-block .ask-why-dot {
+  background: var(--a-error);
+}
+.ask .ask-why-allow .ask-why-dot {
+  background: var(--a-success);
+}
+.ask .ask-why-rule .ask-why-dot {
+  background: var(--a-faint);
+}
+.ask p {
+  margin: var(--space-2) 0 0;
+}
+.ask .ask-subjects {
   list-style: none;
-  padding: 0;
-  margin: 8px 0 2px;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  background: var(--a-input);
 }
-.conversation .ask-subjects li {
+.ask .ask-subjects li {
   font-family: var(--mono);
-  font-size: var(--fs-1);
-  color: var(--a-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 1px 0;
+  font-size: var(--fs-diff);
+  line-height: var(--lh-code);
+  color: var(--a-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 0;
 }
-/* schedule 的 detail 是多行纯文本：不能被上面的单行省略裁掉。手机端同一张卡片，不在 .conversation 里 */
+.ask .ask-subjects li + li {
+  margin-top: var(--space-1);
+}
+.ask .ask-sh {
+  color: var(--a-faint);
+  user-select: none;
+}
+/* schedule 的 detail 是多行纯文本；手机端同一张卡片，不在 .conversation 里 */
 .ask-subjects li.ask-schedule {
   white-space: normal;
-  overflow: visible;
-  text-overflow: unset;
   font-family: inherit;
 }
 .ask-schedule .ask-target {
   font-family: var(--mono);
-  color: var(--a-secondary);
+  font-size: var(--fs-diff);
+  color: var(--a-text);
 }
 .ask-subjects li.ask-app {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  white-space: normal;
   font-family: var(--sans);
+  font-size: var(--fs-2);
   color: var(--a-text);
 }
 .ask-app .exe {
@@ -1228,64 +1267,83 @@
   color: var(--a-muted);
   margin-bottom: 4px;
 }
-.conversation .ask-actions {
+.ask .ask-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin-top: 10px;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
-.conversation .ask-kbd {
+.ask .ask-actions-deny {
   margin-left: auto;
-  font-size: var(--fs-1);
-  color: var(--a-faint);
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
-.conversation .ask :is(button, input, textarea):disabled {
+.ask :is(button, input, textarea):disabled {
   cursor: default;
   opacity: 0.6;
 }
-.conversation .ask label {
+.ask .ask-form {
+  margin-top: var(--space-3);
+}
+.ask label {
   display: block;
   font-size: var(--fs-1);
+  color: var(--a-muted);
 }
-.conversation .ask textarea {
+.ask textarea {
   display: block;
   width: 100%;
   min-height: 60px;
   resize: vertical;
-  margin: 5px 0 8px;
-  padding: 7px 9px;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-3);
   color: var(--a-text);
   background: var(--a-input);
   border: 1px solid var(--a-border-strong);
-  border-radius: var(--radius-1);
-  font: inherit;
+  border-radius: var(--radius-2);
+  font-family: var(--sans);
+  font-size: var(--fs-2);
+  line-height: var(--lh-base);
 }
-.conversation .ask .ask-rule-input {
+.ask .ask-rule-input {
   display: block;
   width: 100%;
   margin: var(--space-1) 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--a-input);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
   font-family: var(--mono);
-  font-size: var(--fs-1);
+  font-size: var(--fs-diff);
+  line-height: var(--lh-code);
 }
-.conversation .ask .ask-rule-input.invalid,
-.conversation .ask .ask-rule-input.invalid:focus {
+.ask .ask-rule-input.invalid,
+.ask .ask-rule-input.invalid:focus {
   border-color: var(--a-error);
   box-shadow: none;
 }
 .ask-rule-matches {
   list-style: none;
-  margin: 0 0 var(--space-0-5);
-  padding: 0;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  background: var(--a-input);
   display: flex;
   flex-direction: column;
-  gap: var(--space-0-5);
+  gap: var(--space-1);
 }
 .ask-rule-matches li {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  font: var(--fs-1) var(--mono);
+  font-family: var(--mono);
+  font-size: var(--fs-diff);
+  line-height: var(--lh-code);
   color: var(--a-secondary);
   min-width: 0;
 }
@@ -1299,8 +1357,8 @@
   flex: none;
   color: var(--a-success);
 }
-.conversation .ask .ask-rule-err {
-  margin: 0 0 var(--space-0-5);
+.ask .ask-rule-err {
+  margin: 0;
   font-size: var(--fs-1);
   color: var(--a-error);
 }
@@ -1625,7 +1683,7 @@
     max-height: 60%;
   }
   .conversation .ask {
-    padding: 10px;
+    padding: var(--space-3);
   }
 }
 /* 分叉确认：在消息操作行下方展开 */

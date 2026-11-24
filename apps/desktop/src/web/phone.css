@@ -315,8 +315,8 @@
 }
 .phone .input,
 .phone .textarea,
-.phone .conversation .ask .ask-rule-input,
-.phone .conversation .ask textarea,
+.phone .ask .ask-rule-input,
+.phone .ask textarea,
 .phone .qcard :is(input, textarea) {
   font-size: var(--fs-4);
 }
@@ -1105,43 +1105,23 @@
   margin: 0;
   padding: 0;
   border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .phone-sheet .ask:focus {
   outline: none;
 }
-.phone-sheet .ask-actions {
-  display: flex;
+.phone-sheet .ask .ask-t {
   flex-wrap: wrap;
-  gap: 8px;
 }
-.phone-sheet .ask-kbd {
-  display: none;
-}
-.phone-sheet .ask-t {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  min-width: 0;
-}
-.phone-sheet .ask-t > .muted-value:not(.ask-source) {
-  flex: none;
-}
-.phone-sheet .ask-source {
+.phone-sheet .ask .ask-source {
   flex: 1 1 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.phone-sheet .ask-why {
+.phone-sheet .ask .ask-why {
   flex: 0 0 100%;
   margin-left: 0;
-  color: var(--a-muted);
   font-size: var(--fs-2);
-  margin-top: 4px;
-}
-.phone-sheet .ask-subjects {
-  overflow-wrap: anywhere;
+  margin-top: var(--space-1);
 }
 
 /* ── 设置 ── */
