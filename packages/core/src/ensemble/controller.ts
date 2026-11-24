@@ -374,6 +374,9 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
   let quietReminderSent = false;
   let deliveringCount = 0;
   let quietTimer: ReturnType<typeof setImmediate> | undefined;
+  // 静默检查已排程或正在判定期间计入 hasRunningWork，使 isIdle 不会在
+  // 「Turn 落定 → 静默提醒投递 → 新 Turn 启动」的空档里误报空闲。
+  let quietCheckInFlight = false;
   let disposed = false;
 
   const warnWorktreeCleanupFailed = (cause: unknown): void => {
@@ -872,7 +875,10 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
     if (quietTimer !== undefined) clearImmediate(quietTimer);
     quietTimer = setImmediate(() => {
       quietTimer = undefined;
-      void maybeSendQuietReminder();
+      quietCheckInFlight = true;
+      void maybeSendQuietReminder().finally(() => {
+        quietCheckInFlight = false;
+      });
     });
   }
 
@@ -1180,6 +1186,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       clearImmediate(quietTimer);
       quietTimer = undefined;
     }
+    quietCheckInFlight = false;
     active = false;
     posts = [];
     deps.clearMaestroEnsembleInputs();
@@ -1798,7 +1805,13 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
 
     hasRunningWork() {
       if (!active) return false;
-      if (deliveringCount > 0) return true;
+      if (
+        deliveringCount > 0 ||
+        quietTimer !== undefined ||
+        quietCheckInFlight ||
+        deps.hasMaestroPendingActive()
+      )
+        return true;
       for (const m of members.values()) {
         if (m.status === "working" || m.opening !== undefined || m.session?.isBusy()) {
           return true;
@@ -1875,6 +1888,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
         clearImmediate(quietTimer);
         quietTimer = undefined;
       }
+      quietCheckInFlight = false;
       const { forkSeq, view, activeEvents } = foldEnsembleViewFromEvents(
         deps.durableEvents(),
         deps.maestroModel().model.ref,
@@ -2041,6 +2055,7 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
         clearImmediate(quietTimer);
         quietTimer = undefined;
       }
+      quietCheckInFlight = false;
       for (const m of members.values()) {
         if (m.unsubscribe !== undefined) {
           m.unsubscribe();
