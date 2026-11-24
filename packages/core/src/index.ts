@@ -327,7 +327,11 @@ import {
   type ResidentKind,
   type ResidentWorktreeOps,
 } from "./resident/index.js";
-import { createApplySubagentChangesTool } from "./tools/builtin/apply-subagent-changes.js";
+import {
+  checkExpectedHead,
+  createApplySubagentChangesTool,
+  ExpectedHeadMismatchError,
+} from "./tools/builtin/apply-subagent-changes.js";
 import { createUpdateGoalTool } from "./tools/builtin/update-goal.js";
 import {
   effectiveEvents,
@@ -3559,11 +3563,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         tools.register(
           createApplySubagentChangesTool({
             lookup,
-            async apply(id, mode) {
+            async apply(id, mode, expectedHead) {
               const { applied, residentKind, head } = await runWorktreeTask(async () => {
                 const result = lookup(id);
                 if (!result || result.applied)
                   throw new Error("No unapplied isolated changes found");
+                const headError = checkExpectedHead(id, result.changes.head, expectedHead);
+                if (headError !== undefined) throw new ExpectedHeadMismatchError(headError);
                 const repository =
                   result.residentKind !== undefined
                     ? result.repository
