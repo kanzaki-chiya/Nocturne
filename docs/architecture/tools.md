@@ -120,7 +120,7 @@ execute(call, ctx):
 | `list_pages` | 列出当前会话所在项目的全部面板页面，供跨会话接着改（[ADR-0114](../decisions/ADR-0114-project-page-library.md)） | 无 | 无参数；按共用项目键聚合顶层会话（含已归档）中的面板页面，按来源 `origin` 合并为最近副本、按最近更新倒序，返回每项的 `ref`（`<sessionId>/<page>`）、`title`、`version`、`updatedAt` 与最新 HTML 绝对路径 `path`；只读、无权限主体（免确认）、声明 `concurrencySafe` 与 `mainSessionOnly`（与 `render_html` 同范围） |
 | `schedule` | 列出、创建、修改、暂停、删除定时任务（ADR-0064） | 写 `schedules.json`，不改工作区文件 | 见下方；声明 `mutatesSchedule`，定时会话与子代理按特性排除 |
 
-顶层后台功能开启时另注册 `apply_subagent_changes({ id, mode?: "clean" | "3way" })`，声明 `mutates`，以改动文件的 `edit` 主体记录检查点；成功并回按有效事件判断，回退后允许再次并回。完整 Git 与冲突语义见 [ADR-0075 §5](../decisions/ADR-0075-worktree-isolation.md#5-交付与合并)。
+顶层后台功能开启时另注册 `apply_subagent_changes({ id, mode?: "clean" | "3way", expectedHead?: string })`，声明 `mutates`，以改动文件的 `edit` 主体记录检查点；成功并回按有效事件判断，回退后允许再次并回。传入可选 `expectedHead`（完整 commit SHA 或至少 7 位十六进制前缀）时，要求目标当前待并回提交头与之匹配，不符或格式非法时以 `invalid_input` 拒绝且不改工作区，省略时保持原行为（见 [ADR-0089 2026-11-24 修订](../decisions/ADR-0089-ensemble.md#修订2026-11-24验证结论绑定版本与按必验项汇报覆盖)）。完整 Git 与冲突语义见 [ADR-0075 §5](../decisions/ADR-0075-worktree-isolation.md#5-交付与合并)。
 
 主会话的目标为 active 时另注册 `update_goal({ status: "met" | "blocked", checklist?: { item, evidence }[], reason? })`（[ADR-0076](../decisions/ADR-0076-work-modes.md) §4.2）：在 Turn 边界与续跑时按目标状态装卸；`met` 须有至少一项、证据非空的清单，`blocked` 须有原因，否则 `invalid_input`；目标此刻已不是 active 时同样以 `invalid_input` 结算。无权限主体，`mutates: false`、`fileEffects: "none"`，写入由目标模块完成（`session.config_changed.goal`），`tool.completed.output` 保存清单与证据。
 

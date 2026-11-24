@@ -211,3 +211,18 @@
 - **对话流 `ensemble_init` 行改作合奏入口**（修订 2026-11-14「桌面端与手机端对话流不再渲染入口行」中的桌面端部分）：桌面端指挥会话中已成功的 `ensemble_init` 工具行改为整行可点击、键盘可达的合奏入口（不再展开，去掉「完成」），左侧折叠箭头换为指挥小头像，中间保留「合奏」与单行省略标题；创建当前 `SessionView.ensemble` 的那一行在合奏进行中右侧展示指挥与未移除成员小头像组（有待确认成员时头像加警告色描边）、状态圆点与右箭头，当前合奏已结束时右侧仅显示「已结束」与右箭头且仍可点击打开留言板。同一会话发生过多次合奏时，更早的 `ensemble_init` 行静态显示「已结束」、无箭头、不可点击，避免误打开当前合奏的留言板；运行中、失败或被拒绝的 `ensemble_init` 仍保持通用工具行。手机端与 TUI 维持现状。
 - **桌面端合奏成员确认改为提示行，不在指挥主会话弹出确认卡片**：桌面端指挥会话底部的 `conversation-requests` 过滤掉 `childSessionId` 属于当前合奏成员的转发权限请求，不再在主会话渲染该成员的 `PermissionCard`，改为对每名有待确认请求的未移除成员展示一行提示（带警告色描边的成员小头像、成员名、模型/档位、「等待确认」与右箭头），点击打开该成员的会话标签，在成员会话内完成确认。指挥自身与普通 `task` 子代理转发来的确认卡片照常在主会话显示，排序与首卡 `1–N` / `Esc` 快捷键只作用于剩余卡片。Core 的 `subagent.permissions` 转发与 `respondSubagentPermission`（[ADR-0091](ADR-0091-subagent-permission-forward.md)）保持不变；理由是让桌面端交互与 TUI 及用户文档（`site-docs/work-modes.md`）一致，成员确认回到成员自己的会话中处理，避免打断指挥主会话。
 
+## 修订（2026-11-24）：验证结论绑定版本与按必验项汇报覆盖
+
+- **验证者结论格式与版本锚定**（`packages/core/src/ensemble/prompts.ts`）：
+  - 保留 `PASS`、`REWORK`，新增第三种结论 `UNVERIFIABLE`（环境起不来、缺依赖等导致无法验证时使用，写明原因与未验内容并 `@maestro`，不算通过）。
+  - `REWORK` 要求列出所有能证实的问题（不只报第一个），附 `file:line` 与期望行为，并直接 `@<author>` 返工。
+  - 独立工作树审查时，验证结论必须写明实际检出并验证的 commit SHA（取 `ensemble_checkout` 返回的提交或自动分离头指针检出提示中的 SHA）、执行的命令或手工操作及观察结果。
+  - 共享主工作区审查时，工作区可能存在未提交改动，不能以 `HEAD` 代表被测状态，改为写清实际检查了哪些行为、文件与结果。
+- **`apply_subagent_changes` 增加可选 `expectedHead` 版本校验**（`packages/core/src/tools/builtin/apply-subagent-changes.ts`、`packages/core/src/index.ts`）：
+  - 新增可选字符串参数 `expectedHead`（完整 SHA 或至少 7 位十六进制前缀），在输入预检（`validateInput`）、工具执行前与工作树串行队列（`runWorktreeTask`）内均校验其与当前待并回改动头 `changes.head` 是否一致；格式非法或不匹配时以 `invalid_input` 拒绝、不修改主工作区，并在英文错误信息中给出当前 head 与期望值。省略 `expectedHead` 时行为与既有实现完全一致，后台子代理与组曲等现有调用方不受影响。
+  - 指挥提示词（`packages/core/src/work-modes/prompts.ts`）要求：并回独立工作树成员前核对验证者 `PASS` 帖中的 SHA 是否为作者当前待并回版本，并将该 SHA 作为 `expectedHead` 传入 `apply_subagent_changes`；若版本已前进或工具报 head 不匹配，请原验证者检查增量并按影响范围复验，拿到新版本的 `PASS` 后再并回。共享工作区成员保留集成后在主工作区经 `shell` 跑检查的既有做法。
+- **收尾按必验项汇报覆盖**（不新增 charter 字段、工具或事件）：
+  - 指挥派工时复用成员任务书已有的 `doneWhen` 写明必验行为与验证项；收尾前对照任务书与留言板（必要时用 `ensemble_read` 翻帖）核对覆盖情况。
+  - 调用 `ensemble_end` 后的汇报逐项列出必验项结论（连同未并回分支）：已通过（附验证证据所在的帖子编号）、发现问题、未验证（写明原因）；成员结束工作、没有回帖、发了 `UNVERIFIABLE` 或构建通过，均不能代替某一项的验证通过结论。
+
+
