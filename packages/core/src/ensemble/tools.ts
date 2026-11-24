@@ -218,7 +218,10 @@ export function createEnsembleMaestroTools(
           properties: {
             owns: { type: "string", description: "Files, modules, or scope this member owns." },
             handsOff: { type: "string", description: "Files or areas this member must not touch." },
-            doneWhen: { type: "string", description: "Concrete completion criteria." },
+            doneWhen: {
+              type: "string",
+              description: "Concrete completion criteria and required verification items.",
+            },
           },
           additionalProperties: false,
         },

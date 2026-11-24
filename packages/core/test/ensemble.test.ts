@@ -2425,4 +2425,393 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
       await worktreeGit(ws, ["worktree", "remove", "--force", holderRemove]).catch(() => undefined);
     }
   }, 30_000);
+
+  it("场景验收 1：验证者对提交 A 发 PASS 后作者继续提交 B，指挥带 A 的 expectedHead 并回被拒且 B 未进入主工作区", async () => {
+    const ws = makeTempDir("nocturne-ens-verdict-sha-");
+    await initGitRepo(ws);
+    const wtSessionsDir = makeTempDir("nocturne-ens-verdict-sha-sessions-");
+
+    let commitA = "";
+    let commitB = "";
+    let authorStage = 0;
+    let verifierStage = 0;
+    let maestroSetupDone = false;
+    let applyACalled = false;
+    let applyBCalled = false;
+
+    const provider = createRoutedProvider("fake", [{ id: "m1" }], (req) => {
+      const role = requestRole(req);
+      const countTool = (name: string) =>
+        req.messages.filter((m) => m.role === "tool" && m.name === name).length;
+      const lastUserText = (() => {
+        for (let i = req.messages.length - 1; i >= 0; i -= 1) {
+          const msg = req.messages[i];
+          if (msg?.role === "user") {
+            return msg.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
+          }
+        }
+        return "";
+      })();
+
+      if (role === "maestro") {
+        if (!maestroSetupDone) {
+          if (countTool("ensemble_init") === 0) {
+            return [
+              callTool("i1", "ensemble_init", { title: "Version Pinned Verdict" }),
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          if (countTool("ensemble_add_member") === 0) {
+            return [
+              callTool("a1", "ensemble_add_member", {
+                name: "author",
+                isolated: true,
+                charter: {
+                  owns: "feature.txt",
+                  handsOff: "README.md",
+                  doneWhen: "feature.txt passes verifier review on checked-out commit",
+                },
+              }),
+              callTool("a2", "ensemble_add_member", {
+                name: "verifier",
+                isolated: true,
+                charter: {
+                  owns: "verify author commits",
+                  handsOff: "production edits",
+                  doneWhen: "PASS verdict with exact checked-out commit SHA",
+                },
+              }),
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          maestroSetupDone = true;
+          return [
+            callTool("p1", "ensemble_post", {
+              text: "@author implement version A in feature.txt and ask @verifier to review",
+            }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (lastUserText.includes("try apply commit A") && !applyACalled) {
+          applyACalled = true;
+          return [
+            callTool("apply-a", "apply_subagent_changes", {
+              id: "author",
+              mode: "clean",
+              expectedHead: commitA,
+            }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (lastUserText.includes("apply verified commit B") && !applyBCalled) {
+          applyBCalled = true;
+          return [
+            callTool("apply-b", "apply_subagent_changes", {
+              id: "author",
+              mode: "clean",
+              expectedHead: commitB.slice(0, 12),
+            }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return stopText("maestro waiting");
+      }
+
+      if (role === "member:author") {
+        if (authorStage === 0) {
+          authorStage = 1;
+          return [
+            callTool("w-a", "write", { path: "feature.txt", content: "version-A\n" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (authorStage === 1) {
+          authorStage = 2;
+          return [
+            callTool("post-a", "ensemble_post", {
+              text: "@verifier implemented version A in feature.txt; please review",
+            }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (authorStage === 2 && lastUserText.includes("push unverified B")) {
+          authorStage = 3;
+          return [
+            callTool("w-b1", "write", { path: "feature.txt", content: "version-B-unverified\n" }),
+            callTool("w-b2", "write", { path: "extra-b.txt", content: "sneaky-B\n" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (authorStage === 3) {
+          authorStage = 4;
+          return [
+            callTool("post-b", "ensemble_post", {
+              text: "@maestro pushed follow-up commit B to feature.txt and extra-b.txt",
+            }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return stopText("author idle");
+      }
+
+      if (role === "member:verifier") {
+        if (verifierStage === 0) {
+          verifierStage = 1;
+          return [
+            callTool("chk-a", "ensemble_checkout", { member: "author" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (verifierStage === 1) {
+          const chkMsg = req.messages.findLast(
+            (m) => m.role === "tool" && m.name === "ensemble_checkout",
+          );
+          const text = typeof chkMsg?.content === "string" ? chkMsg.content : "";
+          const shaMatch = /latest commit ([0-9a-f]{40})/.exec(text);
+          commitA = shaMatch?.[1] ?? "";
+          verifierStage = 2;
+          return [
+            callTool("pass-a", "ensemble_post", {
+              text: `PASS commit ${commitA}: inspected feature.txt (version-A) @maestro`,
+            }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (verifierStage === 2 && lastUserText.includes("re-verify B")) {
+          verifierStage = 3;
+          return [
+            callTool("chk-b", "ensemble_checkout", { member: "author" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (verifierStage === 3) {
+          const chkMsg = req.messages.findLast(
+            (m) => m.role === "tool" && m.name === "ensemble_checkout",
+          );
+          const text = typeof chkMsg?.content === "string" ? chkMsg.content : "";
+          const shaMatch = /latest commit ([0-9a-f]{40})/.exec(text);
+          commitB = shaMatch?.[1] ?? "";
+          verifierStage = 4;
+          return [
+            callTool("pass-b", "ensemble_post", {
+              text: `PASS commit ${commitB}: re-verified delta in feature.txt and extra-b.txt @maestro`,
+            }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        return stopText("verifier idle");
+      }
+
+      return stopText("ok");
+    });
+
+    const rt = await createRuntime({
+      cwd: ws,
+      workspaceRoot: ws,
+      sessionsDir: wtSessionsDir,
+      providers: [provider],
+      interactive: true,
+      subagent: { background: true },
+    });
+    const session = await rt.createSession({ model: "fake/m1", permissionPreset: "bypass" });
+    openRuntimes.push({ sessions: [session] });
+
+    // 1. 作者提交 A → 验证者检出 A 并对 A 发 PASS
+    await session.submit({ text: "start ensemble", workMode: "ensemble" });
+    await vi.waitFor(
+      () => {
+        expect(session.isIdle()).toBe(true);
+        expect(commitA).toMatch(/^[0-9a-f]{40}$/u);
+      },
+      { timeout: 15_000 },
+    );
+
+    // 2. 在指挥并回前，作者继续提交 B，推进分支头
+    await session.postToEnsemble({ text: "@author push unverified B" });
+    await vi.waitFor(
+      () => {
+        expect(session.isIdle()).toBe(true);
+        expect(authorStage).toBe(4);
+      },
+      { timeout: 15_000 },
+    );
+
+    const view = replaySessionView(session.durableEvents());
+    const authorWt = must(must(view.ensemble).members.find((m) => m.name === "author")?.worktree);
+    const actualHeadB = (await worktreeGit(authorWt.path, ["rev-parse", "HEAD"])).trim();
+    expect(actualHeadB).toMatch(/^[0-9a-f]{40}$/u);
+    expect(actualHeadB).not.toBe(commitA);
+
+    // 3. 指挥带 A 的 SHA 调 apply_subagent_changes：必须被拒，B 未进入主工作区
+    await session.submit({ text: "try apply commit A" });
+    const rejectedApply = session
+      .durableEvents()
+      .filter((e) => e.type === "tool.completed" && e.payload.name === "apply_subagent_changes")
+      .at(-1);
+    expect(rejectedApply?.type).toBe("tool.completed");
+    if (rejectedApply?.type === "tool.completed") {
+      expect(rejectedApply.payload.status).toBe("error");
+      expect(rejectedApply.payload.error?.code).toBe("invalid_input");
+      expect(rejectedApply.payload.error?.message).toContain(actualHeadB);
+      expect(rejectedApply.payload.error?.message).toContain(commitA);
+    }
+    expect(existsSync(path.join(ws, "feature.txt"))).toBe(false);
+    expect(existsSync(path.join(ws, "extra-b.txt"))).toBe(false);
+
+    // 4. 请原验证者复验 B 并拿到对 B 的 PASS 后，带 B 的 12 位短 SHA 并回成功
+    await session.postToEnsemble({ text: "@verifier re-verify B" });
+    await vi.waitFor(
+      () => {
+        expect(session.isIdle()).toBe(true);
+        expect(commitB).toBe(actualHeadB);
+      },
+      { timeout: 15_000 },
+    );
+    await session.submit({ text: "apply verified commit B" });
+    const acceptedApply = session
+      .durableEvents()
+      .filter((e) => e.type === "tool.completed" && e.payload.name === "apply_subagent_changes")
+      .at(-1);
+    expect(acceptedApply?.type).toBe("tool.completed");
+    if (acceptedApply?.type === "tool.completed") {
+      expect(acceptedApply.payload.status).toBe("ok");
+    }
+    expect(readFileSync(path.join(ws, "feature.txt"), "utf8")).toBe("version-B-unverified\n");
+    expect(readFileSync(path.join(ws, "extra-b.txt"), "utf8")).toBe("sneaky-B\n");
+  }, 30_000);
+
+  it("场景验收 2：三个必验项仅有两份通过证据时，校验指挥与验证者提示词均包含逐项汇报、未验证写明原因与版本约束", async () => {
+    const ws = makeTempDir("nocturne-ens-coverage-");
+    const sessionsDir = path.join(ws, ".sessions");
+    const recorded: { provider: string; model: string; req: ModelRequest }[] = [];
+
+    let maestroSetupDone = false;
+    let verifierStep = 0;
+
+    const provider = createRoutedProvider(
+      "fake",
+      [{ id: "m1" }],
+      (req) => {
+        const role = requestRole(req);
+        const countTool = (name: string) =>
+          req.messages.filter((m) => m.role === "tool" && m.name === name).length;
+
+        if (role === "maestro") {
+          if (!maestroSetupDone) {
+            if (countTool("ensemble_init") === 0) {
+              return [
+                callTool("i1", "ensemble_init", { title: "Three-Target Verification" }),
+                { type: "finish", reason: "tool_calls" },
+              ];
+            }
+            if (countTool("ensemble_add_member") === 0) {
+              return [
+                callTool("a1", "ensemble_add_member", {
+                  name: "verifier",
+                  charter: {
+                    owns: "verification across Desktop, Mobile, and TUI",
+                    handsOff: "production code edits",
+                    doneWhen:
+                      "Required verification items: (1) Desktop UI renders and passes checks; (2) Mobile web renders and passes checks; (3) TUI starts and renders status block",
+                  },
+                }),
+                { type: "finish", reason: "tool_calls" },
+              ];
+            }
+            maestroSetupDone = true;
+            return [
+              callTool("p1", "ensemble_post", {
+                text: "@verifier verify Desktop, Mobile, and TUI per doneWhen and post verdicts",
+              }),
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return stopText("waiting");
+        }
+
+        if (role === "member:verifier") {
+          if (verifierStep === 0) {
+            verifierStep = 1;
+            return [
+              callTool("v-desktop", "ensemble_post", {
+                text: "PASS [Desktop]: ran desktop layout check; status bar and panel render as expected @maestro",
+              }),
+              callTool("v-mobile", "ensemble_post", {
+                text: "PASS [Mobile]: ran mobile viewport check; side panel opens cleanly @maestro",
+              }),
+              callTool("v-tui", "ensemble_post", {
+                text: "UNVERIFIABLE [TUI]: TUI runtime failed to start in headless terminal; TUI behavior remained unchecked @maestro",
+              }),
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return stopText("verifier done");
+        }
+
+        return stopText("ok");
+      },
+      recorded,
+    );
+
+    const rt = await createRuntime({
+      cwd: ws,
+      workspaceRoot: ws,
+      sessionsDir,
+      providers: [provider],
+      interactive: true,
+      subagent: { background: true },
+    });
+    const session = await rt.createSession({ model: "fake/m1", permissionPreset: "bypass" });
+    openRuntimes.push({ sessions: [session] });
+
+    await session.submit({ text: "verify Desktop, Mobile, and TUI", workMode: "ensemble" });
+    await vi.waitFor(
+      () => {
+        expect(session.isIdle()).toBe(true);
+        expect(verifierStep).toBe(1);
+      },
+      { timeout: 15_000 },
+    );
+
+    // 确认留言板上三个必验项只有两份 PASS 证据和一份 UNVERIFIABLE
+    const view = replaySessionView(session.durableEvents());
+    const ens = must(view.ensemble);
+    const verifierMember = must(ens.members.find((m) => m.name === "verifier"));
+    expect(verifierMember.charter.doneWhen).toContain("Desktop");
+    expect(verifierMember.charter.doneWhen).toContain("Mobile");
+    expect(verifierMember.charter.doneWhen).toContain("TUI");
+
+    const verifierPosts = ens.posts.filter((p) => p.from === "verifier");
+    expect(verifierPosts.filter((p) => p.text.startsWith("PASS "))).toHaveLength(2);
+    expect(verifierPosts.filter((p) => p.text.startsWith("UNVERIFIABLE "))).toHaveLength(1);
+
+    // 断言指挥实际收到的 <work-mode name="ensemble"> 提示词包含必验项逐项汇报与版本核对约束
+    const maestroReq = must(recorded.find((r) => requestRole(r.req) === "maestro")?.req);
+    const maestroUserText = maestroReq.messages
+      .filter((m) => m.role === "user")
+      .flatMap((m) => m.content)
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("\n");
+    expect(maestroUserText).toContain('<work-mode name="ensemble">');
+    expect(maestroUserText).toContain("doneWhen");
+    expect(maestroUserText).toContain("expectedHead");
+    expect(maestroUserText).toContain("ensemble_read");
+    expect(maestroUserText).toContain("item by item");
+    expect(maestroUserText).toContain("board post number");
+    expect(maestroUserText).toContain("unverified (stating the reason)");
+    expect(maestroUserText).toContain("UNVERIFIABLE");
+    expect(maestroUserText).toContain("Never mark an item as passed");
+
+    // 断言验证者实际收到的系统提示词包含三类结论、独立工作树 SHA 与共享工作区规则
+    const verifierReq = must(recorded.find((r) => requestRole(r.req) === "member:verifier")?.req);
+    const verifierSystem = verifierReq.system.map((b) => b.text).join("\n");
+    expect(verifierSystem).toContain("# Verifier Verdict Format");
+    expect(verifierSystem).toContain("`PASS`");
+    expect(verifierSystem).toContain("`REWORK`");
+    expect(verifierSystem).toContain("do not stop at the first one");
+    expect(verifierSystem).toContain("`UNVERIFIABLE`");
+    expect(verifierSystem).toContain("does not count as `PASS`");
+    expect(verifierSystem).toContain("exact checked-out commit SHA");
+    expect(verifierSystem).toContain("do not cite `HEAD` as the verified version");
+  }, 30_000);
 });

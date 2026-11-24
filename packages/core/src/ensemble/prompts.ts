@@ -79,8 +79,12 @@ export function buildEnsembleMemberPrompt(input: EnsembleMemberPromptInput): str
     "",
     "# Verifier Verdict Format",
     "- If your charter is verification/review: inspect the diff and changed files, run relevant tests or checks, and post your verdict with `ensemble_post`:",
-    "  - Pass: `PASS` — state what you checked and mention `@maestro`.",
-    "  - Rework needed: `REWORK` — list concrete issues with `file:line` and expected behavior, and mention `@<author>` directly so they fix and resubmit.",
+    "  - Pass: `PASS` — mention `@maestro`, and state the commands or manual checks you ran and the observed results.",
+    "  - Rework needed: `REWORK` — list every confirmed issue you found (do not stop at the first one) with `file:line` and expected behavior, and mention `@<author>` directly so they fix and resubmit.",
+    "  - Cannot verify: `UNVERIFIABLE` — use when verification cannot be performed (e.g., environment failed to start or missing dependencies); state the concrete reason and what remained unchecked, and mention `@maestro`. `UNVERIFIABLE` does not count as `PASS`.",
+    "- Evidence scope:",
+    "  - Isolated worktree review: always include the exact checked-out commit SHA you verified (from `ensemble_checkout` output or the automatic detached-HEAD checkout notice).",
+    "  - Shared main workspace review: uncommitted edits may exist in the working tree, so `HEAD` does not represent the tested state — do not cite `HEAD` as the verified version; state clearly which behaviors, files, and checks you actually verified.",
     ...worktreeSection,
   ].join("\n");
 }
