@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadConfig } from "../src/config/index.js";
+import { createCredentialStore, loadConfig } from "../src/config/index.js";
 import { fetchGeminiDecisionModels } from "../src/config/reviewer.js";
 import { parseConfigFile } from "../src/config/schema.js";
 import type { DecisionModelConfig } from "../src/config/types.js";
@@ -15,6 +15,11 @@ async function makeTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix));
   tempDirs.push(dir);
   return dir;
+}
+
+/** 测试不碰系统凭据库：macOS CI 没有可用的钥匙串，Linux 也不一定有 libsecret */
+async function memoryCredentials(home: string) {
+  return (await createCredentialStore(createPlatform(), home, { backend: "memory" })).store;
 }
 
 afterEach(async () => {
@@ -162,7 +167,11 @@ describe("decisionModel schema 与配置分层", () => {
       }),
     );
 
-    const config = await loadConfig(createPlatform(), { nocturneHome: home, env: () => undefined });
+    const config = await loadConfig(createPlatform(), {
+      nocturneHome: home,
+      env: () => undefined,
+      credentials: await memoryCredentials(home),
+    });
     const untrusted = await config.forWorkspace(workspace);
     expect(untrusted.resolved.decisionModel).toBeUndefined();
 
@@ -226,7 +235,11 @@ describe("backend: decision、旧 Jev 迁移与环境变量剥离", () => {
       }),
     );
 
-    const config = await loadConfig(createPlatform(), { nocturneHome: home, env: () => undefined });
+    const config = await loadConfig(createPlatform(), {
+      nocturneHome: home,
+      env: () => undefined,
+      credentials: await memoryCredentials(home),
+    });
     await config.setCredential("reviewer", "legacy-stored-secret");
 
     const runtime = await createRuntime({
@@ -272,7 +285,11 @@ describe("backend: decision、旧 Jev 迁移与环境变量剥离", () => {
     const home = await makeTempDir("nocturne-rev-home-");
     const workspace = await makeTempDir("nocturne-rev-ws-");
     const sessionsDir = await makeTempDir("nocturne-rev-sessions-");
-    const config = await loadConfig(createPlatform(), { nocturneHome: home, env: () => undefined });
+    const config = await loadConfig(createPlatform(), {
+      nocturneHome: home,
+      env: () => undefined,
+      credentials: await memoryCredentials(home),
+    });
     const runtime = await createRuntime({
       cwd: workspace,
       sessionsDir,
@@ -408,7 +425,10 @@ describe("backend: decision、旧 Jev 迁移与环境变量剥离", () => {
           ],
         ],
       });
-      const config = await loadConfig(createPlatform(), { nocturneHome: home });
+      const config = await loadConfig(createPlatform(), {
+        nocturneHome: home,
+        credentials: await memoryCredentials(home),
+      });
       const runtime = await createRuntime({
         cwd: workspace,
         sessionsDir,
