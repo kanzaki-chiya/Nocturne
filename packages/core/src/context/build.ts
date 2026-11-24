@@ -8,6 +8,7 @@ import type {
   DurableEvent,
   HistoryEntry,
   ImageAttachment,
+  InstructionsLoadedPayload,
   MemoryContextSnapshot,
   ModelProtocol,
   ProcessedImage,
@@ -18,6 +19,7 @@ import {
   MEMORY_WRITE_GUIDANCE,
   estimateTokens,
   formatHookContextSystem,
+  formatSubdirInstructions,
   parseCompactionPruneLimit,
   parseCompactionThreshold,
   effectiveEvents,
@@ -804,6 +806,7 @@ interface HistoryProjection {
   summaryMessage?: ModelMessage | undefined;
   /** 未被摘要或 L1 修剪覆盖的工具结果元信息（供 protocol 纯函数判定快照是否仍在投影中） */
   visibleTools: ProjectedToolResultRef[];
+  subdirInstructions?: InstructionsLoadedPayload | undefined;
 }
 
 function historyToMessages(
@@ -866,12 +869,26 @@ function historyToMessages(
   // 结算在 pendingMessages 中完成的场景由调用方用返回的 unsettled/deferred 续排
   const unsettled = new Set<string>();
   const deferred: ModelMessage[] = [];
+  let subdirInstructions: InstructionsLoadedPayload | undefined;
   const inject = (m: ModelMessage): void => {
     if (unsettled.size === 0) messages.push(m);
     else deferred.push(m);
   };
 
   for (const entry of history) {
+    if (
+      summaryMessage !== undefined &&
+      latestSummary !== undefined &&
+      entry.seq < latestSummary.seq &&
+      entry.kind === "note" &&
+      entry.instructions !== undefined
+    ) {
+      subdirInstructions ??= { files: [], skipped: [] };
+      for (const file of entry.instructions.files) subdirInstructions.files.push(file);
+      for (const source of entry.instructions.skipped ?? [])
+        subdirInstructions.skipped?.push(source);
+      continue;
+    }
     // 被最新摘要覆盖的历史（含更早的压缩事件）不再进入上下文
     if (entry.seq <= summaryThrough) continue;
     entries += 1;
@@ -997,7 +1014,16 @@ function historyToMessages(
       }
     }
   }
-  return { messages, byChars, entries, unsettled, deferred, summaryMessage, visibleTools };
+  return {
+    messages,
+    byChars,
+    entries,
+    unsettled,
+    deferred,
+    summaryMessage,
+    visibleTools,
+    subdirInstructions,
+  };
 }
 
 /**
@@ -1431,6 +1457,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     unsettled,
     deferred,
     summaryMessage: injectedSummary,
+    subdirInstructions,
     visibleTools,
   } = historyToMessages(
     input.history,
@@ -1530,7 +1557,11 @@ export function buildContext(input: BuildContextInput): BuiltContext {
   const summaryIdx = summaryMessage !== undefined ? messages.indexOf(summaryMessage) : -1;
   let injectAt = summaryIdx >= 0 ? summaryIdx + 1 : 0;
   const injectedMessages = new Set<ModelMessage>();
-  const pushSummaryAttachment = (name: "notes" | "todos", text: string, source: string): void => {
+  const pushSummaryAttachment = (
+    name: "subdirInstructions" | "notes" | "todos",
+    text: string,
+    source: string,
+  ): void => {
     const injected: ModelMessage = { role: "user", content: [{ type: "text", text }] };
     messages.splice(injectAt, 0, injected);
     injectAt += 1;
@@ -1542,6 +1573,21 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       estimatedTokens: estimateTokens(text),
     });
   };
+  if (subdirInstructions !== undefined) {
+    subdirInstructions.files.sort((a, b) =>
+      a.source < b.source ? -1 : a.source > b.source ? 1 : 0,
+    );
+    subdirInstructions.skipped?.sort();
+    const sources = [
+      ...subdirInstructions.files.map((file) => file.source),
+      ...(subdirInstructions.skipped ?? []),
+    ].sort();
+    pushSummaryAttachment(
+      "subdirInstructions",
+      formatSubdirInstructions(subdirInstructions),
+      sources.join(", "),
+    );
+  }
   if (notesAtCompaction !== undefined && notesAtCompaction.length > 0) {
     pushSummaryAttachment(
       "notes",

@@ -84,6 +84,8 @@ export interface TurnDeps {
   /** 会话级执行环境（tools 的类型；Agent 不接触 Platform） */
   execEnv: ExecutionEnvironment;
   instructions: InstructionSet;
+  /** Root of the inherited system instructions when a child has a different workspace. */
+  instructionWorkspaceRoot?: string | undefined;
   environment: EnvironmentInfo;
   config: TurnConfig;
   /** Turn 级中断信号（客户端 interrupt → abort） */

@@ -1099,6 +1099,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
                 executor,
                 execEnv,
                 instructions: deps.instructions,
+                instructionWorkspaceRoot: deps.environment.workspaceRoot,
                 environment: childEnvironment,
                 config: { ...deps.turnConfig, maxSteps: deps.limits.maxStepsPerTurn },
                 signal: childSignal,

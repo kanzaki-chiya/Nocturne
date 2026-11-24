@@ -49,6 +49,7 @@ import { consumeStream, EmptyResponseError, type StreamAccumulation } from "./st
 import type { TurnDeps } from "./types.js";
 import { describeImages } from "./roles.js";
 import { runHookContextSnapshot } from "./hook-context.js";
+import { loadSubdirInstructions } from "./subdir-instructions.js";
 
 function isPersistenceFailure(e: unknown): boolean {
   return e instanceof SessionError && (e.code === "session_failed" || e.code === "session_closed");
@@ -705,7 +706,20 @@ export async function runTurn(
       for (const call of toolCalls) {
         if (aborted(signal)) break;
         status("running_tool");
-        const execution = await deps.executor.execute(call, executionScope());
+        const scope = executionScope();
+        const execution = await deps.executor.execute(call, scope);
+        if (execution.approvedSubjects?.length) {
+          const state = session.state();
+          const loaded = await loadSubdirInstructions({
+            platform: scope.platform,
+            workspaceRoot: scope.workspaceRoot,
+            instructionWorkspaceRoot: deps.instructionWorkspaceRoot ?? state.meta.workspaceRoot,
+            instructions: deps.instructions,
+            history: state.history,
+            subjects: execution.approvedSubjects,
+          });
+          if (loaded !== undefined) await session.emit("instructions.loaded", loaded, { turnId });
+        }
         if (execution.stopTurn) {
           return await finish("aborted");
         }

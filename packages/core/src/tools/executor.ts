@@ -222,6 +222,7 @@ export function createToolExecutor(
       let maxModelChars: number | undefined;
       let maxOutputChars: number | undefined;
       let toolUi: ToolDefinition["ui"];
+      let approvedSubjects: PermissionSubject[] | undefined;
 
       /** 步骤 9：唯一出口——归一化 + 发出恰好一个 tool.completed */
       async function finish(
@@ -321,6 +322,7 @@ export function createToolExecutor(
           status,
           result: { ...budget.result, modelContent },
           stopTurn,
+          ...(status === "ok" && approvedSubjects !== undefined ? { approvedSubjects } : {}),
         };
       }
 
@@ -584,6 +586,8 @@ export function createToolExecutor(
         }
         return finish("denied", errorResult("permission_denied", `权限拒绝：${decision.reason}`));
       }
+
+      approvedSubjects = outcome.subjects;
 
       // 6. tool.started（写入成功后才继续执行；代理调用记录可选 target: { name, input }）
       await scope.events.emit(

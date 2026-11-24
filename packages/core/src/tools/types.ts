@@ -675,6 +675,8 @@ export type ToolExecutionStatus = "ok" | "error" | "denied" | "cancelled";
 export interface ToolExecution {
   status: ToolExecutionStatus;
   result: ToolResult;
+  /** Resolved permission subjects of a successfully completed call. */
+  approvedSubjects?: readonly PermissionSubject[] | undefined;
   /** 用户选择了"拒绝并停止" */
   stopTurn: boolean;
 }

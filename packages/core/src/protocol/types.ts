@@ -1,4 +1,4 @@
-import type { BackgroundShellResult, SubagentResult } from "./events.js";
+import type { BackgroundShellResult, InstructionsLoadedPayload, SubagentResult } from "./events.js";
 import type { SkillSnapshot } from "./skills.js";
 import type { EnsemblePostDelivery } from "./ensemble.js";
 import type { SuiteReportDelivery } from "./suite.js";
@@ -655,6 +655,7 @@ export type HistoryEntry =
       seq: number;
       turnId: string | undefined;
       text: string;
+      instructions?: InstructionsLoadedPayload | undefined;
     };
 
 // ── Hooks（hooks.md）─────────────────────────────────────

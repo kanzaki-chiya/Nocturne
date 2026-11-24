@@ -3,6 +3,7 @@
  * 客户端看到的全部能力都经由这里；进程内与将来的 RPC 客户端共用同一份语义（ADR-0002）。
  */
 import { z } from "zod";
+import { INSTRUCTION_FILE_LIMIT } from "./agent/subdir-instructions.js";
 import {
   BackgroundShells,
   observerOutput,
@@ -435,7 +436,6 @@ export class RuntimeCommandError extends Error {
 const INTERNAL_SESSION = Symbol.for("nocturne.core.internalSession");
 
 /** 指令文件大小上限（context.md 6.2：每项注入内容都有上限） */
-const INSTRUCTION_FILE_LIMIT = 64 * 1024;
 const DEFAULT_PERMISSION_PRESET = "default";
 const delegateSchema = z.object({
   agent: z.string().trim().min(1),

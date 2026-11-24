@@ -14,6 +14,7 @@ export * from "./schema.js";
 export * from "./view.js";
 export * from "./todo.js";
 export * from "./note.js";
+export * from "./instructions.js";
 export * from "./hook-context.js";
 export * from "./hooks.js";
 export * from "./file-refs.js";

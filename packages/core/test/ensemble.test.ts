@@ -3,7 +3,7 @@
  * 全程离线驱动，验证入口准入、指挥工具收窄、成员与模型/档位、留言板与提及唤醒、
  * 工作区与分离头指针审查、并发排队、状态机、权限确认冒泡、安静提醒及重启/回退/分叉持久化。
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -629,6 +629,69 @@ describe("Ensemble 执行方式（ADR-0089）", { timeout: 30_000 }, () => {
     expect(implReqs[0]?.model).toBe("m-worker");
     const switchedReq = must(implReqs.find((r) => r.model === "m-coord"));
     expect(JSON.stringify(switchedReq.req.messages)).toContain("ALPHA-42");
+  });
+
+  it("合奏成员独立加载子目录指令并放在工具结果之后", async () => {
+    const ws = makeTempDir();
+    vi.stubEnv("NOCTURNE_HOME", path.join(ws, "home"));
+    mkdirSync(path.join(ws, "pkg"));
+    writeFileSync(path.join(ws, "pkg", "AGENTS.md"), "ENSEMBLE_SUBDIR");
+    writeFileSync(path.join(ws, "pkg", "x.ts"), "export {};");
+    const recorded: { provider: string; model: string; req: ModelRequest }[] = [];
+    let coordinatorStarted = false;
+    let memberStarted = false;
+    const provider = createRoutedProvider(
+      "fake",
+      [{ id: "m1" }],
+      (request) => {
+        if (requestRole(request) === "maestro") {
+          if (coordinatorStarted) return stopText();
+          coordinatorStarted = true;
+          return [
+            callTool("init", "ensemble_init", { title: "Directory instructions" }),
+            callTool("add", "ensemble_add_member", { name: "worker", charter: VALID_CHARTER }),
+            callTool("post", "ensemble_post", { text: "@worker read pkg/x.ts" }),
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        if (memberStarted) return stopText();
+        memberStarted = true;
+        return [
+          callTool("read", "read", { path: "pkg/x.ts" }),
+          { type: "finish", reason: "tool_calls" },
+        ];
+      },
+      recorded,
+    );
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: path.join(ws, ".sessions"),
+      providers: [provider],
+      interactive: true,
+      subagent: { background: true },
+    });
+    try {
+      const session = await runtime.createSession({ model: "fake/m1", permissionPreset: "bypass" });
+      await session.submit({ text: "start ensemble", workMode: "ensemble" });
+      await vi.waitFor(() => {
+        const member = recorded.filter(({ req }) => requestRole(req) === "member:worker")[1]?.req;
+        expect(member?.messages.slice(-2).map((message) => message.role)).toEqual(["tool", "user"]);
+        expect(member?.messages.at(-1)?.content).toEqual([
+          {
+            type: "text",
+            text: expect.stringContaining(
+              '<instructions source="pkg/AGENTS.md">\nENSEMBLE_SUBDIR\n</instructions>',
+            ),
+          },
+        ]);
+      });
+      expect(session.durableEvents().some((event) => event.type === "instructions.loaded")).toBe(
+        false,
+      );
+    } finally {
+      await runtime.close();
+      vi.unstubAllEnvs();
+    }
   });
 
   it("工具收窄与成员边界：指挥在 Ensemble 期间无改文件工具且结束后恢复；成员无添加成员/task/finish 工具", async () => {

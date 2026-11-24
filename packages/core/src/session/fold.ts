@@ -7,6 +7,7 @@ import {
   appendSessionPageFromFile,
   filterInlinePageFiles,
   formatHookContextEntries,
+  formatSubdirInstructions,
   todoItemsFromCompletion,
   noteItemsFromCompletion,
   effectiveEvents,
@@ -312,6 +313,16 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
         unsettled.delete(p.callId);
         startedInputs.delete(p.callId);
         pinnedResults.delete(p.callId);
+        break;
+      }
+      case "instructions.loaded": {
+        history.push({
+          kind: "note",
+          seq: event.seq,
+          turnId,
+          text: formatSubdirInstructions(event.payload),
+          instructions: event.payload,
+        });
         break;
       }
       case "context.compacted": {

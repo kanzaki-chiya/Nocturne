@@ -7,6 +7,7 @@ import type {
   HistoryEntry,
   HookContextSnapshot,
   ImageAttachment,
+  InstructionFile,
   LoopGuardConfig,
   MemoryContextSnapshot,
   NoteItem,
@@ -15,14 +16,7 @@ import type {
 } from "../protocol/index.js";
 import type { ModelInfo, ModelMessage, ModelRequest } from "../provider/index.js";
 
-/** 一份已加载的指令文件（AGENTS.md 等） */
-export interface InstructionFile {
-  /** 来源路径（用于报告与调试） */
-  source: string;
-  content: string;
-  /** 加载时已按上限截断 */
-  truncated?: boolean | undefined;
-}
+export type { InstructionFile } from "../protocol/index.js";
 
 /** 项目指令集（context.md 第 3 节第 3 项） */
 export interface InstructionSet {
@@ -140,6 +134,7 @@ export interface ContextSection {
     | "skills"
     | "hooks"
     | "environment"
+    | "subdirInstructions"
     | "notes"
     | "todos"
     | "history";

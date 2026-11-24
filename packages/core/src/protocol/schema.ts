@@ -513,6 +513,12 @@ const payloadSchemas = {
       .optional(),
     durationMs: z.number().optional(),
   }),
+  "instructions.loaded": z.object({
+    files: z.array(
+      z.object({ source: z.string(), content: z.string(), truncated: z.boolean().optional() }),
+    ),
+    skipped: z.array(z.string()).optional(),
+  }),
   "context.compacted": z.object({
     kind: z.enum(["prune", "summary"]),
     throughSeq: z.number().int(),
@@ -681,6 +687,7 @@ export const durableEventSchema = z.discriminatedUnion("type", [
   envelope("permission.resolved", payloadSchemas["permission.resolved"]),
   envelope("permission.reviewed", payloadSchemas["permission.reviewed"]),
   envelope("tool.completed", payloadSchemas["tool.completed"]),
+  envelope("instructions.loaded", payloadSchemas["instructions.loaded"]),
   envelope("attachment.described", payloadSchemas["attachment.described"]),
   envelope("context.compacted", payloadSchemas["context.compacted"]),
   envelope("hook.context", payloadSchemas["hook.context"]),

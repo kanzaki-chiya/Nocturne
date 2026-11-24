@@ -469,6 +469,17 @@ export interface HookContextPayload {
   entries: HookContextEntry[];
 }
 
+export interface InstructionFile {
+  source: string;
+  content: string;
+  truncated?: boolean | undefined;
+}
+
+export interface InstructionsLoadedPayload {
+  files: InstructionFile[];
+  skipped?: string[] | undefined;
+}
+
 export interface DurablePayloadMap {
   "shell.task_stopped": BackgroundShellResult & { status: "killed"; source: "user" | "model" };
   "shell.result_discarded": BackgroundShellResult;
@@ -488,6 +499,7 @@ export interface DurablePayloadMap {
   "permission.resolved": PermissionResolvedPayload;
   "permission.reviewed": PermissionReviewedPayload;
   "tool.completed": ToolCompletedPayload;
+  "instructions.loaded": InstructionsLoadedPayload;
   "context.compacted": ContextCompactedPayload;
   "hook.context": HookContextPayload;
   "turn.completed": TurnCompletedPayload;
@@ -611,6 +623,7 @@ export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
   "permission.resolved",
   "permission.reviewed",
   "tool.completed",
+  "instructions.loaded",
   "context.compacted",
   "hook.context",
   "turn.completed",
