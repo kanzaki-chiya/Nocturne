@@ -34,6 +34,18 @@ afterEach(() => {
 });
 
 describe("render_html 工具与内嵌页面标记", () => {
+  it("工具说明要求页面自带配色且不再公布旧主题变量列表（ADR-0088 修订）", () => {
+    const desc = renderHtmlTool.description;
+    expect(desc).not.toContain("Theme CSS variables:");
+    expect(desc).not.toContain("--bg");
+    expect(desc).not.toContain("--raised");
+    expect(desc).toContain("Set the background on body.");
+    expect(desc).toContain(":root");
+    expect(desc).toContain('@media (prefers-color-scheme: dark) { :root:not([data-theme="light"])');
+    expect(desc).toContain(':root[data-theme="dark"]');
+    expect(desc).toContain("color-scheme: dark");
+  });
+
   it("输入校验：缺标题、空标题、多行标题、标题过长、空 HTML、HTML 超限", () => {
     expect(renderHtmlTool.validateInput?.({ title: "", html: "<p>x</p>" })).toContain("title");
     expect(renderHtmlTool.validateInput?.({ title: "   ", html: "<p>x</p>" })).toContain("title");
