@@ -52,6 +52,7 @@ import type {
   FileIndexEntry,
   FileRefResolution,
   LocalFileContent,
+  DecisionModelConfig,
   JevEndpoint,
   JevReviewerConfig,
   ReviewerSampleInfo,
@@ -625,7 +626,12 @@ export interface RpcMethods {
     result: SettingItem[];
   };
   "runtime.updateSettings": {
-    params: { patch: SettingsPatch; reviewerKey?: string; workspaceRoot?: string | undefined };
+    params: {
+      patch: SettingsPatch;
+      reviewerKey?: string;
+      decisionModelKey?: string;
+      workspaceRoot?: string | undefined;
+    };
     result: SettingItem[];
   };
   "runtime.setDefaultModel": {
@@ -711,6 +717,10 @@ export interface RpcMethods {
   "runtime.defaultReviewer": {
     params: { endpoint: JevEndpoint; baseURL?: string; workspaceRoot?: string | undefined };
     result: JevReviewerConfig;
+  };
+  "runtime.listDecisionModels": {
+    params: { decisionModel: DecisionModelConfig; workspaceRoot?: string | undefined };
+    result: { models: string[]; warning?: string };
   };
   "runtime.listReviewerModels": {
     params: { reviewer: JevReviewerConfig; workspaceRoot?: string | undefined };
@@ -1233,6 +1243,7 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "suites.archive": true,
   "suites.open": true,
   "runtime.defaultReviewer": true,
+  "runtime.listDecisionModels": true,
   "runtime.listReviewerModels": true,
   "runtime.listReviewerSamples": true,
   "runtime.testReviewerSample": true,

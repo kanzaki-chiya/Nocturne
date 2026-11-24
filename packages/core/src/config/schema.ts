@@ -384,6 +384,65 @@ const configFileSchema = z.object({
         .optional(),
     })
     .optional(),
+  /** 决策模型（ADR-0117）：Gemini Decisions 或 Jev，拒绝未知字段与内联密钥 */
+  decisionModel: z
+    .discriminatedUnion("source", [
+      z
+        .object({
+          source: z.literal("gemini"),
+          endpoint: z.enum(["ai-studio", "custom"]),
+          baseURL: z.url().optional(),
+          model: z.string().min(1),
+          credential: z.union([
+            z.object({ env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/) }).strict(),
+            z.object({ stored: z.literal(true) }).strict(),
+          ]),
+        })
+        .strict(),
+      z
+        .object({
+          source: z.literal("jev"),
+          endpoint: z.enum(["opencode-zen", "typesafe", "custom"]),
+          baseURL: z.url().optional(),
+          model: z.string().min(1),
+          credential: z.union([
+            z.object({ provider: z.string().min(1) }).strict(),
+            z.object({ env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/) }).strict(),
+            z.object({ stored: z.literal(true) }).strict(),
+          ]),
+        })
+        .strict(),
+    ])
+    .superRefine((cfg, ctx) => {
+      if (cfg.source === "jev" && cfg.endpoint !== "opencode-zen" && "provider" in cfg.credential) {
+        ctx.addIssue({ code: "custom", message: "provider 凭据借用只用于 opencode-zen 接入点" });
+      }
+      if (cfg.endpoint !== "custom" && cfg.baseURL !== undefined) {
+        ctx.addIssue({ code: "custom", message: "baseURL 只用于 custom 接入点" });
+      }
+      if (cfg.endpoint === "custom") {
+        let url: URL | undefined;
+        try {
+          url = new URL(cfg.baseURL ?? "");
+        } catch {
+          /* 校验错误见下 */
+        }
+        if (
+          !url ||
+          !["https:", "http:"].includes(url.protocol) ||
+          url.username ||
+          url.password ||
+          url.search ||
+          url.hash
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            message: "custom 需要不含凭据、查询或片段的 HTTP(S) baseURL",
+          });
+        }
+      }
+    })
+    .optional(),
   /** 子代理档位（ADR-0058）与插件子代理模型（ADR-0105）：按名称逐条校验 */
   subagents: z
     .object({
@@ -407,6 +466,12 @@ const configFileSchema = z.object({
             model: z.object({ provider: z.string().min(1), model: z.string().min(1) }),
           }),
           z.object({ backend: z.literal("off") }),
+          z
+            .object({
+              backend: z.literal("decision"),
+              minConfidence: z.number().min(0).max(1).optional(),
+            })
+            .strict(),
           z
             .object({
               backend: z.literal("jev"),

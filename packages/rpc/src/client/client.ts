@@ -56,6 +56,7 @@ import type {
   CreateSessionOptions,
   FileIndexEntry,
   FileRefResolution,
+  DecisionModelConfig,
   JevEndpoint,
   JevReviewerConfig,
   ReviewerSampleInfo,
@@ -484,7 +485,11 @@ export interface RpcRuntime {
   ): Promise<SettingItem[]>;
   updateSettings(
     patch: SettingsPatch,
-    options?: { reviewerKey?: string; workspaceRoot?: string | undefined },
+    options?: {
+      reviewerKey?: string;
+      decisionModelKey?: string;
+      workspaceRoot?: string | undefined;
+    },
   ): Promise<SettingItem[]>;
   setDefaultModel(
     model: string,
@@ -509,6 +514,10 @@ export interface RpcRuntime {
     baseURL?: string,
     input?: { workspaceRoot?: string | undefined },
   ): Promise<JevReviewerConfig>;
+  listDecisionModels(
+    decisionModel: DecisionModelConfig,
+    input?: { workspaceRoot?: string | undefined },
+  ): Promise<{ models: string[]; warning?: string }>;
   listReviewerModels(
     reviewer: JevReviewerConfig,
     input?: { workspaceRoot?: string | undefined },
@@ -1364,6 +1373,9 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
         ...(updateOptions?.reviewerKey !== undefined
           ? { reviewerKey: updateOptions.reviewerKey }
           : {}),
+        ...(updateOptions?.decisionModelKey !== undefined
+          ? { decisionModelKey: updateOptions.decisionModelKey }
+          : {}),
         ...(updateOptions?.workspaceRoot !== undefined
           ? { workspaceRoot: updateOptions.workspaceRoot }
           : {}),
@@ -1397,6 +1409,11 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
       call("runtime.defaultReviewer", {
         endpoint,
         ...(baseURL !== undefined ? { baseURL } : {}),
+        ...(input?.workspaceRoot !== undefined ? { workspaceRoot: input.workspaceRoot } : {}),
+      }),
+    listDecisionModels: (decisionModel, input) =>
+      call("runtime.listDecisionModels", {
+        decisionModel,
         ...(input?.workspaceRoot !== undefined ? { workspaceRoot: input.workspaceRoot } : {}),
       }),
     listReviewerModels: (reviewer, input) =>

@@ -55,6 +55,7 @@ const reservedFields = new Set([
   "skills",
   "model",
   "modelRoles",
+  "decisionModel",
   "subagents",
   "reasoningEffort",
   "permissions",
@@ -91,6 +92,7 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
     Array.isArray(input) ||
     Object.keys(input).some(
       (key) =>
+        key !== "decisionModel" &&
         key !== "permissions.preset" &&
         key !== "permission.reviewer" &&
         key !== "permission.reviewerRules" &&
@@ -108,7 +110,7 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
     )
   ) {
     throw new TypeError(
-      "仅支持 permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.*、notifications.*、subagents.profiles.*、appearance.themePreset、appearance.customThemes、memory.global 与 memory.project；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 decisionModel、permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.*、notifications.*、subagents.profiles.*、appearance.themePreset、appearance.customThemes、memory.global 与 memory.project；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
@@ -168,6 +170,7 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
           return ref != null ? [[role, ref]] : [];
         }),
       ),
+      ...(patch.decisionModel != null ? { decisionModel: patch.decisionModel } : {}),
       ...(patch["compaction.threshold"] != null || patch["compaction.pruneLimit"] != null
         ? {
             compaction: {
@@ -233,6 +236,7 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
   for (const key of [
     "model",
     "modelRoles",
+    "decisionModel",
     "subagents",
     "reasoningEffort",
     "shell",
@@ -702,6 +706,11 @@ export async function loadSettingsStore(
             if (toolSearch === null) delete mcp.toolSearch;
             else mcp.toolSearch = toolSearch;
             next.mcp = mcp;
+          }
+          const decisionModel = patch.decisionModel;
+          if (decisionModel !== undefined) {
+            if (decisionModel === null) delete next.decisionModel;
+            else next.decisionModel = decisionModel;
           }
           const reviewer = patch["permission.reviewer"];
           if (reviewer !== undefined) {

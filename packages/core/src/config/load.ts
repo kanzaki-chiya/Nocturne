@@ -67,7 +67,12 @@ import {
 } from "./setup.js";
 import { loadSettingsStore } from "./settings.js";
 import { loadAppPermissions } from "./app-permissions.js";
-import { reviewerRulesText, reviewerText } from "./reviewer.js";
+import {
+  decisionModelText,
+  resolveEffectiveDecisionModel,
+  reviewerRulesText,
+  reviewerText,
+} from "./reviewer.js";
 import { readTrustList } from "./trust.js";
 import type {
   SettingsPatch,
@@ -402,10 +407,35 @@ export async function loadConfig(
           saved.modelRoles?.smol,
         ],
         [
+          "decisionModel",
+          merged.resolved.decisionModel === undefined &&
+          merged.resolved.permissionReviewer?.backend === "jev"
+            ? "permission.reviewer"
+            : "decisionModel",
+          decisionModelText(
+            resolveEffectiveDecisionModel(
+              merged.resolved.decisionModel,
+              merged.resolved.permissionReviewer,
+            ),
+          ),
+          saved.decisionModel ? decisionModelText(saved.decisionModel) : undefined,
+        ],
+        [
           "permission.reviewer",
           "permission.reviewer",
-          reviewerText(merged.resolved.permissionReviewer),
-          saved.permission?.reviewer ? reviewerText(saved.permission.reviewer) : undefined,
+          reviewerText(
+            merged.resolved.permissionReviewer,
+            resolveEffectiveDecisionModel(
+              merged.resolved.decisionModel,
+              merged.resolved.permissionReviewer,
+            ),
+          ),
+          saved.permission?.reviewer
+            ? reviewerText(
+                saved.permission.reviewer,
+                resolveEffectiveDecisionModel(saved.decisionModel, saved.permission.reviewer),
+              )
+            : undefined,
         ],
         [
           "permission.reviewerRules",
@@ -543,6 +573,17 @@ export async function loadConfig(
           : origin;
       return {
         key,
+        ...(key === "decisionModel"
+          ? {
+              decisionModel: {
+                effective: resolveEffectiveDecisionModel(
+                  merged.resolved.decisionModel,
+                  merged.resolved.permissionReviewer,
+                ),
+                saved: saved.decisionModel,
+              },
+            }
+          : {}),
         ...(key === "permission.reviewer"
           ? {
               reviewer: {

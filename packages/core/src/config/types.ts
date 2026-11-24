@@ -201,7 +201,29 @@ export interface TurnOverrides {
 }
 
 export type JevEndpoint = "opencode-zen" | "typesafe" | "custom";
+export type GeminiDecisionEndpoint = "ai-studio" | "custom";
 export type ReviewerCredential = { provider: string } | { env: string } | { stored: true };
+export type GeminiDecisionCredential = { env: string } | { stored: true };
+export interface GeminiDecisionModelConfig {
+  source: "gemini";
+  endpoint: GeminiDecisionEndpoint;
+  baseURL?: string | undefined;
+  model: string;
+  credential: GeminiDecisionCredential;
+}
+export interface JevDecisionModelConfig {
+  source: "jev";
+  endpoint: JevEndpoint;
+  baseURL?: string | undefined;
+  model: string;
+  credential: ReviewerCredential;
+}
+export type DecisionModelConfig = GeminiDecisionModelConfig | JevDecisionModelConfig;
+
+export interface DecisionReviewerConfig {
+  backend: "decision";
+  minConfidence?: number | undefined;
+}
 export interface JevReviewerConfig {
   backend: "jev";
   endpoint: JevEndpoint;
@@ -211,7 +233,10 @@ export interface JevReviewerConfig {
   minConfidence?: number | undefined;
 }
 export type SecurityReviewerConfig =
-  { backend: "model"; model: ModelRef } | { backend: "off" } | JevReviewerConfig;
+  | { backend: "model"; model: ModelRef }
+  | { backend: "off" }
+  | DecisionReviewerConfig
+  | JevReviewerConfig;
 
 /** 用户追加的审查规则（ADR-0057）：两段自然语言原样拼进审查提示词，单段最多 1000 字 */
 export interface ReviewerRulesConfig {
@@ -262,6 +287,8 @@ export interface ConfigFile {
   modelsDev?: false | undefined;
   model?: string | undefined;
   modelRoles?: Partial<Record<ModelRole, string | undefined>> | undefined;
+  /** 决策模型（ADR-0117）：Gemini Decisions 或 Jev；不可信项目忽略 */
+  decisionModel?: DecisionModelConfig | undefined;
   /** 会话默认思考档位（ADR-0018 第 4 节）：七档中性值之一 */
   reasoningEffort?: ReasoningEffort | undefined;
   /**
@@ -300,6 +327,8 @@ export interface ConfigFile {
 /** 一层合并后的结果（config.md 第 1 节） */
 export interface ResolvedConfig {
   modelRoles?: Partial<Record<ModelRole, string | undefined>> | undefined;
+  /** 决策模型（ADR-0117）：高层覆盖低层；不可信项目忽略 */
+  decisionModel?: DecisionModelConfig | undefined;
   /** 自定义档位合并结果（不含 `default`——default 的模型即 modelRoles.task） */
   subagentProfiles?: Record<string, SubagentProfileConfig> | undefined;
   /** 插件子代理模型选择（ADR-0105）：按 `<plugin>:<agent>` 逐条合并 */
@@ -588,6 +617,11 @@ export type ModelSettingsPatch = {
 export interface SettingItem {
   /** 模型设置值的停用来源，由 Runtime 经注册表解析派生。 */
   disabled?: "provider" | "model" | undefined;
+  /** decisionModel 行：生效值与 settings.json 已保存值（ADR-0117） */
+  decisionModel?: {
+    effective: DecisionModelConfig | undefined;
+    saved: DecisionModelConfig | undefined;
+  };
   reviewer?: {
     effective: SecurityReviewerConfig | undefined;
     saved: SecurityReviewerConfig | undefined;
@@ -598,6 +632,7 @@ export interface SettingItem {
     saved: ReviewerRulesConfig | undefined;
   };
   key:
+    | "decisionModel"
     | "permission.reviewer"
     | "permission.reviewerRules"
     | "permissions.preset"
@@ -631,6 +666,7 @@ export interface SettingItem {
 
 /** 默认档位随默认模型经 setDefaultModel 成对保存，不在此单独修改（ADR-0034 修订） */
 export type SettingsPatch = Partial<{
+  decisionModel: DecisionModelConfig | null;
   "modelRoles.task": string | null;
   "modelRoles.vision": string | null;
   "modelRoles.smol": string | null;

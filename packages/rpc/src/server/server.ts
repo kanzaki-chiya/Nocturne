@@ -33,6 +33,7 @@ import {
   type ContentBlock,
   type CreateSessionOptions,
   type CreateSuiteInput,
+  type DecisionModelConfig,
   type JevEndpoint,
   type JevReviewerConfig,
   type LoginResult,
@@ -121,7 +122,10 @@ export type { RpcRuntimeHandle } from "./hub.js";
  */
 export const SENSITIVE_METHODS: Partial<Record<RpcMethodName, (p: Params) => string[]>> = {
   "remote.register": (p) => (typeof p.invite === "string" ? [p.invite] : []),
-  "runtime.updateSettings": (p) => (typeof p.reviewerKey === "string" ? [p.reviewerKey] : []),
+  "runtime.updateSettings": (p) => [
+    ...(typeof p.reviewerKey === "string" ? [p.reviewerKey] : []),
+    ...(typeof p.decisionModelKey === "string" ? [p.decisionModelKey] : []),
+  ],
   "provider.prepareProvider": (p) => {
     const credential = p.credential;
     if (typeof credential !== "object" || credential === null) return [];
@@ -1884,12 +1888,14 @@ class Connection implements HubPeer {
       },
       "runtime.updateSettings": async (p) => {
         const reviewerKey = optString(p, "reviewerKey");
+        const decisionModelKey = optString(p, "decisionModelKey");
         const workspaceRoot = await this.workspaceOf(p);
         const result = await this.runtime().updateSettings(
           reqObject(p, "patch") as SettingsPatch,
-          reviewerKey !== undefined || workspaceRoot !== undefined
+          reviewerKey !== undefined || decisionModelKey !== undefined || workspaceRoot !== undefined
             ? {
                 ...(reviewerKey !== undefined ? { reviewerKey } : {}),
+                ...(decisionModelKey !== undefined ? { decisionModelKey } : {}),
                 ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
               }
             : undefined,
@@ -2209,6 +2215,14 @@ class Connection implements HubPeer {
         const workspaceRoot = await this.workspaceOf(p);
         return this.runtime().testReviewerSample(
           reqString(p, "sampleId"),
+          this.abort.signal,
+          workspaceRoot !== undefined ? { workspaceRoot } : undefined,
+        );
+      },
+      "runtime.listDecisionModels": async (p) => {
+        const workspaceRoot = await this.workspaceOf(p);
+        return this.runtime().listDecisionModels(
+          reqObject(p, "decisionModel") as unknown as DecisionModelConfig,
           this.abort.signal,
           workspaceRoot !== undefined ? { workspaceRoot } : undefined,
         );

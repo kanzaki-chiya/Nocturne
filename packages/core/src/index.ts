@@ -60,6 +60,7 @@ import type {
   SettingItem,
   SettingsPatch,
   ToggleImpact,
+  DecisionModelConfig,
   JevEndpoint,
   JevReviewerConfig,
   ModelRole,
@@ -105,9 +106,13 @@ import {
   skillCatalog,
 } from "./skills/index.js";
 import {
-  defaultJevReviewer,
-  fetchJevModels,
+  GEMINI_DECISION_ENDPOINTS,
   JEV_ENDPOINTS,
+  decisionModelFromJevReviewer,
+  defaultJevReviewer,
+  fetchGeminiDecisionModels,
+  fetchJevModels,
+  resolveGeminiDecisionConnection,
   resolveJevConnection,
 } from "./config/reviewer.js";
 // ADR-0035 §5：编辑工具的模型默认表（config 层纯数据）注入 provider 解析
@@ -158,6 +163,7 @@ import {
   createRulePolicy,
   createModelSecurityReviewer,
   createJevSecurityReviewer,
+  createGeminiDecisionReviewer,
   createReviewFacts,
   projectNotesFrom,
   readTrustedRemotes,
@@ -988,7 +994,11 @@ export interface Runtime {
   ): Promise<SettingItem[]>;
   updateSettings(
     patch: SettingsPatch,
-    options?: { reviewerKey?: string; workspaceRoot?: string | undefined },
+    options?: {
+      reviewerKey?: string;
+      decisionModelKey?: string;
+      workspaceRoot?: string | undefined;
+    },
   ): Promise<SettingItem[]>;
   listReviewerProviders(input?: {
     workspaceRoot?: string | undefined;
@@ -998,6 +1008,11 @@ export interface Runtime {
     baseURL?: string,
     input?: { workspaceRoot?: string | undefined },
   ): Promise<JevReviewerConfig>;
+  listDecisionModels(
+    decisionModel: DecisionModelConfig,
+    signal?: AbortSignal,
+    input?: { workspaceRoot?: string | undefined },
+  ): Promise<{ models: string[]; warning?: string }>;
   listReviewerModels(
     reviewer: JevReviewerConfig,
     signal?: AbortSignal,
@@ -1294,6 +1309,41 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return entryAuth(entry).token(new AbortController().signal);
       },
     };
+  };
+  const buildDecisionReviewer = (
+    decisionModel: DecisionModelConfig | undefined,
+    minConfidence: number,
+    providers: readonly ProviderEntryConfig[],
+    sessionId: string,
+  ): SecurityReviewer => {
+    if (decisionModel === undefined) {
+      return {
+        backend: "decision",
+        async review() {
+          return { verdict: "unsure", reason: "决策模型未设置" };
+        },
+      };
+    }
+    if (decisionModel.source === "gemini") {
+      return createGeminiDecisionReviewer(
+        resolveGeminiDecisionConnection(
+          decisionModel,
+          reviewerCredentials(providers),
+          (name) => platform.env(name),
+          minConfidence,
+        ),
+      );
+    }
+    return createJevSecurityReviewer({
+      ...resolveJevConnection(
+        { ...decisionModel, minConfidence },
+        providers,
+        reviewerCredentials(providers),
+        (name) => platform.env(name),
+        "decision-model",
+      ),
+      sessionId,
+    });
   };
   function entryAuth(entry: Pick<ProviderEntryConfig, "id" | "auth" | "apiKeyEnv">) {
     if (config === undefined) {
@@ -2164,23 +2214,26 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     let reviewerKey: string | undefined;
     const getReviewer = (): SecurityReviewer | undefined => {
       if (options.permissions?.reviewer !== undefined) return options.permissions.reviewer;
-      const selected =
-        config === undefined
-          ? resolved?.permissionReviewer
-          : config.resolvedSettings(meta.workspaceRoot).permissionReviewer;
+      const wsSettings =
+        config === undefined ? resolved : config.resolvedSettings(meta.workspaceRoot);
+      const selected = wsSettings?.permissionReviewer;
       if (!selected || selected.backend === "off") return undefined;
-      const key = JSON.stringify(selected);
+      const decisionModel = selected.backend === "decision" ? wsSettings?.decisionModel : undefined;
+      const key = JSON.stringify([selected, decisionModel]);
       if (key !== reviewerKey) {
         reviewerKey = key;
-        if (selected.backend === "jev") {
+        const providers = wsSettings?.providers ?? resolved?.providers ?? [];
+        if (selected.backend === "decision") {
+          modelReviewer = buildDecisionReviewer(
+            decisionModel,
+            selected.minConfidence ?? 0.7,
+            providers,
+            session.id,
+          );
+        } else if (selected.backend === "jev") {
           modelReviewer = createJevSecurityReviewer({
-            ...resolveJevConnection(
-              selected,
-              config?.resolvedSettings(meta.workspaceRoot).providers ?? resolved?.providers ?? [],
-              reviewerCredentials(
-                config?.resolvedSettings(meta.workspaceRoot).providers ?? resolved?.providers ?? [],
-              ),
-              (name) => platform.env(name),
+            ...resolveJevConnection(selected, providers, reviewerCredentials(providers), (name) =>
+              platform.env(name),
             ),
             sessionId: session.id,
           });
@@ -2879,13 +2932,19 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         // 桌面浏览器启动凭证：后台入口读出即删，shell / 外部进程再拿不到
         "NOCTURNE_DESKTOP_BROWSER_BOOTSTRAP",
         ...Object.values(JEV_ENDPOINTS).map((entry) => entry.env),
+        ...Object.values(GEMINI_DECISION_ENDPOINTS).map((entry) => entry.env),
         ...(() => {
-          const reviewer =
-            config?.resolvedSettings(meta.workspaceRoot).permissionReviewer ??
-            resolved?.permissionReviewer;
-          return reviewer?.backend === "jev" && "env" in reviewer.credential
-            ? [reviewer.credential.env]
-            : [];
+          const current = config?.resolvedSettings(meta.workspaceRoot);
+          const reviewer = current?.permissionReviewer ?? resolved?.permissionReviewer;
+          const decisionModel = current?.decisionModel ?? resolved?.decisionModel;
+          const envs: string[] = [];
+          if (reviewer?.backend === "jev" && "env" in reviewer.credential) {
+            envs.push(reviewer.credential.env);
+          }
+          if (decisionModel !== undefined && "env" in decisionModel.credential) {
+            envs.push(decisionModel.credential.env);
+          }
+          return envs;
         })(),
         ...providers
           .map((p) => p.apiKeyEnv)
@@ -7661,6 +7720,35 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         baseURL,
       );
     },
+    async listDecisionModels(decisionModel, signal, input) {
+      validateSettingsPatch({ decisionModel });
+      const providers = config
+        ? (await config.forWorkspace(input?.workspaceRoot ?? workspaceRoot)).resolved.providers
+        : (options.providerConfigs ?? []);
+      if (decisionModel.source === "gemini") {
+        return fetchGeminiDecisionModels(
+          resolveGeminiDecisionConnection(decisionModel, reviewerCredentials(providers), (name) =>
+            platform.env(name),
+          ),
+          GEMINI_DECISION_ENDPOINTS[decisionModel.endpoint].model,
+          signal,
+          GEMINI_DECISION_ENDPOINTS[decisionModel.endpoint].modelFilter,
+        );
+      }
+      return fetchJevModels(
+        resolveJevConnection(
+          decisionModel,
+          providers,
+          reviewerCredentials(providers),
+          (name) => platform.env(name),
+          "decision-model",
+          "reviewer",
+        ),
+        JEV_ENDPOINTS[decisionModel.endpoint].model,
+        signal,
+        JEV_ENDPOINTS[decisionModel.endpoint].modelFilter,
+      );
+    },
     async listReviewerModels(reviewer, signal, input) {
       validateSettingsPatch({ "permission.reviewer": reviewer });
       const providers = config
@@ -7689,7 +7777,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (selected === undefined || selected.backend === "off")
         throw new RuntimeCommandError("invalid_command", "安全审查未配置或已关闭");
       let reviewer: SecurityReviewer;
-      if (selected.backend === "jev") {
+      if (selected.backend === "decision") {
+        if (settings.decisionModel === undefined)
+          throw new RuntimeCommandError("invalid_model", "决策模型未设置");
+        reviewer = buildDecisionReviewer(
+          settings.decisionModel,
+          selected.minConfidence ?? 0.7,
+          settings.providers,
+          "reviewer-samples",
+        );
+      } else if (selected.backend === "jev") {
         reviewer = createJevSecurityReviewer({
           ...resolveJevConnection(
             selected,
@@ -7747,12 +7844,52 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           if (ref != null && resolveModelRole(roleRegistry, ref, role) === undefined)
             throw new RuntimeCommandError("invalid_model", `模型角色 ${role} 的模型 ${ref} 不可用`);
         }
-        const previousKey =
+        const currentItems = config.describeSettings(root);
+        const savedReviewer = currentItems.find((item) => item.key === "permission.reviewer")
+          ?.reviewer?.saved;
+        const savedDecisionModel = currentItems.find((item) => item.key === "decisionModel")
+          ?.decisionModel?.saved;
+        const effectivePatch: SettingsPatch = { ...patch };
+        let migrateStoredKey = false;
+        let deleteLegacyReviewerKey = false;
+        if (savedReviewer?.backend === "jev") {
+          if (
+            patch["permission.reviewer"] !== undefined &&
+            savedDecisionModel === undefined &&
+            patch.decisionModel === undefined
+          ) {
+            effectivePatch.decisionModel = decisionModelFromJevReviewer(savedReviewer);
+            if ("stored" in savedReviewer.credential) {
+              migrateStoredKey = settingsOptions?.decisionModelKey === undefined;
+              deleteLegacyReviewerKey = true;
+            }
+          }
+          if (patch.decisionModel !== undefined && patch["permission.reviewer"] === undefined) {
+            effectivePatch["permission.reviewer"] = {
+              backend: "decision",
+              ...(savedReviewer.minConfidence !== undefined
+                ? { minConfidence: savedReviewer.minConfidence }
+                : {}),
+            };
+            if ("stored" in savedReviewer.credential) {
+              if (
+                patch.decisionModel !== null &&
+                "stored" in patch.decisionModel.credential &&
+                settingsOptions?.decisionModelKey === undefined
+              ) {
+                migrateStoredKey = true;
+              }
+              deleteLegacyReviewerKey = true;
+            }
+          }
+        }
+        if (effectivePatch !== patch) validateSettingsPatch(effectivePatch);
+        const previousReviewerKey =
           settingsOptions?.reviewerKey !== undefined
             ? await config.credentials.get("reviewer")
             : undefined;
         if (settingsOptions?.reviewerKey !== undefined) {
-          const reviewer = patch["permission.reviewer"];
+          const reviewer = effectivePatch["permission.reviewer"];
           if (
             reviewer?.backend !== "jev" ||
             !("stored" in reviewer.credential) ||
@@ -7761,14 +7898,52 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             throw new Error("单独密钥只用于凭据库存储的 Jev 审查器");
           await config.setCredential("reviewer", settingsOptions.reviewerKey);
         }
+        const needDecisionKeyWrite =
+          settingsOptions?.decisionModelKey !== undefined || migrateStoredKey;
+        const previousDecisionKey = needDecisionKeyWrite
+          ? await config.credentials.get("decision-model")
+          : undefined;
+        let wroteDecisionKey = false;
+        if (settingsOptions?.decisionModelKey !== undefined) {
+          const dm = effectivePatch.decisionModel;
+          if (
+            dm == null ||
+            !("stored" in dm.credential) ||
+            settingsOptions.decisionModelKey.trim() === ""
+          ) {
+            if (settingsOptions.reviewerKey !== undefined) {
+              if (previousReviewerKey !== undefined)
+                await config.setCredential("reviewer", previousReviewerKey);
+              else await config.credentials.delete("reviewer");
+            }
+            throw new Error("单独密钥只用于凭据库存储的决策模型");
+          }
+          await config.setCredential("decision-model", settingsOptions.decisionModelKey);
+          wroteDecisionKey = true;
+        } else if (migrateStoredKey && previousDecisionKey === undefined) {
+          const legacyKey = await config.credentials.get("reviewer");
+          if (legacyKey !== undefined) {
+            await config.setCredential("decision-model", legacyKey);
+            wroteDecisionKey = true;
+          }
+        }
         try {
-          await config.updateSettings(patch);
+          await config.updateSettings(effectivePatch);
         } catch (error) {
           if (settingsOptions?.reviewerKey !== undefined) {
-            if (previousKey !== undefined) await config.setCredential("reviewer", previousKey);
+            if (previousReviewerKey !== undefined)
+              await config.setCredential("reviewer", previousReviewerKey);
             else await config.credentials.delete("reviewer");
           }
+          if (wroteDecisionKey) {
+            if (previousDecisionKey !== undefined)
+              await config.setCredential("decision-model", previousDecisionKey);
+            else await config.credentials.delete("decision-model");
+          }
           throw error;
+        }
+        if (deleteLegacyReviewerKey && effectivePatch["permission.reviewer"]?.backend !== "jev") {
+          await config.credentials.delete("reviewer").catch(() => undefined);
         }
         await broadcast("providers", (hooks) => {
           hooks.markProvidersDirty();

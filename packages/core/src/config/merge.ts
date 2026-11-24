@@ -84,6 +84,7 @@ export interface MergeResult {
       | "compaction.threshold"
       | "compaction.pruneLimit"
       | "mcp.toolSearch"
+      | "decisionModel"
       | "permission.reviewer"
       | "permission.reviewerRules"
       | `modelRoles.${ModelRole}`
@@ -390,6 +391,10 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
         out.modelRoles = { ...out.modelRoles, [role]: ref };
         origins[`modelRoles.${role}`] = kind;
       }
+    }
+    if (file.decisionModel !== undefined) {
+      out.decisionModel = file.decisionModel;
+      origins.decisionModel = kind;
     }
     // 档位按名逐条合并：同名高层整条替换，不同名并存（ADR-0058，与 modelRoles 同规则）
     for (const [name, profile] of Object.entries(file.subagents?.profiles ?? {})) {

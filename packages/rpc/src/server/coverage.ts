@@ -42,6 +42,7 @@ export const RUNTIME_METHODS: Record<
   updateSettings: "runtime.updateSettings",
   listReviewerProviders: "runtime.listReviewerProviders",
   defaultReviewer: "runtime.defaultReviewer",
+  listDecisionModels: "runtime.listDecisionModels",
   listReviewerModels: "runtime.listReviewerModels",
   listReviewerSamples: "runtime.listReviewerSamples",
   testReviewerSample: "runtime.testReviewerSample",
