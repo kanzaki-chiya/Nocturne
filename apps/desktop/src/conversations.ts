@@ -22,6 +22,7 @@ import {
 } from "@nocturne/rpc/client";
 
 import type { ComposerSubmit } from "./Composer";
+import { validateDraftAttachments } from "./draft-attachments";
 import {
   acceptOutgoing,
   bindPending,
@@ -937,8 +938,8 @@ export class Conversations {
    * 重发/编辑重发（U-01）：先 rewind 回退到目标用户消息之前，再走普通 send
    * （接受/busy/历史记录逻辑一致）。rewind 拒绝时抛出——编辑框据此保留草稿；
    * rewind 成功后 submit 被拒同样抛出，但会话视图已被回退截断。
-   * 附件、@文件 快照与技能/委派快照不复用：重发只带消息文本；用户提交的执行方式
-   * 保留（ADR-0076 §1），重发时照常走模式起始流程。
+   * 图片等附件经调用方传入并转发给 send；@文件 快照与技能/委派快照不复用；
+   * 用户提交的执行方式保留（ADR-0076 §1），重发时照常走模式起始流程。
    */
   async resubmit(
     targetSeq: number,
@@ -946,13 +947,17 @@ export class Conversations {
     mode: RewindMode,
     workMode?: WorkModeName,
     quotes?: MessageQuote[],
+    attachments?: ComposerSubmit["attachments"],
   ): Promise<void> {
     const entry = this.selected;
     if (entry === undefined) throw new Error("请先打开会话");
+    const list = attachments ?? [];
+    const invalid = validateDraftAttachments(list);
+    if (invalid !== undefined) throw new Error(invalid);
     await this.rewindEntry(entry, targetSeq, mode);
     await this.send({
       text,
-      attachments: [],
+      attachments: list,
       ...(workMode ? { workMode } : {}),
       ...(quotes?.length ? { quotes } : {}),
     });

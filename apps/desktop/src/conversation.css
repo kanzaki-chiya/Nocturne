@@ -113,18 +113,38 @@
   opacity: 0.5;
   cursor: default;
 }
-/* 原位编辑框：与气泡同宽对齐；编辑中其后的旧回复变暗（发送成功才被移除） */
+/* 原位编辑框：占满对话栏宽度（--w-thread 内）；编辑中其后的旧回复变暗（发送成功才被移除） */
 .conversation .u.editing ~ * {
   opacity: 0.35;
 }
+.conversation .u.editing > .u-body {
+  width: 100%;
+  max-width: 100%;
+  align-items: stretch;
+}
 .conversation .u-edit {
   align-self: stretch;
-  background: var(--a-side);
+  background: var(--a-panel);
   border: 1px solid var(--a-border);
-  border-radius: var(--radius-3);
-  padding: 8px;
+  border-radius: var(--radius-composer);
+  padding: var(--space-3);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.conversation .u-edit:focus-within {
+  border-color: var(--a-border-strong);
+}
+.conversation .u-edit.drop {
+  border-color: var(--a-accent);
+  box-shadow: var(--shadow-focus);
+  background: var(--a-sel);
+}
+.conversation .u-edit .atts {
+  margin-bottom: var(--space-2);
 }
 .conversation .u-edit textarea {
+  display: block;
   width: 100%;
   box-sizing: border-box;
   resize: none;
@@ -135,7 +155,14 @@
   background: var(--a-input);
   border: 1px solid var(--a-border);
   border-radius: var(--radius-2);
-  padding: 6px 8px;
+  padding: var(--space-2) var(--space-3);
+  min-height: calc(4 * 1em * var(--lh-base) + var(--space-4) + 2px);
+  max-height: calc(12 * 1em * var(--lh-base) + var(--space-4) + 2px);
+  overflow-y: hidden;
+}
+.conversation .u-edit textarea:focus {
+  outline: none;
+  border-color: var(--a-border-strong);
 }
 .conversation .u-edit-info {
   margin: 6px 0 0;
@@ -156,9 +183,16 @@
 }
 .conversation .u-edit-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
-  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.conversation .u-edit-attach {
+  margin-right: auto;
+  color: var(--a-secondary);
+}
+.conversation .u-edit-attach:hover:not(:disabled) {
+  color: var(--a-text);
 }
 .conversation .u-text {
   white-space: pre-wrap;

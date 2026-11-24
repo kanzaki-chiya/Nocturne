@@ -1661,8 +1661,9 @@ export function App({ host }: { host: DesktopHost }) {
     mode: RewindMode,
     workMode?: WorkModeName,
     quotes?: MessageQuote[],
+    attachments?: ComposerSubmit["attachments"],
   ): Promise<void> => {
-    await conversations.resubmit(targetSeq, text, mode, workMode, quotes);
+    await conversations.resubmit(targetSeq, text, mode, workMode, quotes, attachments);
     selectedIdRef.current = conversations.selectedId;
     setSelectedId(conversations.selectedId);
     await refresh();
@@ -3272,6 +3273,7 @@ interface SessionPaneProps {
     mode: RewindMode,
     workMode?: WorkModeName,
     quotes?: MessageQuote[],
+    attachments?: ComposerSubmit["attachments"],
   ) => Promise<void>;
   onFork: (targetSeq: number) => Promise<void>;
   /** 分叉后填进输入框的原消息，或拒收后放回的草稿（Composer 首次挂载时取用） */
@@ -3507,6 +3509,7 @@ function SessionPane({
         enableFind
         enableTurnNav
         onResubmit={onResubmit}
+        pickImages={pickImages}
         onQuote={onQuote}
         onFork={view.suite !== undefined ? undefined : onFork}
         onApprovePlan={onApprovePlan}

@@ -9,10 +9,26 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
+  type DragEvent as ReactDragEvent,
   type ReactNode,
 } from "react";
 import { marked, type Token, type Tokens } from "marked";
 import { Badge, Button, Checkbox, ICON_MD, ICON_SM, Icon, IconButton } from "./ui";
+import { DraftAttachments } from "./DraftAttachments";
+import {
+  createDraftAttachments,
+  loadStoredImageAttachments,
+  readClipboardAttachments,
+  readDroppedAttachments,
+  readFileListAttachments,
+  revokeDraftAttachments,
+  toSubmitAttachments,
+  type DraftAttachment,
+  type NewAttachmentFile,
+  type SubmitAttachment,
+} from "./draft-attachments";
+import type { PickedImage } from "./picked-images";
 import {
   ImageViewerBoundary,
   triggerBytesDownload,
@@ -262,7 +278,7 @@ export interface ConversationProps {
   busy: boolean;
   /**
    * 重发一条用户消息：先 rewind(targetSeq, mode) 再 submit（Conversations.resubmit）。
-   * 用户提交的执行方式消息带 workMode 重发（ADR-0076 §1）。
+   * 用户提交的执行方式消息带 workMode 重发（ADR-0076 §1）；附件随重发带上。
    */
   onResubmit?:
     | ((
@@ -271,8 +287,11 @@ export interface ConversationProps {
         mode: RewindMode,
         workMode?: WorkModeName,
         quotes?: MessageQuote[],
+        attachments?: SubmitAttachment[],
       ) => Promise<void>)
     | undefined;
+  /** 编辑重发时的附件选择入口（桌面由外壳提供；缺省时使用浏览器文件选择） */
+  pickImages?: (() => Promise<PickedImage[]>) | undefined;
   /** 选中消息文字点「回复」时回调（ADR-0116；仅桌面端主会话传入） */
   onQuote?: ((quote: MessageQuote) => void) | undefined;
   /** 批准当前计划（ADR-0076 §5、§7）：在计划模式且空闲时显示在最后一条助手消息下方 */
@@ -382,6 +401,7 @@ export type ReadOnlyConversationProps = Omit<
   ConversationProps,
   | "session"
   | "onResubmit"
+  | "pickImages"
   | "onQuote"
   | "onApprovePlan"
   | "onFork"
@@ -1636,6 +1656,7 @@ function UserMessage({
   busy,
   repliesAfter,
   onResubmit,
+  pickImages,
   onFork,
   scheduleSource,
   fileLinks,
@@ -1655,6 +1676,7 @@ function UserMessage({
   /** 这条消息之后将被撤回的回复轮数（助手 turn 数） */
   repliesAfter: number;
   onResubmit: ConversationProps["onResubmit"];
+  pickImages?: ConversationProps["pickImages"];
   onFork?: ConversationProps["onFork"];
   scheduleSource?: ConversationProps["scheduleSource"];
   quoteFlash?: boolean;
@@ -1664,9 +1686,16 @@ function UserMessage({
   quotable?: boolean;
 }) {
   const bubble = useRef<HTMLDivElement>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
+  const editPasteNumber = useRef(1);
   const [visible, setVisible] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [editAttachments, setEditAttachments] = useState<DraftAttachment[]>([]);
+  const editAttachmentsRef = useRef<DraftAttachment[]>([]);
+  editAttachmentsRef.current = editAttachments;
+  const [dragOver, setDragOver] = useState(false);
   const [mode, setMode] = useState<"both" | "conversation">("both");
   const [target, setTarget] = useState<RewindTarget | undefined>();
   const [pending, setPending] = useState(false);
@@ -1677,6 +1706,71 @@ function UserMessage({
   const skills = useContext(MessageSkillsContext);
   const saveFile = useSaveFile();
   const { copy, copied } = useCopyText(setError);
+  useEffect(
+    () => () => {
+      revokeDraftAttachments(editAttachmentsRef.current);
+    },
+    [],
+  );
+  const replaceEditAttachments = useCallback((files: readonly NewAttachmentFile[]) => {
+    setEditAttachments((current) => {
+      revokeDraftAttachments(current);
+      return createDraftAttachments(files);
+    });
+  }, []);
+  const addEditAttachments = useCallback((files: readonly NewAttachmentFile[]) => {
+    const added = createDraftAttachments(files);
+    if (added.length > 0) setEditAttachments((current) => [...current, ...added]);
+  }, []);
+  const removeEditAttachment = useCallback((index: number) => {
+    setEditAttachments((current) => {
+      const removed = current[index];
+      if (removed !== undefined) URL.revokeObjectURL(removed.url);
+      return current.filter((_, i) => i !== index);
+    });
+  }, []);
+  const closeEdit = useCallback(() => {
+    replaceEditAttachments([]);
+    setDragOver(false);
+    setEditing(false);
+    setError(undefined);
+  }, [replaceEditAttachments]);
+  const growEditTextarea = useCallback(() => {
+    const field = editTextareaRef.current;
+    if (field === null) return;
+    const computed = getComputedStyle(field);
+    const lineHeight = parseFloat(computed.lineHeight) || 21;
+    const paddingY =
+      (parseFloat(computed.paddingTop) || 0) + (parseFloat(computed.paddingBottom) || 0);
+    const borderY =
+      (parseFloat(computed.borderTopWidth) || 0) + (parseFloat(computed.borderBottomWidth) || 0);
+    const minHeight = Math.ceil(lineHeight * 4 + paddingY + borderY);
+    const maxHeight = Math.ceil(lineHeight * 12 + paddingY + borderY);
+    field.style.height = "auto";
+    const contentHeight = field.scrollHeight + borderY;
+    const nextHeight = Math.min(maxHeight, Math.max(minHeight, contentHeight));
+    field.style.height = `${nextHeight}px`;
+    field.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
+  }, []);
+  useLayoutEffect(() => {
+    if (!editing) return;
+    growEditTextarea();
+  }, [editing, draft, growEditTextarea]);
+  useEffect(() => {
+    if (!editing) return;
+    const field = editTextareaRef.current;
+    if (field === null) return;
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      growEditTextarea();
+    });
+    observer.observe(field);
+    return () => {
+      observer.disconnect();
+    };
+  }, [editing, growEditTextarea]);
   const hasImages = (entry.attachments?.length ?? 0) > 0;
   useEffect(() => {
     const element = bubble.current;
@@ -1765,12 +1859,18 @@ function UserMessage({
     if (!isLiveSession(session)) return;
     setError(undefined);
     setPending(true);
-    void session
-      .rewindTargets()
-      .then((targets) => {
+    void Promise.all([
+      session.rewindTargets(),
+      loadStoredImageAttachments(entry.attachments ?? [], images, session),
+    ])
+      .then(([targets, stored]) => {
         setTarget(targets.find((item) => item.seq === entry.seq));
         setDraft(body);
         setMode("both");
+        replaceEditAttachments(stored.loaded);
+        if (stored.errors.length > 0) {
+          setError(`读取原图失败：${stored.errors.join("；")}`);
+        }
         setEditing(true);
       })
       .catch((reason: unknown) => {
@@ -1780,24 +1880,124 @@ function UserMessage({
         setPending(false);
       });
   };
-  const sendResubmit = (content: string, rewindMode: "both" | "conversation") => {
+  const sendResubmit = (
+    content: string,
+    rewindMode: "both" | "conversation",
+    attachmentsOverride?: SubmitAttachment[],
+  ) => {
     if (!onResubmit) return;
     setError(undefined);
     setPending(true);
+    const submitAttachments =
+      attachmentsOverride ?? (editing ? toSubmitAttachments(editAttachmentsRef.current) : []);
+    const hasQuotes = Boolean(entry.quotes && entry.quotes.length > 0);
     const call =
-      entry.quotes && entry.quotes.length > 0
-        ? onResubmit(entry.seq, content, rewindMode, userWorkMode(entry.workMode), entry.quotes)
-        : onResubmit(entry.seq, content, rewindMode, userWorkMode(entry.workMode));
+      submitAttachments.length > 0
+        ? onResubmit(
+            entry.seq,
+            content,
+            rewindMode,
+            userWorkMode(entry.workMode),
+            hasQuotes ? entry.quotes : undefined,
+            submitAttachments,
+          )
+        : hasQuotes
+          ? onResubmit(entry.seq, content, rewindMode, userWorkMode(entry.workMode), entry.quotes)
+          : onResubmit(entry.seq, content, rewindMode, userWorkMode(entry.workMode));
     void call.catch((reason: unknown) => {
       // 回退/发送失败：编辑内容保留（编辑框仍打开时错误显示在框内）
       setError(`重发失败：${reasonText(reason)}`);
       setPending(false);
     });
   };
+  const resendDirectly = () => {
+    const existing = entry.attachments ?? [];
+    if (existing.length === 0) {
+      sendResubmit(body, "both");
+      return;
+    }
+    setError(undefined);
+    setPending(true);
+    void loadStoredImageAttachments(existing, images, session).then(
+      (stored) => {
+        if (stored.errors.length > 0) {
+          setError(`读取原图失败：${stored.errors.join("；")}`);
+          setPending(false);
+          return;
+        }
+        sendResubmit(
+          body,
+          "both",
+          stored.loaded.map((file) => ({
+            data: file.data,
+            mimeType: file.mimeType ?? "application/octet-stream",
+            label: file.name,
+            ...(file.source ? { source: file.source } : {}),
+          })),
+        );
+      },
+      (reason: unknown) => {
+        setError(`读取原图失败：${reasonText(reason)}`);
+        setPending(false);
+      },
+    );
+  };
+  const onEditPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const parsed = readClipboardAttachments(event.clipboardData, {
+      nextPasteNumber: () => editPasteNumber.current++,
+    });
+    if (!parsed.handled) return;
+    event.preventDefault();
+    if (Array.isArray(parsed.files)) {
+      addEditAttachments(parsed.files);
+    } else {
+      void parsed.files.then(addEditAttachments, (reason: unknown) => {
+        setError(reasonText(reason));
+      });
+    }
+  };
+  const onEditDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragOver(false);
+    const dropped = readDroppedAttachments(event.dataTransfer);
+    if (dropped === null) return;
+    void dropped.then(addEditAttachments, (reason: unknown) => {
+      setError(reasonText(reason));
+    });
+  };
+  const openEditPicker = () => {
+    if (pickImages !== undefined) {
+      void pickImages().then(
+        (picked) => {
+          if (picked.length > 0) addEditAttachments(picked.map((image) => ({ ...image })));
+        },
+        (reason: unknown) => {
+          setError(reasonText(reason));
+        },
+      );
+      return;
+    }
+    editFileInputRef.current?.click();
+  };
   // ADR-0076：Runtime 写入的模式消息（目标核对、继续目标、批准计划）不能重发
   const resubmittable = onResubmit !== undefined && !isRuntimeWorkMode(entry.workMode);
   const busyTitle = busy ? "请先等待或按 Esc 中断" : undefined;
   const restorable = target?.files.filter((file) => file.action !== "untracked") ?? [];
+  const editInfoParts: string[] = [];
+  if (repliesAfter > 0) editInfoParts.push(`将撤回 ${repliesAfter} 轮回复`);
+  if (restorable.length > 0) {
+    editInfoParts.push(
+      `将还原 ${restorable.length} 个文件：${restorable
+        .map((file) => displayPath(file.path, cwd))
+        .join("、")}`,
+    );
+  }
+  const editInfoLead = editInfoParts.join("，");
+  const editInfoTail =
+    (target?.untrackedCalls ?? 0) > 0
+      ? `${untrackedCallsText(target?.untrackedCalls ?? 0, target?.untrackedByKind)}的改动不还原`
+      : "";
+  const editInfo = [editInfoLead, editInfoTail].filter(Boolean).join("；");
   return (
     <article
       className={`u${editing ? " editing" : ""}${searchHit ? " search-hit" : ""}${quoteFlash && quoteFlashMode === "message" ? " quote-flash" : ""}`}
@@ -1817,33 +2017,46 @@ function UserMessage({
       )}
       <div className="u-body">
         {editing ? (
-          <div className="u-edit">
+          <div
+            className={`u-edit${dragOver ? " drop" : ""}`}
+            onDragOver={(event) => {
+              if (event.dataTransfer.types.includes("Files")) {
+                event.preventDefault();
+                setDragOver(true);
+              }
+            }}
+            onDragLeave={(event) => {
+              if (
+                !(event.relatedTarget instanceof Node) ||
+                !event.currentTarget.contains(event.relatedTarget)
+              ) {
+                setDragOver(false);
+              }
+            }}
+            onDrop={onEditDrop}
+          >
+            {editAttachments.length > 0 && (
+              <ImageViewerBoundary>
+                <DraftAttachments attachments={editAttachments} onRemove={removeEditAttachment} />
+              </ImageViewerBoundary>
+            )}
             <textarea
+              ref={editTextareaRef}
               aria-label="编辑消息"
               value={draft}
-              rows={Math.min(12, Math.max(2, draft.split("\n").length + 1))}
+              rows={4}
               onChange={(event) => {
                 setDraft(event.target.value);
               }}
+              onPaste={onEditPaste}
               onKeyDown={(event) => {
                 if (event.key === "Escape" && !pending) {
                   event.preventDefault();
-                  setEditing(false);
-                  setError(undefined);
+                  closeEdit();
                 }
               }}
             />
-            <p className="u-edit-info">
-              将撤回 {repliesAfter} 轮回复
-              {restorable.length > 0
-                ? `，将还原 ${restorable.length} 个文件：${restorable
-                    .map((file) => displayPath(file.path, cwd))
-                    .join("、")}`
-                : ""}
-              {(target?.untrackedCalls ?? 0) > 0
-                ? `；${untrackedCallsText(target?.untrackedCalls ?? 0, target?.untrackedByKind)}的改动不还原`
-                : ""}
-            </p>
+            {editInfo !== "" ? <p className="u-edit-info">{editInfo}</p> : null}
             {restorable.length > 0 ? (
               <div className="u-edit-mode" role="radiogroup" aria-label="回退方式">
                 <label>
@@ -1876,22 +2089,49 @@ function UserMessage({
               </p>
             ) : null}
             <div className="u-edit-actions">
+              <IconButton
+                className="u-edit-attach"
+                disabled={pending}
+                aria-label="添加文件"
+                onClick={openEditPicker}
+              >
+                <Icon name="attachment" size={ICON_MD} />
+              </IconButton>
+              {pickImages === undefined && (
+                <input
+                  ref={editFileInputRef}
+                  type="file"
+                  multiple
+                  hidden
+                  aria-label="选择文件"
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? []);
+                    event.target.value = "";
+                    if (files.length === 0) return;
+                    void readFileListAttachments(files, {
+                      inferImageMime: true,
+                      source: "upload",
+                    }).then(addEditAttachments, (reason: unknown) => {
+                      setError(reasonText(reason));
+                    });
+                  }}
+                />
+              )}
               <Button
                 variant="primary"
-                disabled={pending || (draft.trim() === "" && (entry.quotes?.length ?? 0) === 0)}
+                disabled={
+                  pending ||
+                  (draft.trim() === "" &&
+                    editAttachments.length === 0 &&
+                    (entry.quotes?.length ?? 0) === 0)
+                }
                 onClick={() => {
                   sendResubmit(draft, mode);
                 }}
               >
                 {pending ? "发送中…" : "发送"}
               </Button>
-              <Button
-                disabled={pending}
-                onClick={() => {
-                  setEditing(false);
-                  setError(undefined);
-                }}
-              >
+              <Button disabled={pending} onClick={closeEdit}>
                 取消
               </Button>
             </div>
@@ -2065,9 +2305,7 @@ function UserMessage({
                   disabled={busy || pending}
                   aria-label="重发"
                   title={busyTitle ?? "重发"}
-                  onClick={() => {
-                    sendResubmit(body, "both");
-                  }}
+                  onClick={resendDirectly}
                 >
                   <Icon name="refresh_2" size={ICON_SM} />
                 </button>
@@ -3578,6 +3816,7 @@ function EntryView({
   busy,
   repliesAfter,
   onResubmit,
+  pickImages,
   onFork,
   fileLinks,
   showReplyActions,
@@ -3609,6 +3848,7 @@ function EntryView({
   busy: boolean;
   repliesAfter: number;
   onResubmit: ConversationProps["onResubmit"];
+  pickImages?: ConversationProps["pickImages"];
   onFork?: ConversationProps["onFork"];
   fileLinks: ConversationProps["fileLinks"];
   showReplyActions: boolean;
@@ -3791,6 +4031,7 @@ function EntryView({
           busy={busy}
           repliesAfter={repliesAfter}
           onResubmit={onResubmit}
+          pickImages={pickImages}
           onFork={onFork}
           scheduleSource={scheduleSource}
           quoteFlash={quoteFlash}
@@ -5164,6 +5405,7 @@ function ConversationContent({
   images,
   busy,
   onResubmit,
+  pickImages,
   onQuote,
   onApprovePlan,
   onFork,
@@ -6293,6 +6535,7 @@ function ConversationContent({
                     viewSuite={view.suite}
                     onOpenSuiteThread={onOpenSuiteThread}
                     onResubmit={onResubmit}
+                    pickImages={pickImages}
                     onFork={onFork}
                     fileLinks={fileLinks}
                     quoteFlash={quoteFlash?.seq === entry.seq}

@@ -14,6 +14,7 @@ import { RpcError, type RpcRuntime } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "../attachment-images";
 import type { ComposerSubmit } from "../Composer";
+import { validateDraftAttachments } from "../draft-attachments";
 import { localTurnEntries, mergePending } from "../outgoing";
 import { Conversation, PermissionCard, QuestionCard } from "../Conversation";
 import { phoneWarningText } from "../open-warnings";
@@ -25,6 +26,7 @@ import { SessionHeaderTools, sessionInputHistory } from "./SessionHeaderTools";
 import { SessionGrants, useSessionGrants } from "../SessionGrants";
 import { TodoPanel } from "../TodoList";
 import { loadTodosCollapsed, saveTodosCollapsed } from "./local";
+import { estimateSubmitBytes, formatBytes, SUBMIT_MESSAGE_LIMIT } from "./phone-images";
 import {
   bindPhoneOutgoing,
   failPhoneOutgoing,
@@ -477,8 +479,19 @@ export function SessionScreen({
         }
         {...(ensembleMember === undefined && suiteThread === undefined
           ? {
-              onResubmit: async (targetSeq, text, mode, workMode, quotes) => {
-                // 同桌面 resubmit：先回退再按普通发送；重发带文本、用户提交的执行方式与引用
+              onResubmit: async (targetSeq, text, mode, workMode, quotes, attachments) => {
+                // 同桌面 resubmit：先回退再按普通发送；重发带文本、附件、用户提交的执行方式与引用
+                const list = attachments ?? [];
+                const invalid = validateDraftAttachments(list);
+                if (invalid !== undefined) throw new Error(invalid);
+                if (
+                  list.length > 0 &&
+                  (estimateSubmitBytes(text, list) > SUBMIT_MESSAGE_LIMIT ||
+                    list.reduce((sum, file) => sum + file.data.byteLength, 0) >
+                      Math.floor((SUBMIT_MESSAGE_LIMIT * 3) / 4) - 1024)
+                ) {
+                  throw new Error(`总大小超过 ${formatBytes(SUBMIT_MESSAGE_LIMIT)}，请减少附件`);
+                }
                 setBusy(true);
                 try {
                   await sessions.rewind(entry, targetSeq, mode);
@@ -487,7 +500,7 @@ export function SessionScreen({
                 }
                 await submit({
                   text,
-                  attachments: [],
+                  attachments: list,
                   ...(workMode ? { workMode } : {}),
                   ...(quotes?.length ? { quotes } : {}),
                 });

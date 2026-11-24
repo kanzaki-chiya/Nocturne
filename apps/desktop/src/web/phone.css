@@ -106,7 +106,7 @@
 .phone
   button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.ensemble-seg button):not(
     .ensemble-chip
-  ):not(.input-label-button):not(.phone-item):not(.usage-cell),
+  ):not(.input-label-button):not(.phone-item):not(.usage-cell):not(.thumb2-open):not(.thumb2 .x),
 .phone input:not(.check input),
 .phone select,
 .phone textarea,
@@ -543,6 +543,21 @@
   width: 44px;
   height: 44px;
   padding: 0;
+  justify-content: center;
+}
+/* 原位编辑框里的缩略图预览与移除按钮不被通用 44px 规则撑坏 */
+.phone .conversation .thumb2 .thumb2-open {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  align-items: center;
+}
+.phone .conversation .thumb2 .x {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
 }
 /* 本轮改动与 diff：不撑宽页面，diff 正文在卡内横向滚动 */
