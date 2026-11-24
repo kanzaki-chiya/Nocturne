@@ -7,7 +7,7 @@ import type {
 } from "react";
 
 export type ButtonVariant =
-  "default" | "primary" | "ghost" | "danger" | "ghost-danger" | "danger-solid";
+  "default" | "primary" | "ghost" | "danger" | "ghost-danger" | "danger-text" | "danger-solid";
 
 export type ButtonSize = "sm" | "md" | "lg";
 
@@ -39,6 +39,7 @@ const VARIANT_CLASS: Record<ButtonVariant, string> = {
   ghost: "btn-ghost",
   danger: "btn-danger",
   "ghost-danger": "btn-ghost btn-danger",
+  "danger-text": "btn-danger-text",
   "danger-solid": "btn-danger-solid",
 };
 

@@ -84,6 +84,16 @@
 .btn-danger.btn-ghost:hover:not(:disabled) {
   border-color: transparent;
 }
+.btn-danger-text {
+  border-color: transparent;
+  background: transparent;
+  color: var(--a-error);
+}
+.btn-danger-text:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--a-error-bg);
+  color: var(--a-error);
+}
 .btn-danger-solid {
   background: var(--a-error);
   border-color: var(--a-error);
@@ -389,7 +399,7 @@
 .spage .btn-sm {
   min-height: var(--ctl-h-md);
 }
-.spage .btn:not(.btn-primary, .btn-danger-solid, .btn-ghost) {
+.spage .btn:not(.btn-primary, .btn-danger-solid, .btn-ghost, .btn-danger-text) {
   border-color: var(--a-border);
 }
 .spage:has(> .readable > .md-frame) {

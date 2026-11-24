@@ -21,6 +21,14 @@ describe("共享基础控件 (src/ui)", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
 
     rerender(
+      <Button variant="danger-text" onClick={onClick}>
+        拒绝并停止
+      </Button>,
+    );
+    const dangerTextBtn = screen.getByRole("button", { name: "拒绝并停止" });
+    expect(dangerTextBtn.className).toBe("btn btn-danger-text");
+
+    rerender(
       <Button variant="danger-solid" size="lg" disabled onClick={onClick}>
         确认删除
       </Button>,
