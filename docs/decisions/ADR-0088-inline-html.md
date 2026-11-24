@@ -21,7 +21,7 @@
 4. **自适应高度、折叠与全屏**：页面框无标题栏、无说明文字；高度随内容自适应并夹紧在 `48px`–`4096px` 之间；内容高于 `420px` 时默认折叠至 `420px`，底部渐隐并居中放置展开/收起箭头按钮；桌面悬停或聚焦（手机窄于 `600px` 常显，`44px` 触控区）在右上角显示全屏按钮；全屏遮罩挂在窗口根部，仅提供下载（保存为 `.html`）与关闭两个图标按钮。
 5. **仅主会话可用、免确认**：内置工具 `render_html` 只对主会话开放；因其 `permissionSubjects` 为空（第二版起带 `images` 时为每个路径一条 `read` 主体，见文末）且 `traits.mutates` 为 `false`，在 `read-only` 权限预设与计划模式（`/plan`）下均直接可用且不产生权限确认；通过工具特性 `traits.mainSessionOnly: true` 从子代理工具池中排除（显式传入 `tools: ["render_html"]` 亦被过滤）。
 6. **完成后再显示**：参数流式到达期间（`tool.input.delta`）及工具执行中仅显示动词为 `页面` 的普通工具行，不在流式阶段渲染半成品 HTML；工具成功完成后隐藏该次调用的工具行，直接原地渲染内嵌页面（运行失败时保留工具行报错）。
-7. **显示时动态注入主题**：落盘保存的 HTML 原文不写入当前主题色值；客户端在显示时读取宿主计算样式，向空壳页动态注入一组稳定的主题 CSS 变量与 `color-scheme`。切换深浅色或外观字体字号时通过 `postMessage` 热更新空壳页样式，不重新加载页面、不丢失页面内脚本与交互状态。不涉及被编辑项目自身的设计系统。
+7. **显示时动态注入主题**（**已由文末 2026-11-25 修订替代**）：落盘保存的 HTML 原文不写入当前主题色值；客户端在显示时读取宿主计算样式，向空壳页动态注入一组稳定的主题 CSS 变量与 `color-scheme`。切换深浅色或外观字体字号时通过 `postMessage` 热更新空壳页样式，不重新加载页面、不丢失页面内脚本与交互状态。不涉及被编辑项目自身的设计系统。
 
 ### 2. 独立空壳页、CSP 与 Tauri 子框架 IPC 封锁
 
@@ -56,9 +56,9 @@
 - **共享派生视图与终端显示**：`packages/core/src/protocol/view.ts` 在归约 `SessionView` 时识别成功完成的带 `inline` 附件工具结果（不按工具名硬编码）；图形端渲染 `InlinePage` 组件并在附件读取失败或远程被拒时回退为普通文件附件卡片；TUI 在全屏与内联模式下均显示一行 `▣ <title>`（不含 `.html` 后缀）。
 - **会话生命周期**：HTML 存于会话标准附件目录 `attachments/<sessionId>/`，会话分叉、回退、归档及清理行为与现有图片和文件附件完全一致。
 
-### 5. 主题变量清单
+### 5. 主题变量清单（兼容旧页面，已由文末 2026-11-25 修订）
 
-客户端从宿主根元素读取计算样式并向空壳页注入以下 12 个稳定 CSS 变量及 `color-scheme`；空壳页内置零特异度 `:where(:root)` / `:where(body)` 默认规则，使未写任何样式的纯 HTML 底色、文字色、字体与对话区一致，同时不覆盖页面自定义样式：
+原设计由客户端从宿主根元素读取计算样式并注入以下 12 个变量。2026-11-25 修订后，新页面在 `:root` 上自带浅色与深色变量，工具说明不再公布这组变量；空壳页与独立导出保留以下 12 个变量（改为固定的默认主题浅色与深色两组值，不再读取外观自定义颜色）及零特异度 `:where(:root)` / `:where(body)` 默认规则，仅用于兼容旧页面：
 
 | 页面 CSS 变量 | 含义 | 宿主 Token 来源 |
 |---|---|---|
@@ -143,6 +143,34 @@
   - `backdrop-filter: blur(...)` 在 Windows WebView2（Chromium）的 `<foreignObject>` 实测可产生模糊效果，但在其他渲染引擎或复杂合成层下仍可能退化或失真；
   - `<video>` 实时画面、嵌套 `<iframe>` 及滚动容器内部未展开的溢出内容不随 `<foreignObject>` 光栅化；
   - CSS 动画与过渡在克隆快照中会被冻结停用，不保证捕获特定中间帧。
+
+## 修订（2026-11-25）：页面自带配色，下载为独立 HTML
+
+- **状态**：已接受（2026-11-25）
+- **修订**：本 ADR 第 1 节第 7 条、第 5 节、第三版「下载为 HTML」；[ADR-0109](ADR-0109-page-versions.md) 面板与手机全屏的下载沿用本修订
+
+### 背景
+
+原第 1 节第 7 条规定页面不写颜色，由客户端注入 12 个主题变量，带来两个问题：页面配色只是借用宿主界面颜色，不由模型设计；「下载为 HTML」（桌面全屏、面板标签、手机与安卓全屏，`apps/desktop/src/InlinePage.tsx`）保存附件原始字节，单独打开时主题变量未定义、颜色与字体丢失，且空壳页 CSP 不在文件里。本修订改为页面自带浅色与深色两套变量，宿主只告知深浅色，下载直接输出可独立打开的 HTML 文件。
+
+### 决定
+
+1. **页面自带配色**：`render_html` 工具说明删掉 `Theme CSS variables: …` 列表，改为要求：
+   - 在 `:root` 上把所有颜色定义成 CSS 变量（先写浅色值），并由页面自己写字体栈；
+   - 在 `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { … } }` 与 `:root[data-theme="dark"] { … }` 里重定义同一组变量的深色值，两处都设置 `color-scheme: dark`；
+   - 组件只引用这些变量，不在媒体查询或 `[data-theme]` 块里单独写组件颜色；
+   - 保留 `body` 设置背景的要求。
+2. **宿主只给深浅色**：
+   - 桌面端、手机网页、安卓：空壳页（`apps/desktop/public-web/sandbox.html` 及同步副本 `apps/relay/public/sandbox.html`）在页面根元素上设置 `data-theme="light" | "dark"`，取值来自 `readInlineTheme` 算出的 `colorScheme`（宿主根元素有 `data-theme` 时采用之，否则跟随系统），同时继续设置 `color-scheme` 与字号 `--nct-fs`；切换深浅色时沿用 `nocturne:inline-html:theme` 消息热更新，不重新加载页面。
+   - TUI 在浏览器打开时不设 `data-theme`，页面跟随系统 `prefers-color-scheme`。
+   - 页面显示自身底色，不再要求与对话区底色一致。
+3. **旧页面兼容**：空壳页继续注入第 5 节的 12 个变量与零特异度默认样式作为兼容层，取值改为固定的默认主题两组值（与 `INLINE_PAGE_THEMES` 一致），按 `data-theme` 切换浅色或深色，不再读取外观设置中的自定义颜色。`readInlineTheme` 删除颜色读取，仅保留 `colorScheme` 与字号。
+4. **下载为独立 HTML**：「下载为 HTML」（桌面全屏、面板标签、手机与安卓全屏）改为保存注入后的独立文件——在页面的 `<!doctype>` 之后（无 doctype 时放在最前，保留首位 BOM）依次插入：
+   - `<meta http-equiv="Content-Security-Policy" content="…">`，策略与 TUI 外壳 `INLINE_PAGE_SHELL_CSP` 相同（含 [ADR-0112](ADR-0112-page-cdn.md) 的 cdnjs 白名单）；
+   - `<meta charset="utf-8">`；
+   - 兼容层样式：默认主题浅色与深色两组零特异度变量（按 `prefers-color-scheme` 切换）及零特异度默认样式；新页面自行定义的同名变量按 CSS 规则覆盖兼容层。
+   页面正文不改、不套 iframe，不带 `window.nocturne`、页面数据、评论与评论圆点；入口、按钮文字、文件名、保存通道与「下载为图片」均不变，不新增菜单项，也不保留「下载原始 HTML」。
+5. **共用代码**：`INLINE_PAGE_SHELL_CSP`、`INLINE_PAGE_THEMES`、`INLINE_PAGE_BASE_STYLE`、`INLINE_PAGE_COMPAT_STYLE`、`injectInlinePageTheme` 与 `buildStandaloneInlineHtml` 置于 `@nocturne/core/protocol`（`packages/core/src/protocol/inline-page-export.ts`，纯函数、无 Node 依赖），供 TUI、桌面端（含手机网页与安卓）共用；静态文件 `sandbox.html` 内嵌的兼容常量由测试与 `@nocturne/core/protocol` 比对。TUI 的 iframe 外壳与临时目录逻辑留在 `apps/tui/src/inline-page-open.ts`。
 
 ## 后续修订
 
