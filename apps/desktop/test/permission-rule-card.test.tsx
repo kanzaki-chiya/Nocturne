@@ -88,7 +88,7 @@ function fakeSession(overrides: Partial<RpcSession> = {}): RpcSession {
 }
 
 describe("PermissionCard 改成规则… 表单", () => {
-  it("带 ruleSuggestion 时显示「改成规则…」且排在「本项目允许」后，KeyHint 变为 1–6；不满足条件时不显示", () => {
+  it("带 ruleSuggestion 时显示「改成规则…」且排在「本项目允许」后，无快捷键说明行；不满足条件时不显示", () => {
     const { container, rerender } = render(
       <PermissionCard
         pending={shellPending()}
@@ -106,8 +106,8 @@ describe("PermissionCard 改成规则… 表单", () => {
       "拒绝",
       "拒绝并停止",
     ]);
-    const kbds = Array.from(container.querySelectorAll(".ask-kbd kbd")).map((el) => el.textContent);
-    expect(kbds).toEqual(["1", "6", "Esc"]);
+    expect(container.querySelector(".ask-kbd")).toBeNull();
+    expect(container.querySelector(".kbd-hint")).toBeNull();
 
     // 不带 ruleSuggestion 时不显示
     rerender(
@@ -118,9 +118,7 @@ describe("PermissionCard 改成规则… 表单", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: "改成规则…" })).toBeNull();
-    expect(
-      Array.from(container.querySelectorAll(".ask-kbd kbd")).map((el) => el.textContent),
-    ).toEqual(["1", "5", "Esc"]);
+    expect(container.querySelector(".ask-kbd")).toBeNull();
 
     // 不含 allow_project 时不显示
     rerender(

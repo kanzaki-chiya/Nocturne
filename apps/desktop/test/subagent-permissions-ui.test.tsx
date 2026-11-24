@@ -818,7 +818,8 @@ describe("父会话转发确认卡与桌面 UI 集成", () => {
     act(() => {
       controller.current?.subagentLinks?.open("child-a");
     });
-    expect(await screen.findByText(/pwsh › echo a/)).toBeTruthy();
+    const cardA = await screen.findByRole("region", { name: "权限确认" });
+    expect(cardA.textContent).toContain("pwsh › echo a");
 
     // 切到会话 B 且 controls 尚未返回（shellKind=undefined）：不得泄漏 sess-a 的 pwsh
     rerender(
@@ -845,7 +846,11 @@ describe("父会话转发确认卡与桌面 UI 集成", () => {
         <PanelHarness sessionId="sess-b" active={convB} shellKind="bash" />
       </TitlebarSlot.Provider>,
     );
-    expect(await screen.findByText(/bash › echo b/)).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "权限确认" }).textContent).toContain(
+        "bash › echo b",
+      );
+    });
     expect(shellInfoA).not.toHaveBeenCalled();
     expect(shellInfoB).not.toHaveBeenCalled();
     unmount();

@@ -3132,7 +3132,7 @@ describe("Conversation 工具行与拒绝", () => {
 });
 
 describe("Conversation 权限卡片 v2", () => {
-  it("标题给出操作与审查者结论，主体单行排列且 shell 带 kind 前缀", () => {
+  it("标题给出盾牌图标、操作与审查者结论，不含「需要确认」与快捷键行，shell 带弱化 kind 前缀", () => {
     const view = createSessionView();
     view.pendingPermission = permission({
       toolName: "shell",
@@ -3148,13 +3148,110 @@ describe("Conversation 权限卡片 v2", () => {
     });
     mount(view);
     const card = screen.getByRole("region", { name: "权限确认" });
-    expect(card.querySelector(".ask-t .muted-value")?.textContent).toBe("执行命令");
-    expect(card.querySelector(".kbd-hint")?.textContent).toBe("1–5 选择Esc 拒绝");
+    expect(card.querySelector(".ask-t")?.textContent).not.toContain("需要确认");
+    expect(card.querySelector(".ask-t .ask-ico")).not.toBeNull();
+    expect(card.querySelector(".ask-t .ask-op")?.textContent).toBe("执行命令");
+    expect(card.querySelector(".ask-why")?.classList.contains("ask-why-unsure")).toBe(true);
+    expect(card.querySelector(".ask-why .ask-why-dot")).not.toBeNull();
+    expect(card.querySelector(".kbd-hint")).toBeNull();
+    expect(card.querySelector(".ask-kbd")).toBeNull();
     expect(card.textContent).toContain("审查器交给你确认");
-    expect(card.textContent).toContain("pwsh › rm -rf x");
+    expect(card.querySelector(".ask-subjects .ask-sh")?.textContent).toBe("pwsh › ");
+    expect(card.querySelector(".ask-subjects")?.textContent).toContain("pwsh › rm -rf x");
     expect(within(card).getByRole("button", { name: "允许一次" })).toBeTruthy();
     expect(within(card).getByRole("button", { name: "拒绝" })).toBeTruthy();
-    expect(card.textContent).toContain("Esc 拒绝");
+  });
+
+  it("审查结论圆点对应四种结论类名：unsure / block / allow / rule", () => {
+    const cases = [
+      { verdict: "unsure" as const, cls: "ask-why-unsure", text: "审查器交给你确认" },
+      { verdict: "block" as const, cls: "ask-why-block", text: "审查器建议拒绝" },
+      { verdict: "allow" as const, cls: "ask-why-allow", text: "审查器认为可以执行" },
+      { verdict: undefined, cls: "ask-why-rule", text: "按权限规则需要确认" },
+    ];
+    for (const c of cases) {
+      cleanup();
+      const view = createSessionView();
+      view.pendingPermission = permission({
+        requestId: `perm-${c.cls}`,
+        review: c.verdict
+          ? {
+              callId: "call-1",
+              backend: "b",
+              verdict: c.verdict,
+              reason: c.text,
+              durationMs: 1,
+              cached: false,
+            }
+          : undefined,
+      });
+      mount(view);
+      const card = screen.getByRole("region", { name: "权限确认" });
+      const why = card.querySelector(".ask-why");
+      expect(why?.classList.contains(c.cls)).toBe(true);
+      expect(why?.querySelector(".ask-why-dot")).not.toBeNull();
+      expect(why?.textContent).toBe(c.text);
+    }
+  });
+
+  it("按钮按允许组靠左、拒绝组靠右分组并保持渲染顺序，数字键 1–N 按顺序映射且无快捷键说明行时数字键与 Esc 仍生效", async () => {
+    const view = createSessionView();
+    view.pendingPermission = permission({
+      toolName: "shell",
+      subjects: [{ kind: "shell", target: "git status --short", shell: "pwsh" }],
+      options: ["allow_once", "allow_session", "allow_project", "deny", "deny_stop"],
+      ruleSuggestion: { pattern: "git status *" },
+    });
+    const rendered = mount(view);
+    const card = screen.getByRole("region", { name: "权限确认" });
+    expect(card.querySelector(".kbd-hint")).toBeNull();
+
+    // 允许组直接位于 .ask-actions，拒绝组收在右侧 .ask-actions-deny
+    const allowBtns = Array.from(card.querySelectorAll(":scope .ask-actions > button")).map(
+      (b) => b.textContent,
+    );
+    const denyBtns = Array.from(card.querySelectorAll(".ask-actions-deny > button")).map(
+      (b) => b.textContent,
+    );
+    expect(allowBtns).toEqual(["允许一次", "本会话允许", "本项目允许", "改成规则…"]);
+    expect(denyBtns).toEqual(["拒绝", "拒绝并停止"]);
+
+    // 样式变体：首允许 primary、其余允许默认、拒绝 ghost、拒绝并停止 danger-text
+    const allBtns = within(card).getAllByRole("button");
+    expect(allBtns.map((b) => b.textContent)).toEqual([
+      "允许一次",
+      "本会话允许",
+      "本项目允许",
+      "改成规则…",
+      "拒绝",
+      "拒绝并停止",
+    ]);
+    expect(allBtns[0]?.className).toBe("btn btn-primary");
+    expect(allBtns[1]?.className).toBe("btn");
+    expect(allBtns[2]?.className).toBe("btn");
+    expect(allBtns[3]?.className).toBe("btn");
+    expect(allBtns[4]?.className).toBe("btn btn-ghost");
+    expect(allBtns[5]?.className).toBe("btn btn-danger-text");
+
+    // 数字键 6 对应渲染顺序第 6 项「拒绝并停止」
+    fireEvent.keyDown(window, { key: "6" });
+    await waitFor(() =>
+      expect(rendered.methods.respondPermission).toHaveBeenCalledWith("permission-1", {
+        decision: "deny",
+        stop: true,
+      }),
+    );
+
+    // 换新请求后按 Esc 仍直接拒绝
+    rendered.methods.respondPermission.mockClear();
+    view.pendingPermission = permission({ requestId: "permission-esc" });
+    rendered.rerender(<Conversation view={view} {...conversationProps(rendered)} />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(rendered.methods.respondPermission).toHaveBeenCalledWith("permission-esc", {
+        decision: "deny",
+      }),
+    );
   });
 
   it("数字键直选选项、Esc 直接拒绝；均不经过输入框", async () => {
@@ -3284,7 +3381,7 @@ describe("schedule 确认卡片", () => {
     view.pendingPermission = schedulePermission("检查 logs/。\n按服务汇总。");
     mount(view);
     const card = screen.getByRole("region", { name: "权限确认" });
-    expect(card.querySelector(".ask-t .muted-value")?.textContent).toBe("定时任务");
+    expect(card.querySelector(".ask-t .ask-op")?.textContent).toBe("定时任务");
     expect(card.textContent).toContain("create:错误日志巡检");
     const pre = card.querySelector(".subject-detail pre");
     const text = pre?.textContent ?? "";
