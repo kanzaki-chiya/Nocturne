@@ -7,73 +7,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  INLINE_PAGE_SHELL_CSP,
+  INLINE_PAGE_THEMES,
+  injectInlinePageTheme,
+} from "@nocturne/core/protocol";
 
-/** 与 sandbox.html 空壳页一致，另加 form-action 与 base-uri（meta 不支持 frame-ancestors 与 sandbox） */
-export const INLINE_PAGE_SHELL_CSP =
-  "default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdnjs.cloudflare.com; img-src data: blob: https://cdnjs.cloudflare.com; font-src data: https://cdnjs.cloudflare.com; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'";
-
-/** 桌面端默认主题（tokens.css 的 :root 与 prefers-color-scheme: light）对应的 12 个页面变量 */
-const SANS =
-  '"Inter Variable", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif';
-const MONO = '"JetBrains Mono Variable", "Cascadia Mono", Consolas, "Microsoft YaHei", monospace';
-export const INLINE_PAGE_THEMES: Readonly<
-  Record<"light" | "dark", Readonly<Record<string, string>>>
-> = {
-  light: {
-    "--bg": "#ffffff",
-    "--raised": "#f4f4f5",
-    "--text": "#0d0d10",
-    "--secondary": "#55555c",
-    "--muted": "#75757d",
-    "--border": "#ececef",
-    "--accent": "#5d50b0",
-    "--ok": "#2a7146",
-    "--warn": "#8a5c10",
-    "--bad": "#b02f3c",
-    "--sans": SANS,
-    "--mono": MONO,
-  },
-  dark: {
-    "--bg": "#141417",
-    "--raised": "#1a1a1f",
-    "--text": "#ededef",
-    "--secondary": "#a0a0a8",
-    "--muted": "#7a7a83",
-    "--border": "#1f1f24",
-    "--accent": "#a8a5ec",
-    "--ok": "#86c69c",
-    "--warn": "#e3bc76",
-    "--bad": "#e8919a",
-    "--sans": SANS,
-    "--mono": MONO,
-  },
-};
-
-function themeRule(scheme: "light" | "dark"): string {
-  const decls = Object.entries(INLINE_PAGE_THEMES[scheme]).map(([k, v]) => `${k}: ${v}`);
-  return `:root { color-scheme: ${scheme}; ${decls.join("; ")}; }`;
-}
-
-/** sandbox.html 的零特异度默认样式（不含内嵌框专用的高度与滚动规则） */
-const BASE_STYLE = [
-  ":where(:root) { box-sizing: border-box; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.5; }",
-  ":where(*, *::before, *::after) { box-sizing: border-box; }",
-  ":where(body) { margin: 0; padding: 20px; display: flow-root; background: transparent; color: inherit; font: inherit; }",
-  "@media (max-width: 560px) { :where(body) { padding: 14px; } }",
-  ":where(code, pre, kbd, samp) { font-family: var(--mono); }",
-].join("\n");
-
-const INJECTED = `<style>${themeRule("light")}\n@media (prefers-color-scheme: dark) { ${themeRule("dark")} }\n${BASE_STYLE}</style>`;
-
-const DOCTYPE = /^(\uFEFF?\s*<!doctype[^>]*>)/i;
-
-/** 主题样式插在 doctype 之后：带 doctype 的页面仍是标准模式 */
-export function injectInlinePageTheme(html: string): string {
-  const doctype = DOCTYPE.exec(html)?.[1];
-  return doctype === undefined
-    ? `${INJECTED}${html}`
-    : `${doctype}${INJECTED}${html.slice(doctype.length)}`;
-}
+export { INLINE_PAGE_SHELL_CSP, INLINE_PAGE_THEMES, injectInlinePageTheme };
 
 function escapeAttr(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;");

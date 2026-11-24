@@ -5,6 +5,10 @@ import { createElement } from "react";
 import { render } from "ink-testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider } from "@nocturne/core";
+import {
+  INLINE_PAGE_SHELL_CSP as PROTOCOL_INLINE_PAGE_SHELL_CSP,
+  INLINE_PAGE_THEMES as PROTOCOL_INLINE_PAGE_THEMES,
+} from "@nocturne/core/protocol";
 import { App } from "../src/app.js";
 import {
   INLINE_PAGE_SHELL_CSP,
@@ -83,9 +87,9 @@ describe("内嵌页面外壳文件", () => {
       .replace(/&quot;/g, '"')
       .replace(/&amp;/g, "&");
     expect(srcdoc.startsWith("<!doctype html><style>")).toBe(true);
-    expect(srcdoc).toContain(":root { color-scheme: light; --bg: #ffffff;");
+    expect(srcdoc).toContain(":where(:root) { color-scheme: light; --bg: #ffffff;");
     expect(srcdoc).toContain(
-      "@media (prefers-color-scheme: dark) { :root { color-scheme: dark; --bg: #141417;",
+      "@media (prefers-color-scheme: dark) { :where(:root) { color-scheme: dark; --bg: #141417;",
     );
     expect(srcdoc).toContain(":where(body) { margin: 0; padding: 20px;");
     expect(srcdoc.endsWith("<p>页</p></body></html>")).toBe(true);
@@ -96,14 +100,25 @@ describe("内嵌页面外壳文件", () => {
     expect(bare.startsWith("&lt;style>") || bare.startsWith("<style>")).toBe(true);
   });
 
-  it("主题常量与桌面端默认主题的浅色、深色 token 一致", () => {
+  it("CSP 与主题常量来自 @nocturne/core/protocol，且与桌面端默认主题的浅色、深色 token 一致", () => {
+    expect(INLINE_PAGE_SHELL_CSP).toBe(PROTOCOL_INLINE_PAGE_SHELL_CSP);
+    expect(INLINE_PAGE_THEMES).toBe(PROTOCOL_INLINE_PAGE_THEMES);
     const desktop = path.join(process.cwd(), "../desktop/src");
     const css = readFileSync(path.join(desktop, "tokens.css"), "utf8");
-    const page = readFileSync(path.join(desktop, "InlinePage.tsx"), "utf8");
-    const mapping = [...page.matchAll(/\["(--[\w-]+)", "(--[\w-]+)"\]/g)].map(
-      (m): [string, string] => [m[1] ?? "", m[2] ?? ""],
-    );
-    expect(mapping).toHaveLength(12);
+    const mapping: readonly (readonly [string, string])[] = [
+      ["--bg", "--a-panel"],
+      ["--raised", "--a-raised"],
+      ["--text", "--a-text"],
+      ["--secondary", "--a-secondary"],
+      ["--muted", "--a-muted"],
+      ["--border", "--a-border"],
+      ["--accent", "--a-accent"],
+      ["--ok", "--a-success"],
+      ["--warn", "--a-warning"],
+      ["--bad", "--a-error"],
+      ["--sans", "--sans"],
+      ["--mono", "--mono"],
+    ];
     const dark = cssBlock(css, ":root {");
     const light = {
       ...dark,
