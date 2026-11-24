@@ -2379,7 +2379,9 @@ function ReviewerDialog({
     >
       {disclosure === "shown" && recipient !== undefined ? (
         <div className="pbanner">
-          {decisionModel?.source === "gemini" ? "首次启用 Gemini" : "首次启用 Jev"}
+          <div className="pbanner-title">
+            {decisionModel?.source === "gemini" ? "首次启用 Gemini" : "首次启用 Jev"}
+          </div>
           <span>
             将把待确认操作的类别、目标或命令、工作目录、全部用户消息（约 8000 字内）、项目说明前
             2000 字和 git remote 地址发送给 {recipient.label}

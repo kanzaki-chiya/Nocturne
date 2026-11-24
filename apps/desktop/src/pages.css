@@ -274,6 +274,10 @@
   font-size: var(--fs-2);
   max-width: 640px;
 }
+.page3 .pbanner .pbanner-title {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .page3 .pbanner span {
   color: var(--a-secondary);
 }
