@@ -288,6 +288,10 @@ export interface PermissionReviewedPayload {
   usage?: Usage | undefined;
 }
 
+export function permissionReviewLabel(verdict: PermissionReviewedPayload["verdict"]): string {
+  return { allow: "放行", block: "拦截", unsure: "交给你确认" }[verdict];
+}
+
 export interface PermissionResolvedPayload {
   requestId?: string | undefined;
   callId: string;

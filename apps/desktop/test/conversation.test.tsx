@@ -2496,6 +2496,43 @@ describe("Conversation 工具行三个阶段同一结构", () => {
     }
   });
 
+  it.each([
+    ["allow", "放行"],
+    ["block", "拦截"],
+    ["unsure", "交给你确认"],
+  ] as const)("工具行收起和展开时均显示中文审查结论（%s）", (verdict, label) => {
+    const view = createSessionView();
+    view.entries = [
+      tool({
+        name: "shell",
+        input: { command: "Get-Date" },
+        result: {
+          status: "ok",
+          modelContent: "完成",
+          output: { exitCode: 0 },
+          error: undefined,
+          truncated: false,
+          spillPath: undefined,
+          durationMs: 12,
+        },
+        review: {
+          callId: "call-1",
+          backend: "test",
+          verdict,
+          reason: "测试理由",
+          durationMs: 1,
+          cached: false,
+        },
+      }),
+    ];
+    const { container } = mount(view);
+    const line = container.querySelector(".tool-line");
+    if (!line) throw new Error("缺少工具行");
+    expect(line.querySelector(".granted-tag")?.textContent).toBe(`审查：${label}`);
+    fireEvent.click(line);
+    expect(container.querySelector(".tool-info .muted-value")?.textContent).toBe(label);
+  });
+
   it("完成的 edit 收起时是无框普通行，点开出现 diff 区域和详情", () => {
     const view = createSessionView();
     view.entries = [tool({ input: editInput })];

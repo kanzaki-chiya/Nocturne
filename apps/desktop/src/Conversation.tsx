@@ -103,6 +103,7 @@ import {
   isRuntimeWorkMode,
   userWorkMode,
   unwrapEnsemblePostText,
+  permissionReviewLabel,
   validateShellRulePattern,
   matchesShellPatternGrant,
   shellDialect,
@@ -2792,7 +2793,8 @@ function ToolDetails({
         {typeof value?.replaced === "number" && <span>{value.replaced} 处替换</span>}
         {entry.review && (
           <span title={entry.review.reason}>
-            安全审查<span className="muted-value">{entry.review.verdict}</span>
+            安全审查
+            <span className="muted-value">{permissionReviewLabel(entry.review.verdict)}</span>
           </span>
         )}
         {entry.subjects.map((subject, index) => {
@@ -3150,7 +3152,7 @@ function ToolRow({
       />
       {entry.review && (
         <span className="granted-tag" title={entry.review.reason}>
-          审查：{entry.review.verdict === "allow" ? "放行" : entry.review.verdict}
+          审查：{permissionReviewLabel(entry.review.verdict)}
         </span>
       )}
       {subagentLink !== undefined && subagentLink.kind !== "none" && links !== null && (
