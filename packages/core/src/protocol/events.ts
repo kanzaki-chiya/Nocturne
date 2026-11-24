@@ -339,6 +339,12 @@ export interface ToolCompletedPayload {
   files?: FileAttachment[] | undefined;
   /** 插件工具声明了 _meta.ui.resourceUri 时附带的页面定位信息（ADR-0101） */
   ui?: ToolCompletedUi | undefined;
+  /** 凭据或授权数据类主体，独立目标核对只读取工具名与状态。 */
+  sensitiveForModel?: true | undefined;
+  /** 工具执行期间产生的辅助模型用量。 */
+  usage?: Usage | undefined;
+  /** 计费所用模型，缺省使用当时的会话模型。 */
+  usageModel?: ModelRef | undefined;
   durationMs?: number | undefined;
 }
 

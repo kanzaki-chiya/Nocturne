@@ -71,6 +71,8 @@ export type GoalStatus = (typeof GOAL_STATUSES)[number];
 /** 持久化英文原因；展示时由 goalReasonText 翻译。 */
 export const GOAL_NO_PROGRESS_REASON =
   "No progress: three consecutive goal checks completed without any tool calls. Resume when you can take action.";
+export const GOAL_UNVERIFIED_BLOCK_PREFIX =
+  "Goal blocked after another completion report without new tool calls. Still unverified:";
 
 /** `session.config_changed.goal`：每次都写完整对象 */
 export interface GoalConfig {
@@ -182,7 +184,15 @@ export function visibleGoal(goal: GoalState | undefined): GoalState | undefined 
 }
 
 export function goalReasonText(reason: string): string {
-  return reason === GOAL_NO_PROGRESS_REASON ? "连续三轮核对没有调用任何工具，目标已受阻" : reason;
+  if (reason === GOAL_NO_PROGRESS_REASON) return "连续三轮核对没有调用任何工具，目标已受阻";
+  if (!reason.startsWith(GOAL_UNVERIFIED_BLOCK_PREFIX)) return reason;
+  return reason
+    .replace(
+      GOAL_UNVERIFIED_BLOCK_PREFIX,
+      "两次报告完成之间没有新的工具调用，以下各项仍未通过核对：",
+    )
+    .replace(/^Item (\d+)(?:: )?/gm, "第 $1 项：")
+    .replace(/^Checklist coverage(?:: )?/gm, "清单覆盖范围：");
 }
 
 const GOAL_STATUS_TEXT: Record<GoalStatus, string> = {

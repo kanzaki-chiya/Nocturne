@@ -88,6 +88,8 @@ export interface PermissionPolicy {
    * 任一主体 deny 则整体 deny）。
    */
   evaluate(subjects: readonly PermissionSubject[], options?: EvaluateOptions): SubjectEvaluation;
+  /** 是否只能向辅助模型提供调用状态。复用凭据与授权数据分类，不改变调用判定。 */
+  sensitiveForModel?(subjects: readonly PermissionSubject[]): boolean;
 }
 
 /** Executor 可发出的持久化事件类型 */

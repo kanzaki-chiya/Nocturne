@@ -70,6 +70,8 @@ interface ConfigFile {
   };
   /** 独立的安全审查器；仅 smart 调用 */
   permission?: { reviewer?: SecurityReviewerConfig };
+  /** 目标核对（ADR-0119）：`/goal` 声称完成时的独立抽查；缺省 `{ backend: "off" }`，不可信项目忽略 */
+  goalCheck?: { backend: "off" | "decision" | "smol" };
   /** shell 选择（ADR-0022）：auto | pwsh | powershell | bash | cmd | sh */
   shell?: string;
   /** 非标准安装位置的可执行文件路径；种类仍由 shell 决定。
@@ -108,7 +110,7 @@ interface ConfigFile {
 
 | 字段 | 合并方式 |
 |---|---|
-| `model`、`permissions.preset`、`permission.reviewer`、`reasoningEffort`、`compaction.threshold`、`compaction.pruneLimit`、`mcp.toolSearch`、`turn.*`（含 `turn.loopGuard`，整值覆盖）、`shell`、`shellPath` | 高层覆盖低层 |
+| `model`、`permissions.preset`、`permission.reviewer`、`goalCheck`、`reasoningEffort`、`compaction.threshold`、`compaction.pruneLimit`、`mcp.toolSearch`、`turn.*`（含 `turn.loopGuard`，整值覆盖）、`shell`、`shellPath` | 高层覆盖低层 |
 | `providers` | 按 `id` 合并：同 id 条目浅合并（高层字段覆盖），其中 `models` 按模型 id **逐字段合并**（ADR-0024 第 2 节）：顶层字段（`displayName`/`contextWindow`/`maxOutputTokens`/`pricing`/`protocol`/`endpoints`）逐个覆盖、`capabilities` 逐键覆盖、数组字段（`reasoningEffort`/`endpoints`）由最高层整体替换（显式空数组同样生效、不并集）；不同 id 并存 |
 | `permissions.rules` | 追加：高层规则排在低层之后（权限"后写优先"语义见 permissions.md 5.1） |
 | `mcp.servers` | 按服务器 id 浅合并（同 `providers`）；不同 id 并存 |
@@ -121,7 +123,7 @@ models.dev 数据在启动时从缓存或内置快照读取，启动不联网；
 
 `pricing` 作为整体值替换（包括缓存读写价与分档，不逐字段合并）；手写配置 > 上游清单 > models.dev。服务商可声明 `modelsDevPricing: string`，只从指定 models.dev 服务商键取价，缺省时回退到该条目已有的 `modelsDevProvider`；两个键分别按层覆盖，最后取 `modelsDevPricing ?? modelsDevProvider`，取价不改变既有协议推断路径。前三者都没有时按模型厂商兜底（来源 `vendor`）：按 models.dev 匹配规则在扁平表找到规范 ID `<厂商>/<模型>`（扁平表没有时用同一规则在厂商服务商的模型里找），取该厂商服务商下同名模型的价格，厂商未列出时取 OpenRouter 下同一规范 ID 的价格；快照与缓存为此另收录扁平表厂商前缀中 api.json 存在的服务商，每个保留全部带价格的模型，只保留价格。缓存只在比快照新时使用，旧格式缓存没有这部分价格时厂商价缺失，下一次刷新 models.dev 后补上。形状与来源标记见 [provider-api.md](../protocols/provider-api.md#2-模型与能力)，估算决定见 [ADR-0053](../decisions/ADR-0053-usage-and-cost.md)。
 
-**程序设置层 `settings.json`**（[ADR-0034](../decisions/ADR-0034-settings-layer.md)）：白名单为 `modelRoles`、`model`、`reasoningEffort`、`permissions.preset`、`permission.reviewer`、`compaction.threshold`、`compaction.pruneLimit`、`shell`、`shellPath`、`notifications`，与 `config.json` 共用 schema，按第 1 节的顺序参与通用合并。损坏文件忽略并警告；无效字段逐个忽略并警告，其余合法字段继续生效，不阻塞启动。白名单外字段（包括 `permissions`、`compaction` 中的未知成员）原样保留，但不参与合并；`theme` 等界面偏好仍由客户端解释。写入采用临时文件 + rename，成功后才更新内存，失败保留旧值，同进程并发写入串行执行，避免设置与偏好互相覆盖。
+**程序设置层 `settings.json`**（[ADR-0034](../decisions/ADR-0034-settings-layer.md)）：白名单为 `modelRoles`、`model`、`reasoningEffort`、`permissions.preset`、`permission.reviewer`、`goalCheck`、`compaction.threshold`、`compaction.pruneLimit`、`shell`、`shellPath`、`notifications`，与 `config.json` 共用 schema，按第 1 节的顺序参与通用合并。损坏文件忽略并警告；无效字段逐个忽略并警告，其余合法字段继续生效，不阻塞启动。白名单外字段（包括 `permissions`、`compaction` 中的未知成员）原样保留，但不参与合并；`theme` 等界面偏好仍由客户端解释。写入采用临时文件 + rename，成功后才更新内存，失败保留旧值，同进程并发写入串行执行，避免设置与偏好互相覆盖。
 
 **通知偏好**（[ADR-0056](../decisions/ADR-0056-session-notifications.md)）：`notifications` 段六个字段（`enabled`、`events.attention`、`events.error`、`events.done`、`doneAfterSeconds`、`sound`，缺省 `true/true/true/true/60/true`）逐字段参与通用合并（手写优先、可信项目可覆盖、不可信项目忽略）。`settings.json` 侧逐字段校验，非法字段分别忽略并警告，其他合法字段继续生效；未知成员保留但不参与合并。`SettingItem` / `SettingsPatch` 为六个逐字段条目，`effective` 和 `saved` 为字符串（`"true"` / `"60"`），`null` 清除；Core 只做校验读写，提醒判定在各客户端。
 
@@ -215,6 +217,8 @@ describeToggleImpact({ provider, models? }): ToggleImpact
 **样例检查**（ADR-0057 §8）：`listReviewerSamples()` 返回内置样例（约 20 条，`permission/reviewer-samples.ts`，含越界样例与应当放行的样例）的 `{ id, title, expect }`，`testReviewerSample(id)` 用**当前已保存**的审查器配置和追加规则跑一条，返回 `{ id, title, expected, actual, match, durationMs, reason }`（`expected` / `actual` 为 `allow` 或 `ask`，`ask` 即交人；`block` 与 `unsure` 都记为 `ask`）。审查器关闭或未配置报 `invalid_command`，审查模型不可用报 `invalid_model`；审查失败或超过 30 秒按「交人」记录并带原因，不抛错，调用方中止则抛出中止原因。核心函数 `runReviewerSamples(reviewer, samples, signal)` 逐条返回同样的结果，命中率由 `summarizeSampleResults` 计算。
 
 **绕过审查的显式规则**：用户 / 项目 / CLI 的显式规则命中时不进入 smart 的分流，因此 `shell allow *` 这类规则等于关掉 shell 审查（白名单、直接交人、送审都不再生效）；Runtime 没有为此提供检测接口，设置页不据此硬猜，只在这里说明。
+
+**目标核对 `goalCheck`**（[ADR-0119](../decisions/ADR-0119-goal-check.md)）：`{ backend: "off" | "decision" | "smol" }`（严格对象，不单独配置模型、接入点或凭据），位于 `settings.json` 白名单与 `config.json` 通用合并链中，高层覆盖低层，缺省按 `off` 处理，不可信项目忽略整段。`SettingItem.key` 为 `"goalCheck"`，`effective` 为生效后端原文（`"off"` / `"decision"` / `"smol"`），`saved` 为设置层保存的后端原文或 `undefined`；`SettingsPatch["goalCheck"]` 接受 `{ backend }` 或 `null`（删除设置层值）。首次外发披露偏好记为顶层字符串偏好 `goalCheckDisclosureAccepted`（经 `getPreference`/`setPreference` 读写）。
 
 **通用界面偏好**（[ADR-0029](../decisions/ADR-0029-tui-themes.md) 第 3 节）：`RuntimeConfig` 与公开的 `Runtime` 都提供 `getPreference(key: string): string | undefined`、`setPreference(key: string, value: string | undefined): Promise<void>`。它们读写 `settings.json` 顶层的普通字符串字段；`undefined` 删除字段。写入拒绝无效字段名、`shell`/`shellPath` 等有专用接口的保留字段和非字符串值；原子写盘成功后才更新内存，失败时旧值不变，未知字段原样保留。`Runtime` 委托注入的 `RuntimeConfig`；`createRuntime` 未传 `config` 时，读取返回 `undefined`，写入返回被拒绝的 Promise，错误为「未注入 RuntimeConfig，无法保存偏好」。Core 不解释偏好值的 UI 含义；TUI 在首次渲染前读取 `theme`，由 TUI 判断 `dark`/`light`，非法值回退 `dark`；`/theme` 保存失败时保持原主题并留在选择页提示错误。
 

@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import {
   DEFAULT_SUBAGENT_PROFILE,
+  GOAL_CHECK_BACKENDS,
   REASONING_EFFORT_LEVELS,
   REASONING_EFFORT_ORDER,
   PERMISSION_PRESET_NAMES,
@@ -443,6 +444,10 @@ const configFileSchema = z.object({
       }
     })
     .optional(),
+  goalCheck: z
+    .object({ backend: z.enum(GOAL_CHECK_BACKENDS) })
+    .strict()
+    .optional(),
   /** 子代理档位（ADR-0058）与插件子代理模型（ADR-0105）：按名称逐条校验 */
   subagents: z
     .object({
@@ -585,7 +590,7 @@ const CREDENTIAL_KEYS = new Set([
 
 /** mcp.servers.*.env 中合法的凭据引用形态：`${NAME}` 引用运行时环境变量 */
 const ENV_REFERENCE = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/;
-const CREDENTIAL_NAME = /key|token|secret|password|credential|auth/i;
+export const CREDENTIAL_NAME = /key|token|secret|password|credential|auth/i;
 
 /**
  * 凭据字段硬拒绝（config.md 第 3 节）：providers 条目的内联凭据字段、

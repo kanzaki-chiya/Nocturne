@@ -27,6 +27,7 @@ interface RequestRecord {
   model: ModelRef;
   usage: Usage;
   turnId?: string | undefined;
+  auxiliaryTool?: true;
 }
 /** 带 timing 的 message.assistant（不要求有 usage） */
 interface TimingRecord {
@@ -230,6 +231,18 @@ function parse(text: string): FileAggregate {
           if (typeof input?.name === "string") result.skills.push({ time, name: input.name });
         }
         break;
+      case "tool.completed": {
+        const model = e.payload.usageModel ?? current;
+        if (e.payload.usage && model)
+          result.requests.push({
+            time,
+            usage: e.payload.usage,
+            model,
+            turnId: e.turnId,
+            auxiliaryTool: true,
+          });
+        break;
+      }
     }
   }
   return result;
@@ -280,6 +293,8 @@ export function createUsageStats(deps: {
         buckets: Map<number, LatencyAccumulator>;
         fullInputCost: number;
         actualInputCost: number;
+        cacheEligibleInput: number;
+        cacheEligibleRead: number;
         first: number;
         last: number;
       }
@@ -293,6 +308,8 @@ export function createUsageStats(deps: {
           buckets: new Map(),
           fullInputCost: 0,
           actualInputCost: 0,
+          cacheEligibleInput: 0,
+          cacheEligibleRead: 0,
           first: Infinity,
           last: -Infinity,
         };
@@ -389,11 +406,17 @@ export function createUsageStats(deps: {
         const x = extraFor(r.model);
         x.first = Math.min(x.first, r.time);
         x.last = Math.max(x.last, r.time);
-        if (cost && prices) {
-          // 缓存节省：全部输入按输入价（同一档位规则）对比实际输入侧费用
-          const full = estimateCost({ inputTokens: r.usage.inputTokens, outputTokens: 0 }, prices);
-          x.fullInputCost += full?.input ?? 0;
-          x.actualInputCost += cost.input + cost.cacheRead + cost.cacheWrite;
+        if (!r.auxiliaryTool) {
+          x.cacheEligibleInput += r.usage.inputTokens;
+          x.cacheEligibleRead += r.usage.cacheReadTokens ?? 0;
+          if (cost && prices) {
+            const full = estimateCost(
+              { inputTokens: r.usage.inputTokens, outputTokens: 0 },
+              prices,
+            );
+            x.fullInputCost += full?.input ?? 0;
+            x.actualInputCost += cost.input + cost.cacheRead + cost.cacheWrite;
+          }
         }
         for (const total of [m, stats.totals]) {
           total.inputTokens += r.usage.inputTokens;
@@ -442,11 +465,15 @@ export function createUsageStats(deps: {
     }
     for (const path of cache.keys()) if (!live.has(path)) cache.delete(path);
     stats.models = [...models.values()];
+    let cacheEligibleRead = 0;
+    let cacheEligibleInput = 0;
     for (const m of stats.models) {
-      m.cacheHitRate = m.inputTokens ? (m.cacheReadTokens ?? 0) / m.inputTokens : 0;
       if (!m.pricing) stats.unpricedModels.push(m.model);
       const x = extra.get(modelKey(m.model));
       if (!x) continue;
+      cacheEligibleRead += x.cacheEligibleRead;
+      cacheEligibleInput += x.cacheEligibleInput;
+      m.cacheHitRate = x.cacheEligibleInput ? x.cacheEligibleRead / x.cacheEligibleInput : 0;
       if (x.fullInputCost > 0)
         m.cacheSavings = (x.fullInputCost - x.actualInputCost) / x.fullInputCost;
       if (Number.isFinite(x.first)) {
@@ -478,6 +505,7 @@ export function createUsageStats(deps: {
           };
         });
     }
+    stats.cacheHitRate = cacheEligibleInput ? cacheEligibleRead / cacheEligibleInput : 0;
     for (const [date, perDay] of dailyModels) {
       const d = days.get(date);
       if (d) d.models = [...perDay.values()].sort((a, b) => b.tokens - a.tokens);

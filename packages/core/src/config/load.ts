@@ -446,6 +446,12 @@ export async function loadConfig(
             : undefined,
         ],
         [
+          "goalCheck",
+          "goalCheck",
+          merged.resolved.goalCheck?.backend ?? "off",
+          saved.goalCheck?.backend,
+        ],
+        [
           "reasoningEffort",
           "reasoningEffort",
           merged.resolved.reasoningEffort ?? "off",

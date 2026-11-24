@@ -45,6 +45,7 @@ import type {
   JsonSchema,
   McpServerEntry,
   McpServerPayload,
+  ModelRef,
   NoteItem,
   PermissionAction,
   PermissionSubject,
@@ -154,18 +155,26 @@ export type ToolResult<Output = unknown> =
   | {
       status: "ok";
       modelContent: string;
-      output?: Output;
+      output?: Output | undefined;
       attachments?: ToolResultAttachment[] | undefined;
       files?: FileAttachment[] | undefined;
       savedImages?: ImageAttachment[] | undefined;
+      /** 工具执行期间产生的辅助模型用量（ADR-0119 §7）；由执行器透传到 tool.completed */
+      usage?: Usage | undefined;
+      /** 产生 `usage` 的辅助模型（用于跨会话按模型拆分用量与费用，省略时回落会话当前模型） */
+      usageModel?: ModelRef | undefined;
     }
   | {
       status: "error";
       modelContent: string;
-      output?: Output;
+      output?: Output | undefined;
       attachments?: ToolResultAttachment[] | undefined;
       files?: FileAttachment[] | undefined;
       savedImages?: ImageAttachment[] | undefined;
+      /** 工具执行期间产生的辅助模型用量（ADR-0119 §7）；由执行器透传到 tool.completed */
+      usage?: Usage | undefined;
+      /** 产生 `usage` 的辅助模型（用于跨会话按模型拆分用量与费用，省略时回落会话当前模型） */
+      usageModel?: ModelRef | undefined;
       error: { code: string; message: string };
     };
 

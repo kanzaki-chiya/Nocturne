@@ -196,9 +196,9 @@
 
 ### work-modes（`src/work-modes/`）
 
-- **负责**：执行方式（[ADR-0076](../decisions/ADR-0076-work-modes.md)、[ADR-0089](../decisions/ADR-0089-ensemble.md)）的说明块正文与 `<work-mode>` 文本块拼装；由 `core/index` 在提交准备阶段接入。斜杠解析与显示文本是纯函数，放在 `protocol/work-modes.ts`，客户端共用。
-- **不负责**：Turn 编排（不进 Agent Loop）、权限判定。
-- **依赖**：仅 `protocol`（dependency-cruiser 规则 `work-modes-deps` 固化）。
+- **负责**：执行方式的说明块与 `<work-mode>` 文本块拼装，以及目标报告时的独立核对、证据预算和脱敏。`core/index` 注入生效模型、会话事件、权限主体分类与目标状态写入。斜杠解析与显示文本由客户端共用。详见 [ADR-0076](../decisions/ADR-0076-work-modes.md) 和 [ADR-0119](../decisions/ADR-0119-goal-check.md)。
+- **不负责**：Turn 编排、权限判定。
+- **依赖**：`protocol`、`provider/index` 和 `config/schema` 的 `CREDENTIAL_NAME`，由 dependency-cruiser `work-modes-deps` 固化。
 
 ### resident（`src/resident/`）
 

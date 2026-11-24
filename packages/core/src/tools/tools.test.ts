@@ -1795,4 +1795,98 @@ describe("ToolTraits.maxOutputChars 通用预算声明", () => {
     expect(execDispatched.status).toBe("ok");
     expect(execDispatched.result.output).toEqual(largePayload);
   });
+
+  it("执行器在 ok 与 error 结果上透传 usage、usageModel 与结构化 output（ADR-0119 §7）", async () => {
+    const h = await makeHarness(tmpWorkspace(), allowAll);
+    const okTool: ToolDefinition<
+      Record<string, never>,
+      { status: string; check: { result: string } }
+    > = {
+      name: "usage_ok_tool",
+      description: "返回 ok 与辅助模型用量",
+      inputSchema: { type: "object", additionalProperties: false },
+      traits: { mutates: false, concurrencySafe: true },
+      permissionSubjects: () => [],
+      async execute() {
+        return {
+          status: "ok",
+          modelContent: "passed",
+          output: { status: "met", check: { result: "passed" } },
+          usage: { inputTokens: 200, outputTokens: 10 },
+          usageModel: { provider: "ai-studio", model: "gemini-decision-1" },
+        };
+      },
+    };
+    const errTool: ToolDefinition<
+      Record<string, never>,
+      { status: string; check: { result: string } }
+    > = {
+      name: "usage_err_tool",
+      description: "返回 error、结构化 output 与辅助模型用量",
+      inputSchema: { type: "object", additionalProperties: false },
+      traits: { mutates: false, concurrencySafe: true },
+      permissionSubjects: () => [],
+      async execute() {
+        return {
+          status: "error",
+          modelContent: "unverified item 1",
+          output: { status: "met", check: { result: "rejected" } },
+          error: { code: "goal_unverified", message: "item 1 failed" },
+          usage: { inputTokens: 350, outputTokens: 15 },
+          usageModel: { provider: "openai", model: "gpt-4o-mini" },
+        };
+      },
+    };
+    const noUsageTool: ToolDefinition<Record<string, never>> = {
+      name: "no_usage_tool",
+      description: "只带 usageModel 但无 usage 时不写孤立 usageModel",
+      inputSchema: { type: "object", additionalProperties: false },
+      traits: { mutates: false, concurrencySafe: true },
+      permissionSubjects: () => [],
+      async execute() {
+        return {
+          status: "ok",
+          modelContent: "ok",
+          usageModel: { provider: "openai", model: "gpt-4o-mini" },
+        };
+      },
+    };
+    const registry = createToolRegistry();
+    registry.register(okTool);
+    registry.register(errTool);
+    registry.register(noUsageTool);
+    const executor = createToolExecutor(registry);
+
+    await executor.execute(call("usage_ok_tool", {}), h.scope);
+    const okEvent = h.events.find(
+      (e) => e.type === "tool.completed" && e.payload.name === "usage_ok_tool",
+    );
+    expect(okEvent?.payload).toMatchObject({
+      status: "ok",
+      output: { status: "met", check: { result: "passed" } },
+      usage: { inputTokens: 200, outputTokens: 10 },
+      usageModel: { provider: "ai-studio", model: "gemini-decision-1" },
+    });
+
+    const errExec = await executor.execute(call("usage_err_tool", {}), h.scope);
+    expect(errExec.status).toBe("error");
+    expect(errExec.result.output).toEqual({ status: "met", check: { result: "rejected" } });
+    const errEvent = h.events.find(
+      (e) => e.type === "tool.completed" && e.payload.name === "usage_err_tool",
+    );
+    expect(errEvent?.payload).toMatchObject({
+      status: "error",
+      error: { code: "goal_unverified", message: "item 1 failed" },
+      output: { status: "met", check: { result: "rejected" } },
+      usage: { inputTokens: 350, outputTokens: 15 },
+      usageModel: { provider: "openai", model: "gpt-4o-mini" },
+    });
+
+    await executor.execute(call("no_usage_tool", {}), h.scope);
+    const noUsageEvent = h.events.find(
+      (e) => e.type === "tool.completed" && e.payload.name === "no_usage_tool",
+    );
+    expect(noUsageEvent?.payload).not.toHaveProperty("usage");
+    expect(noUsageEvent?.payload).not.toHaveProperty("usageModel");
+  });
 });

@@ -245,9 +245,12 @@ module.exports = {
     {
       name: "work-modes-deps",
       severity: "error",
-      comment: "work-modes（执行方式，ADR-0076）只能依赖 protocol；由 core/index 接入",
+      comment:
+        "work-modes 依赖 protocol、provider 公开入口与 config 的凭据键名规则（ADR-0119）；由 core/index 装配",
       from: { path: "^packages/core/src/work-modes/" },
-      to: { path: "^packages/core/src/(?!work-modes/|protocol/)" },
+      to: {
+        path: "^packages/core/src/(?!work-modes/|protocol/|provider/index\\.ts$|config/schema\\.ts$)",
+      },
     },
     {
       name: "resident-deps",

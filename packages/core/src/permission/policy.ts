@@ -35,7 +35,7 @@ import {
   shellDialect,
   shellSegments,
 } from "./pattern.js";
-import { presetRules, type PresetContext } from "./presets.js";
+import { authorizationDataPatterns, presetRules, type PresetContext } from "./presets.js";
 import { classifySmartShell } from "./smart-shell.js";
 import { computeWhere } from "./where.js";
 import type { EvaluateOptions, PermissionPolicy, SubjectEvaluation } from "./types.js";
@@ -761,7 +761,23 @@ export function createRulePolicy(options: RulePolicyOptions): PermissionPolicy {
     return { action, hit, note, userOnly };
   }
 
+  const authData =
+    options.presetContext?.nocturneHome === undefined
+      ? []
+      : authorizationDataPatterns(options.presetContext.nocturneHome, caseSensitive);
   return {
+    sensitiveForModel(subjects) {
+      return subjects.some(
+        (subject) =>
+          isProtected(subject) ||
+          isExternalCredential(subject) ||
+          (subject.kind === "shell" && isCredentialCommand(subject)) ||
+          (isPathKind(subject.kind) &&
+            authData.some((pattern) =>
+              matchPattern(pattern, subject, workspaceRoot, caseSensitive),
+            )),
+      );
+    },
     evaluate(subjects, options?: EvaluateOptions): SubjectEvaluation {
       const evaluated = subjects.map((s) => ({
         ...s,

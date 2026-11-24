@@ -124,6 +124,8 @@ PermissionPolicy.evaluate()             → 计算 where，匹配规则   纯函
 - 命中凭据后端命令，或凭据文件名所在路径片段指向真实凭据或位置无法静态确定的 shell 命令至少 `ask`，且不交给模型审查器自动批准（细则见[第 6 节第 5 条](#6-预设)）。
 - `oauth-host.json` 与 `locks/oauth-*.lock` 不是机密，不纳入硬拒绝。
 
+目标核对沿用上述凭据分类及第 6 节的授权数据路径。命中任一主体的调用仅提供工具名和状态，详见 [ADR-0119 §3](../decisions/ADR-0119-goal-check.md#3-核对输入由-runtime-组装)。
+
 对每个主体：
 
 ```text

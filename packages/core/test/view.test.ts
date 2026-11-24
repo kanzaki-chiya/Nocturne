@@ -6,7 +6,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 import { createRuntime, type Runtime, type RuntimeSession } from "../src/index.js";
 import { FakeProvider, ProviderError, type FakeScript } from "../src/provider/index.js";
@@ -1387,4 +1387,167 @@ it("ADR-0089 修订：ensembleQuietReminder 不进 SessionView.entries、不改�
   // 新版安静提醒不进 entries，旧日志 Runtime 帖照常在 entries 和 ensemble.posts 中
   expect(replay.entries.map((e) => e.key)).toEqual(["u:u1", "u:u2", "a:a3"]);
   expect(replay.ensemble?.posts.map((p) => p.fromKind)).toEqual(["runtime"]);
+});
+
+it("tool.completed.usage 计入会话视图累计用量而不计入 lastTurn，且回退保留、分叉不重复累加（ADR-0119 §7）", () => {
+  const model = { provider: "fake", model: "fake-1" };
+  const decisionModel = { provider: "ai-studio", model: "gemini-decision-1" };
+  const events: DurableEvent[] = [
+    {
+      type: "session.created",
+      sessionId: "s1",
+      seq: 1,
+      time: "2026-11-24T00:00:00.000Z",
+      payload: {
+        formatVersion: 1,
+        nocturneVersion: "test",
+        cwd: "/w",
+        workspaceRoot: "/w",
+        model,
+        permissionPreset: "default",
+      },
+    },
+    {
+      type: "turn.started",
+      sessionId: "s1",
+      seq: 2,
+      time: "2026-11-24T00:00:01.000Z",
+      turnId: "t1",
+      payload: { turnIndex: 1 },
+    },
+    {
+      type: "message.user",
+      sessionId: "s1",
+      seq: 3,
+      time: "2026-11-24T00:00:02.000Z",
+      turnId: "t1",
+      payload: { messageId: "u1", content: [{ type: "text", text: "hi" }] },
+    },
+    {
+      type: "message.assistant",
+      sessionId: "s1",
+      seq: 4,
+      time: "2026-11-24T00:00:03.000Z",
+      turnId: "t1",
+      payload: {
+        messageId: "a1",
+        model,
+        content: [],
+        toolCalls: [{ callId: "c1", name: "custom_check", input: {} }],
+        usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 800 },
+        finishReason: "tool_calls",
+      },
+    },
+    {
+      type: "tool.completed",
+      sessionId: "s1",
+      seq: 5,
+      time: "2026-11-24T00:00:04.000Z",
+      turnId: "t1",
+      payload: {
+        callId: "c1",
+        name: "custom_check",
+        status: "error",
+        modelContent: "unverified",
+        error: { code: "goal_unverified", message: "failed" },
+        usage: { inputTokens: 500, outputTokens: 20 },
+        usageModel: decisionModel,
+      },
+    },
+    {
+      type: "turn.completed",
+      sessionId: "s1",
+      seq: 6,
+      time: "2026-11-24T00:00:05.000Z",
+      turnId: "t1",
+      payload: {
+        reason: "done",
+        steps: 1,
+        usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 800 },
+      },
+    },
+  ];
+
+  const live = createSessionView();
+  for (const ev of events.slice(0, 5)) reduceSessionView(live, ev);
+  // 进行中 Turn：sessionUsageSoFar 同时包含主模型步骤与已完成工具用量，无重复
+  expect(sessionUsageSoFar(live)).toEqual({
+    inputTokens: 1500,
+    outputTokens: 120,
+    cacheReadTokens: 800,
+  });
+
+  const completedTurn = events[5];
+  assert(completedTurn);
+  reduceSessionView(live, completedTurn);
+  expect(live.usage).toEqual({
+    inputTokens: 1500,
+    outputTokens: 120,
+    cacheReadTokens: 800,
+  });
+  expect(live.lastTurn?.usage).toEqual({
+    inputTokens: 1000,
+    outputTokens: 100,
+    cacheReadTokens: 800,
+  });
+  expect(toolEntries(live)[0]?.result).toMatchObject({
+    usage: { inputTokens: 500, outputTokens: 20 },
+    usageModel: decisionModel,
+  });
+
+  // V1：重放与实时等价
+  const replay = replaySessionView(events);
+  expect(replay).toEqual({ ...live, revision: replay.revision });
+
+  // 回退保留已消耗的工具用量
+  const rewound: DurableEvent = {
+    type: "session.rewound",
+    sessionId: "s1",
+    seq: 7,
+    time: "2026-11-24T00:00:06.000Z",
+    payload: { targetSeq: 3, mode: "conversation", files: [] },
+  };
+  reduceSessionView(live, rewound);
+  expect(live.usage).toEqual({
+    inputTokens: 1500,
+    outputTokens: 120,
+    cacheReadTokens: 800,
+  });
+
+  // 分叉会话：复制的父事件 tool.completed.usage 不累加，仅累加子会话自身事件
+  const inheritedTool = events[4];
+  assert(inheritedTool);
+  const forked = replaySessionView([
+    {
+      type: "session.created",
+      sessionId: "child",
+      seq: 1,
+      time: "2026-11-24T00:01:00.000Z",
+      payload: {
+        formatVersion: 1,
+        nocturneVersion: "test",
+        cwd: "/w",
+        workspaceRoot: "/w",
+        model,
+        permissionPreset: "default",
+        forkedFrom: { sessionId: "s1", seq: 6 },
+      },
+    },
+    { ...inheritedTool, seq: 2 },
+    {
+      type: "tool.completed",
+      sessionId: "child",
+      seq: 3,
+      time: "2026-11-24T00:01:01.000Z",
+      turnId: "t2",
+      payload: {
+        callId: "c2",
+        name: "custom_check",
+        status: "ok",
+        modelContent: "ok",
+        usage: { inputTokens: 30, outputTokens: 5 },
+      },
+    },
+  ]);
+  expect(forked.usage).toEqual({ inputTokens: 30, outputTokens: 5 });
 });

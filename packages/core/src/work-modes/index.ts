@@ -1,7 +1,4 @@
-/**
- * 执行方式模块（ADR-0076）：说明块正文与模式状态的判定。不进 Agent Loop，
- * 由 core/index 在提交准备与 Turn 边界接入；只依赖 protocol。
- */
+/** 执行方式的说明、续跑判定与目标独立核对。由 Core 装配并接入会话。 */
 export {
   goalResumeBody,
   planApprovedBody,
@@ -9,4 +6,5 @@ export {
   workModeBody,
   type WorkModeContext,
 } from "./prompts.js";
-export { goalContinuation, type GoalContinuation } from "./goal.js";
+export { createGoalReporter, goalContinuation, type GoalContinuation } from "./goal.js";
+export { checkGoalWithDecision, checkGoalWithSmol, goalCheckUnavailable } from "./goal-check.js";

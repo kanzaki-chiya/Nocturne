@@ -27,6 +27,7 @@ export {
   validateExternalAgentConfig,
 } from "./external-agents.js";
 export * from "./errors.js";
+export { CREDENTIAL_NAME } from "./schema.js";
 export { loadConfig } from "./load.js";
 export { workspaceKey } from "./grants.js";
 // settings.json 设置层（ADR-0034）：loadConfig 内部使用，测试可注入

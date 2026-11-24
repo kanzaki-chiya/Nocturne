@@ -782,4 +782,180 @@ describe("usageStats 延迟、性能序列与逐日按模型用量", () => {
       expect(again.models[0]?.latency?.tokensPerSecond).toBe(400 / 4);
     });
   });
+
+  it("tool.completed.usage 计入跨会话用量且不按工具名判断，不污染 Turn、主模型缓存命中率与性能序列（ADR-0119 §7）", async () => {
+    const decisionModel = { provider: "ai-studio", model: "gemini-decision-1" };
+    const t0 = at(10, 9);
+    const t1 = new Date(t0.getTime() + 2000);
+    const t2 = new Date(t0.getTime() + 4000);
+    const t3 = new Date(t0.getTime() + 6000);
+    const created: DurableEvent<"session.created"> = {
+      sessionId: "s-tool-usage",
+      seq: 1,
+      time: t0.toISOString(),
+      type: "session.created",
+      payload: {
+        formatVersion: 1,
+        nocturneVersion: "test",
+        cwd: "/w",
+        workspaceRoot: "/w",
+        model: m1,
+        permissionPreset: "default",
+      },
+    };
+    const toolCompletedDecision: DurableEvent<"tool.completed"> = {
+      sessionId: "s-tool-usage",
+      seq: 4,
+      time: t2.toISOString(),
+      turnId: "turn-1",
+      type: "tool.completed",
+      payload: {
+        callId: "c1",
+        name: "any_tool_name",
+        status: "error",
+        modelContent: "rejected",
+        error: { code: "goal_unverified", message: "missing" },
+        usage: { inputTokens: 600, outputTokens: 0 },
+        usageModel: decisionModel,
+      },
+    };
+    const events: DurableEvent[] = [
+      created,
+      {
+        sessionId: "s-tool-usage",
+        seq: 2,
+        time: t0.toISOString(),
+        turnId: "turn-1",
+        type: "turn.started",
+        payload: { turnIndex: 1 },
+      },
+      {
+        sessionId: "s-tool-usage",
+        seq: 3,
+        time: t1.toISOString(),
+        turnId: "turn-1",
+        type: "message.assistant",
+        payload: {
+          messageId: "a1",
+          model: m1,
+          content: [],
+          toolCalls: [{ callId: "c1", name: "any_tool_name", input: {} }],
+          usage: { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 800 },
+          timing: { ttftMs: 100, durationMs: 1100 },
+          finishReason: "tool_calls",
+        },
+      },
+      toolCompletedDecision,
+      {
+        sessionId: "s-tool-usage",
+        seq: 5,
+        time: t3.toISOString(),
+        turnId: "turn-1",
+        type: "turn.completed",
+        payload: {
+          reason: "done",
+          steps: 1,
+          usage: { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 800 },
+        },
+      },
+    ];
+    const fallbackEvents: DurableEvent[] = [
+      {
+        ...created,
+        sessionId: "s-tool-fallback",
+        payload: { ...created.payload, model: m2 },
+      },
+      {
+        sessionId: "s-tool-fallback",
+        seq: 2,
+        time: t2.toISOString(),
+        turnId: "turn-1",
+        type: "tool.completed",
+        payload: {
+          callId: "c2",
+          name: "another_tool",
+          status: "ok",
+          modelContent: "ok",
+          usage: { inputTokens: 400, outputTokens: 50 },
+          // 省略 usageModel 时回落会话当前模型 m2
+        },
+      },
+    ];
+    const forkEvents: DurableEvent[] = [
+      {
+        ...created,
+        sessionId: "s-fork",
+        payload: {
+          ...created.payload,
+          forkedFrom: { sessionId: "s-tool-usage", seq: 5 },
+        },
+      },
+      // 复制自父会话的 tool.completed 不应重复计入
+      { ...toolCompletedDecision, seq: 2 },
+    ];
+    const serialize = (list: DurableEvent[]) => list.map((e) => JSON.stringify(e) + "\n").join("");
+
+    await withLogs(
+      {
+        "s-tool-usage": serialize(events),
+        "s-tool-fallback": serialize(fallbackEvents),
+        "s-fork": serialize(forkEvents),
+      },
+      async (stats) => {
+        const result = await stats({ days: 7 });
+        expect(result.turns).toBe(1);
+        expect(result.totals.inputTokens).toBe(2000);
+        expect(result.totals.outputTokens).toBe(250);
+        expect(result.totals.cacheReadTokens).toBe(800);
+
+        const main = result.models.find(
+          (m) => m.model.provider === m1.provider && m.model.model === m1.model,
+        );
+        const decision = result.models.find(
+          (m) =>
+            m.model.provider === decisionModel.provider && m.model.model === decisionModel.model,
+        );
+        const fallback = result.models.find(
+          (m) => m.model.provider === m2.provider && m.model.model === m2.model,
+        );
+        expect(decision).toMatchObject({
+          inputTokens: 600,
+          outputTokens: 0,
+          turns: 0,
+          requests: 1,
+          performance: [],
+        });
+        expect(decision?.latency).toBeUndefined();
+
+        expect(fallback).toMatchObject({
+          inputTokens: 400,
+          outputTokens: 50,
+          turns: 0,
+          requests: 1,
+          performance: [],
+        });
+        expect(fallback?.latency).toBeUndefined();
+
+        // 主模型：缓存命中率、Turn 数与延迟/性能样本完全不受工具辅助模型用量影响
+        expect(main).toMatchObject({
+          inputTokens: 1000,
+          outputTokens: 200,
+          cacheReadTokens: 800,
+          cacheHitRate: 0.8,
+          turns: 1,
+          requests: 1,
+        });
+        expect(main?.latency?.samples).toBe(1);
+        expect(main?.latency?.tokensPerSecond).toBe(200 / 1);
+        expect(main?.performance).toHaveLength(1);
+        expect(main?.performance[0]?.samples).toBe(1);
+
+        // 当日按模型拆分合计等于当日总 token
+        const day = result.daily.find((d) => d.date === "2026-10-10");
+        expect(day?.requests).toBe(3);
+        expect(day?.tokens).toBe(2250);
+        expect(day?.models?.reduce((n, item) => n + item.tokens, 0)).toBe(2250);
+      },
+    );
+  });
 });

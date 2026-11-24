@@ -49,8 +49,10 @@ interface SessionView {
     | undefined;
   /** 已完结 Turn 数 */
   turnCount: number;
-  /** 累计用量（turn.completed 与本会话 page.model_called 的用量累加） */
+  /** 累计用量（turn.completed、本会话 page.model_called 与 tool.completed.usage 的用量累加） */
   usage: Usage;
+  /** 工具辅助调用累计量。已计入 usage，计算会话命中率时扣除。 */
+  toolUsage?: Usage;
   /** 等待用户回复的权限请求（至多一个：执行管线串行） */
   pendingPermission: PendingPermission | undefined;
   /** 活动转发池中等待用户确认的子代理权限请求（只由临时事件 subagent.permissions 整份替换；持久重放恒为 []，ADR-0091） */
@@ -233,7 +235,7 @@ interface SessionNotice {
 | `permission.requested` | `pendingPermission` 设置；同 `callId` 的 `live.tools` 项移除并晋升为 `awaiting_permission` 条目（回填 `subjects`），无 live/entries 对应物则新建 `awaiting_permission` 条目（`name` 暂缺）；记录进 `pendingByCallId` |
 | `permission.resolved` | `requestId` 匹配则清 `pendingPermission`、`pendingByCallId`；`callId` 的 entries 条目更新 `resolution`（`deny` 时 `status` 仍等 `tool.completed` 落定）；追加 `permission` notice 条目（`source: "reviewer"` 时不追加：结论已由该工具条目的 `review` 展示）。归约器内部维护 `Map<callId, resolved>`，供晚到的 `started`/`completed` 回填 |
 | `tool.started` | 同 `callId` 的 `live.tools` 项移除并晋升（`inputText` 丢弃）；`entries` 中已有条目（requested 建的 awaiting）则更新为 `running` 并填 `input`/`subjects`/`permission`/`turnId`/`name`；否则新建 `running` 条目 |
-| `tool.completed` | 若为合法且成功的 `todo_write` / `note_write`（`todoItemsFromCompletion` / `noteItemsFromCompletion`），分别更新 `todos` / `notes`；同 `callId` 的 `live.tools` 项丢弃（未执行即终态）；`entries` 条目不存在则新建（`denied`/`cancelled` 路径无 `started`）；`status` 取 `payload.status`，填 `result`/`seq`（若尚无）/`turnId`/`name`；清 `liveOutput`；同 `callId` 的 `pendingQuestion` 清除（ADR-0032） |
+| `tool.completed` | 若为合法且成功的 `todo_write` / `note_write`（`todoItemsFromCompletion` / `noteItemsFromCompletion`），分别更新 `todos` / `notes`；同 `callId` 的 `live.tools` 项丢弃（未执行即终态）；`entries` 条目不存在则新建（`denied`/`cancelled` 路径无 `started`）；`status` 取 `payload.status`，填 `result`（含可选 `usage` / `usageModel`）/`seq`（若尚无）/`turnId`/`name`；清 `liveOutput`；同 `callId` 的 `pendingQuestion` 清除（ADR-0032）；本会话带 `usage` 时累加至 `view.usage`（回退保留、分叉继承事件不重复累加，不进入 `lastTurn.usage`） |
 | `context.compacted` | `kind: "prune"` 的修剪不产生条目；`kind: "summary"` 追加 `compacted` notice 条目，`message` 为「上下文已压缩为摘要」（`compactedNoticeText`），不含 kind 与 throughSeq，payload 原样保留。两种事件均照常持久化并参与上下文构建，`lastSeq` 与重放事件簿记照常推进 |
 | `turn.completed` | `currentTurn` 匹配则清除；`lastTurn`（含 `recovered`）/`turnCount`/`usage` 更新；`status=idle`；`retry`、`pendingPermission`、`pendingQuestion` 清空；**清空整个 `live`**（管线串行、同一时刻至多一个 Turn；`LiveTool.turnId` 可为空，按 turnId 筛选会留下无持久落点的孤儿，破坏 V8）；`reason!=="done"` 时追加 `turn_end` notice 条目（`recovered:true` 时文案区分"本次失败/中断"与"上次进程退出"） |
 

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CREDENTIAL_NAME,
   createPlatform,
   createRuntime,
   FakeProvider,
@@ -12,6 +13,7 @@ import {
   type SettingsPatch,
   type CredentialStore,
 } from "../src/index.js";
+import { CREDENTIAL_NAME as SCHEMA_CREDENTIAL_NAME } from "../src/config/schema.js";
 import { createRulePolicy, PERMISSION_PRESET_NAMES } from "../src/permission/index.js";
 
 let root: string;
@@ -1080,5 +1082,118 @@ describe("ADR-0034 设置层", () => {
     expect(partial.base.shell).toBe("cmd");
     expect(partial.base.warnings.join("\n")).toContain("memory.global");
     expect(partial.memoryConfig()).toEqual({ global: true, project: false });
+  });
+
+  it("goalCheck：缺省 off、settings 读写与校验、高层覆盖、不可信项目忽略、坏配置告警（ADR-0119）", async () => {
+    // 1. 缺省为 off
+    const defaults = await load();
+    expect(defaults.base.goalCheck).toBeUndefined();
+    expect(defaults.describeSettings().find((item) => item.key === "goalCheck")).toEqual({
+      key: "goalCheck",
+      effective: "off",
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+
+    // 2. updateSettings 写入 decision / smol / off 与 null 清除
+    await defaults.updateSettings({ goalCheck: { backend: "decision" } });
+    expect(await readSettings()).toEqual({ goalCheck: { backend: "decision" } });
+    expect(defaults.describeSettings().find((item) => item.key === "goalCheck")).toEqual({
+      key: "goalCheck",
+      effective: "decision",
+      saved: "decision",
+      source: "settings",
+      overridden: false,
+    });
+    expect((await load()).base.goalCheck).toEqual({ backend: "decision" });
+
+    await defaults.updateSettings({ goalCheck: { backend: "smol" } });
+    expect(defaults.describeSettings().find((item) => item.key === "goalCheck")).toMatchObject({
+      effective: "smol",
+      saved: "smol",
+      source: "settings",
+      overridden: false,
+    });
+
+    // 3. 拒绝非法补丁、未知字段及 setPreference 写保留键；允许 goalCheckDisclosureAccepted 偏好
+    await expect(
+      defaults.updateSettings({ goalCheck: { backend: "bogus" } } as never),
+    ).rejects.toThrow();
+    await expect(
+      defaults.updateSettings({ goalCheck: { backend: "decision", model: "x" } } as never),
+    ).rejects.toThrow();
+    await expect(defaults.setPreference("goalCheck", "decision")).rejects.toThrow(TypeError);
+    await defaults.setPreference("goalCheckDisclosureAccepted", "google");
+    expect(defaults.getPreference("goalCheckDisclosureAccepted")).toBe("google");
+
+    // 4. null 清除设置层，恢复缺省 off，并保留其他偏好
+    await defaults.updateSettings({ goalCheck: null });
+    expect(await readSettings()).toEqual({ goalCheckDisclosureAccepted: "google" });
+    expect(defaults.describeSettings().find((item) => item.key === "goalCheck")).toEqual({
+      key: "goalCheck",
+      effective: "off",
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+
+    // 5. 用户 config.json 覆盖 settings.json，overridden = true
+    await json("settings.json", { goalCheck: { backend: "decision" } });
+    await json("config.json", { goalCheck: { backend: "smol" } });
+    const layered = await load();
+    expect(layered.base.goalCheck).toEqual({ backend: "smol" });
+    expect(layered.describeSettings().find((item) => item.key === "goalCheck")).toEqual({
+      key: "goalCheck",
+      effective: "smol",
+      saved: "decision",
+      source: "user",
+      overridden: true,
+    });
+
+    // 6. 项目层不可信时忽略 goalCheck，信任后生效
+    await rm(path.join(home, "config.json"), { force: true });
+    await rm(path.join(home, "settings.json"), { force: true });
+    await mkdir(path.join(workspace, ".nocturne"), { recursive: true });
+    await writeFile(
+      path.join(workspace, ".nocturne", "config.json"),
+      JSON.stringify({ goalCheck: { backend: "decision" } }),
+    );
+    const untrusted = await load();
+    expect((await untrusted.forWorkspace(workspace)).resolved.goalCheck).toBeUndefined();
+    expect(
+      untrusted.describeSettings(workspace).find((item) => item.key === "goalCheck"),
+    ).toMatchObject({
+      effective: "off",
+      saved: undefined,
+      source: "default",
+      overridden: false,
+    });
+
+    await untrusted.setWorkspaceTrusted(workspace, true);
+    expect((await untrusted.forWorkspace(workspace)).resolved.goalCheck).toEqual({
+      backend: "decision",
+    });
+    expect(
+      untrusted.describeSettings(workspace).find((item) => item.key === "goalCheck"),
+    ).toMatchObject({
+      effective: "decision",
+      saved: undefined,
+      source: "project",
+      overridden: false,
+    });
+
+    // 7. settings.json 中坏的 goalCheck 仅告警并忽略，不连累其他合法字段
+    await json("settings.json", { goalCheck: { backend: "invalid" }, shell: "cmd" });
+    const bad = await load();
+    expect(bad.base.shell).toBe("cmd");
+    expect(bad.base.goalCheck).toBeUndefined();
+    expect(bad.base.warnings.join("\n")).toContain("goalCheck");
+
+    // 8. CREDENTIAL_NAME 从 config/schema.ts 与 config/index.ts 导出，供目标核对脱敏复用
+    expect(CREDENTIAL_NAME).toBe(SCHEMA_CREDENTIAL_NAME);
+    expect(CREDENTIAL_NAME.test("API_KEY")).toBe(true);
+    expect(CREDENTIAL_NAME.test("auth_token")).toBe(true);
+    expect(CREDENTIAL_NAME.test("username")).toBe(false);
   });
 });

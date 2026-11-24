@@ -109,6 +109,8 @@ export interface DailyUsageStats {
 }
 export interface UsageStats {
   totals: UsageTotals;
+  /** 整体缓存命中率，分子和分母均排除工具的辅助请求。旧后台可能省略。 */
+  cacheHitRate?: number | undefined;
   sessions: number;
   turns: number;
   subagentTurns: number;

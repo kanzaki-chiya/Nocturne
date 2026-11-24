@@ -172,8 +172,8 @@ type AskUserReply =
 
 ```ts
 type ToolResult<Output = unknown> =
-  | { status: "ok";    modelContent: string; output?: Output; attachments?: RawImageAttachment[]; files?: FileAttachment[] }
-  | { status: "error"; modelContent: string; output?: Output; attachments?: RawImageAttachment[]; files?: FileAttachment[]; error: { code: string; message: string } }
+  | { status: "ok";    modelContent: string; output?: Output; attachments?: RawImageAttachment[]; files?: FileAttachment[]; usage?: Usage; usageModel?: ModelRef }
+  | { status: "error"; modelContent: string; output?: Output; attachments?: RawImageAttachment[]; files?: FileAttachment[]; usage?: Usage; usageModel?: ModelRef; error: { code: string; message: string } }
 
 /** 工具结果携带的图片字节（ADR-0023）；执行器负责落盘，
     事件里只出现 ImageAttachment 引用（events.md 第 4 节） */
@@ -192,6 +192,7 @@ type RawImageAttachment = {
 - `attachments`：图片字节；执行器经会话的 `AttachmentStore` 逐张落盘（tools.md 第 4 节），成功的写入 `tool.completed.attachments` 引用，`source` 取 `origin === "mcp" ? "mcp" : "read"`；工具也可直接通过 `ctx.saveImageAttachment` 保存后经 `savedImages` 返回引用（`read`/`web_fetch` 借此在 `modelContent` 中写入分段或缩小结果）。某张保存失败不影响其余：成功的照常引用，失败的在 `modelContent` 末尾追加 `[图片附件保存失败：<原因>]` 并记 `tool.attachment_failed` 诊断；无论成败都恰好一个 `tool.completed`。`read` 的图片相关错误码为 `image_too_large`（原文件超 50 MB、总像素超 64,000,000，或需要自动处理的 GIF）与 `image_corrupt`（文件头损坏/截断或无法解码）。
 - `files`：已落盘的文件附件引用（[ADR-0072](../decisions/ADR-0072-file-attachments.md)、[ADR-0088](../decisions/ADR-0088-inline-html.md)），原样写入 `tool.completed.files`。`render_html` 的创建、更新与版本显示规则见 [ADR-0109](../decisions/ADR-0109-page-versions.md)，跨会话接着改与 `list_pages` 见 [ADR-0114](../decisions/ADR-0114-project-page-library.md)。成功时产出 `output: { page, version, display, title, file, path, bytes }` 与 `files: [FileAttachment]`（带 `inline: { title, page, version, display, from? }`），新建缺省 `inline`，更新沿用第一版并忽略传入的 `display`；当 `page` 传同项目另一会话的 `<sessionId>/<page>` 时，在当前会话新建 `page-<n>` 面板副本，版本号接续原页最新版本号加一，`inline.from` 记录 `{ session, page }` 并复制源页面数据文件；跨项目或目标不存在时以 `invalid_input` 结算并列出可用 `ref`。`modelContent` 写明该版的实际显示方式。`bytes` 为图片内联后大小，附件存储缺失或写盘失败时分别以 `attachment_unavailable`、`io_error` 结算；`images` 的路径不存在、是目录、不是图片、未被 HTML 引用、替换后超过 8 MiB 时分别以 `file_not_found`、`is_directory`、`unsupported_image`、`image_unreferenced`、`html_too_large` 结算，`modelContent` 点名出错的路径。匹配规则见 [ADR-0088](../decisions/ADR-0088-inline-html.md) 第二版。`list_pages` 无参数，成功时产出 `output: { pages: [{ ref, title, version, updatedAt, path }] }`，按最近更新倒序。
 - `reply_page_comment` 成功时产出 `output: { page, comment, text, version, resolve }`。`version` 是回复时该页的最新版本，`resolve` 缺省为 `false`。讨论串按 `tool.completed` 的事件时间和序号派生模型回复。详见 [ADR-0115](../decisions/ADR-0115-page-comment-threads.md)。
+- `usage` / `usageModel`：可选，表示工具执行期间产生的辅助模型用量与对应模型（[ADR-0119](../decisions/ADR-0119-goal-check.md) §7）。执行器无论 `ok` 还是 `error` 均透传到 `tool.completed.usage` / `tool.completed.usageModel`（未提供 `usage` 时不写 `usageModel`）；不计入 `turn.completed.usage`。
 - 可预期的失败（文件不存在、`old` 字符串不唯一、先读检查失败）返回 `status: "error"` 与工具自定义的 `code`；非预期异常直接抛出，由执行器转换为 `tool_failed`。
 - `denied`、`cancelled`、`interrupted` 等状态只由执行器或恢复逻辑产生，工具不会返回它们。
 

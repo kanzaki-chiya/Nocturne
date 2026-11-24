@@ -114,6 +114,8 @@ export interface SessionView {
     | undefined;
   turnCount: number;
   usage: Usage;
+  /** Included in usage, excluded from the session cache hit rate. */
+  toolUsage?: Usage | undefined;
   /** 目标模式（ADR-0076 §2）；从未设定时缺省 */
   goal?: GoalState | undefined;
   /** 计划模式（ADR-0076 §5）；不在计划模式时缺省 */
@@ -316,6 +318,8 @@ export interface ToolEntry {
         attachments?: ImageAttachment[] | undefined;
         files?: FileAttachment[] | undefined;
         ui?: ToolCompletedUi | undefined;
+        usage?: Usage | undefined;
+        usageModel?: ModelRef | undefined;
         durationMs: number | undefined;
       }
     | undefined;
@@ -852,8 +856,18 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         ...(p.files !== undefined ? { files: p.files } : {}),
         ...(p.ui !== undefined ? { ui: p.ui } : {}),
+        ...(p.usage !== undefined ? { usage: p.usage } : {}),
+        ...(p.usageModel !== undefined ? { usageModel: p.usageModel } : {}),
         durationMs: p.durationMs,
       };
+      if (
+        !rebuilding &&
+        p.usage !== undefined &&
+        (created?.type !== "session.created" || event.sessionId === created.sessionId)
+      ) {
+        view.usage = addUsage(view.usage, p.usage);
+        view.toolUsage = view.toolUsage === undefined ? p.usage : addUsage(view.toolUsage, p.usage);
+      }
       const inlineFiles = p.status === "ok" ? filterInlinePageFiles(p.files) : [];
       if (inlineFiles.length > 0) {
         entry.inlineFiles = inlineFiles;
@@ -1007,6 +1021,26 @@ export function sessionUsageSoFar(view: SessionView): Usage {
       usage = addUsage(usage, entry.usage);
   }
   return usage;
+}
+
+export function sessionCacheUsageSoFar(
+  view: SessionView,
+  usage: Usage = sessionUsageSoFar(view),
+): Usage {
+  const tool = view.toolUsage;
+  if (tool === undefined) return usage;
+  return {
+    inputTokens: usage.inputTokens - tool.inputTokens,
+    outputTokens: usage.outputTokens - tool.outputTokens,
+    cacheReadTokens:
+      usage.cacheReadTokens === undefined
+        ? undefined
+        : usage.cacheReadTokens - (tool.cacheReadTokens ?? 0),
+    cacheWriteTokens:
+      usage.cacheWriteTokens === undefined
+        ? undefined
+        : usage.cacheWriteTokens - (tool.cacheWriteTokens ?? 0),
+  };
 }
 
 function addUsage(a: Usage, b: Usage): Usage {

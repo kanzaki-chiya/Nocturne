@@ -91,6 +91,16 @@ export function foldEvents(events: readonly DurableEvent[]): SessionState {
     if (event.type === "turn.started") goalTurnOpen = true;
     if (event.type === "turn.completed") goalTurnOpen = false;
     const active = effective.has(event.seq);
+    if (event.type === "tool.completed" && event.sessionId === meta?.id) {
+      const auxiliary = event.payload.usage;
+      if (auxiliary !== undefined) {
+        usage.inputTokens += auxiliary.inputTokens;
+        usage.outputTokens += auxiliary.outputTokens;
+        usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + (auxiliary.cacheReadTokens ?? 0);
+        usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + (auxiliary.cacheWriteTokens ?? 0);
+        usage.reasoningTokens = (usage.reasoningTokens ?? 0) + (auxiliary.reasoningTokens ?? 0);
+      }
+    }
     if (
       !active &&
       ![

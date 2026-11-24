@@ -78,6 +78,8 @@ import {
 import { MODEL_ROLES } from "./config/index.js";
 import {
   truncateSubagentTableDescription,
+  GOAL_CHECK_DISCLOSURE_PREF,
+  parseGoalCheckAccepted,
   type HooksDescription,
   type PluginOverview,
   type PluginsDescription,
@@ -109,6 +111,8 @@ import {
   GEMINI_DECISION_ENDPOINTS,
   JEV_ENDPOINTS,
   decisionModelFromJevReviewer,
+  decisionModelRecipient,
+  resolveEffectiveDecisionModel,
   defaultJevReviewer,
   fetchGeminiDecisionModels,
   fetchJevModels,
@@ -332,7 +336,8 @@ import {
   createApplySubagentChangesTool,
   ExpectedHeadMismatchError,
 } from "./tools/builtin/apply-subagent-changes.js";
-import { createUpdateGoalTool } from "./tools/builtin/update-goal.js";
+import { createUpdateGoalTool, UPDATE_GOAL_TOOL_NAME } from "./tools/builtin/update-goal.js";
+import { DEFAULT_REVIEW_CONFIDENCE } from "./permission/reviewer-questions.js";
 import {
   effectiveEvents,
   formatQuotesBlock,
@@ -355,6 +360,10 @@ import {
 import { DEFAULT_MAX_MODEL_CHARS, truncateModelContent, truncationNote } from "./tools/budget.js";
 import { writeSpill } from "./tools/spill.js";
 import {
+  checkGoalWithDecision,
+  checkGoalWithSmol,
+  createGoalReporter,
+  goalCheckUnavailable,
   goalContinuation,
   goalResumeBody,
   planApprovedBody,
@@ -1314,6 +1323,33 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
     };
   };
+  const decisionConnection = (
+    model: DecisionModelConfig,
+    providers: readonly ProviderEntryConfig[],
+    sessionId: string,
+    minConfidence: number = DEFAULT_REVIEW_CONFIDENCE,
+    legacyStoredKey = false,
+  ) => {
+    const credentials = reviewerCredentials(providers);
+    const env = (name: string) => platform.env(name);
+    return model.source === "gemini"
+      ? {
+          ...resolveGeminiDecisionConnection(model, credentials, env, minConfidence),
+          source: model.source,
+        }
+      : {
+          ...resolveJevConnection(
+            { ...model, minConfidence },
+            providers,
+            credentials,
+            env,
+            "decision-model",
+            legacyStoredKey ? "reviewer" : undefined,
+          ),
+          source: model.source,
+          sessionId,
+        };
+  };
   const buildDecisionReviewer = (
     decisionModel: DecisionModelConfig | undefined,
     minConfidence: number,
@@ -1328,26 +1364,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         },
       };
     }
-    if (decisionModel.source === "gemini") {
-      return createGeminiDecisionReviewer(
-        resolveGeminiDecisionConnection(
-          decisionModel,
-          reviewerCredentials(providers),
-          (name) => platform.env(name),
-          minConfidence,
-        ),
-      );
-    }
-    return createJevSecurityReviewer({
-      ...resolveJevConnection(
-        { ...decisionModel, minConfidence },
-        providers,
-        reviewerCredentials(providers),
-        (name) => platform.env(name),
-        "decision-model",
-      ),
-      sessionId,
-    });
+    const connection = decisionConnection(decisionModel, providers, sessionId, minConfidence);
+    return connection.source === "gemini"
+      ? createGeminiDecisionReviewer(connection)
+      : createJevSecurityReviewer(connection);
   };
   function entryAuth(entry: Pick<ProviderEntryConfig, "id" | "auth" | "apiKeyEnv">) {
     if (config === undefined) {
@@ -2650,7 +2670,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       pendingSkillEnable = true;
       if (!busy() && compactController === undefined) await applySkills();
     };
-    const executor = createToolExecutor(tools);
+    const executor = createToolExecutor(tools, {
+      sensitiveForModel: (subjects) => policy.sensitiveForModel?.(subjects) ?? subjects.length > 0,
+    });
 
     // MCP：RuntimeOptions.mcpServers（注入）∪ 配置层 mcpServers（项目层仅信任时并入）∪ 已启用插件 mcpServers
     let sessionPlugins: ActivePluginsResolution = pluginResolution;
@@ -4416,15 +4438,61 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         },
       });
     };
+    const goalReporter = createGoalReporter({
+      goal: () => session.state().goal,
+      events: () => session.durableEvents(),
+      sensitive: (subjects) => policy.sensitiveForModel?.(subjects) ?? subjects.length > 0,
+      toolName: UPDATE_GOAL_TOOL_NAME,
+      write: writeGoal,
+      check: () => {
+        const settings = config?.resolvedSettings(meta.workspaceRoot) ?? resolved;
+        switch (settings?.goalCheck?.backend) {
+          case "smol": {
+            const smol =
+              resolveModelRole(sessionRegistry, settings.modelRoles?.smol, "smol") ?? model;
+            return (input, signal) => checkGoalWithSmol(input, smol, signal);
+          }
+          case "decision": {
+            const selected = resolveEffectiveDecisionModel(
+              settings.decisionModel,
+              settings.permissionReviewer,
+            );
+            if (!selected)
+              return () => Promise.resolve(goalCheckUnavailable("decision", "决策模型未设置"));
+            const { id } = decisionModelRecipient(selected);
+            const accepted = parseGoalCheckAccepted(
+              config?.getPreference(GOAL_CHECK_DISCLOSURE_PREF),
+            );
+            if (!accepted.has(id)) {
+              return () =>
+                Promise.resolve(goalCheckUnavailable("decision", "尚未确认目标核对的数据外发说明"));
+            }
+            const connection = decisionConnection(
+              selected,
+              settings.providers,
+              session.id,
+              DEFAULT_REVIEW_CONFIDENCE,
+              settings.decisionModel === undefined,
+            );
+            return (input, signal) =>
+              checkGoalWithDecision(input, connection, DEFAULT_REVIEW_CONFIDENCE, signal);
+          }
+          default:
+            return undefined;
+        }
+      },
+    });
     const updateGoalTool = createUpdateGoalTool({
       active: () => session.state().goal?.status === "active",
-      report: (result) =>
-        writeGoal(result.status, result.status === "blocked" ? result.reason : undefined),
+      report: (input, callId, signal) => goalReporter.report(input, callId, signal),
     });
     /** update_goal 只在目标为 active 时注册（§4.2），在 Turn 边界与续跑时按状态装卸 */
     const installGoalTool = () => {
       tools.unregister(updateGoalTool.name);
-      if (session.state().goal?.status === "active") tools.register(updateGoalTool);
+      const { goal, plan } = session.state();
+      if (goal?.status === "active" && plan === undefined && meta.parent === undefined) {
+        tools.register(updateGoalTool);
+      }
     };
     const goalInput = (body: string): PreparedInput => ({
       content: [],
@@ -5874,6 +5942,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const goal = session.state().goal;
         if (goal === undefined) throw new RuntimeCommandError("invalid_command", "没有目标");
         if (goal.status !== "active") return;
+        goalReporter.stop();
         await writeGoal("stopped", "user");
       },
       async resumeGoal() {
@@ -5895,6 +5964,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           throw new RuntimeCommandError("invalid_command", "没有目标");
         clearingGoal = true;
         try {
+          goalReporter.stop();
           controller?.abort();
           await session.emit("session.config_changed", { goal: null });
         } finally {

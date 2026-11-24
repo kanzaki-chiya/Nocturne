@@ -4,11 +4,15 @@ import {
   deriveProtocolFromEndpoints,
   encodeDurableEvent,
   EventParseError,
+  GOAL_CHECK_BACKENDS,
   isDurableEvent,
   isDurableEventType,
   isEphemeralEventType,
+  isGoalCheckBackend,
   LOG_FORMAT_VERSION,
   PROTOCOL_ENDPOINTS,
+  type GoalCheckBackend,
+  type GoalCheckResult,
   type ModelProtocol,
   resolveEffectiveProtocol,
   unavailableProtocolReason,
@@ -429,5 +433,59 @@ describe("resolveEffectiveProtocol", () => {
     // 无声明无 endpoints → 条目 type
     expect(resolveEffectiveProtocol(undefined, undefined, "anthropic")).toBe("anthropic");
     expect(resolveEffectiveProtocol(undefined, [], "openai-compatible")).toBe("openai-compatible");
+  });
+});
+
+describe("goalCheck protocol 与 tool.completed usage（ADR-0119）", () => {
+  it("GOAL_CHECK_BACKENDS / isGoalCheckBackend 覆盖三种后端并拒绝非法值", () => {
+    const backends: readonly GoalCheckBackend[] = GOAL_CHECK_BACKENDS;
+    expect(backends).toEqual(["off", "decision", "smol"]);
+    expect(isGoalCheckBackend("off")).toBe(true);
+    expect(isGoalCheckBackend("decision")).toBe(true);
+    expect(isGoalCheckBackend("smol")).toBe(true);
+    expect(isGoalCheckBackend("other")).toBe(false);
+    expect(isGoalCheckBackend(null)).toBe(false);
+  });
+
+  it("tool.completed 携带可选 usage、usageModel 与 output.check 往返且兼容旧事件", () => {
+    const check: GoalCheckResult = {
+      backend: "decision",
+      model: "ai-studio/gemini-decision-1",
+      result: "rejected",
+      items: [
+        { index: 0, passed: true, confidence: 0.92 },
+        { index: 1, passed: false, confidence: 0.85, note: "missing test evidence" },
+      ],
+      coverage: true,
+    };
+    const withUsage = makeEvent({
+      type: "tool.completed",
+      turnId: "t1",
+      payload: {
+        callId: "c1",
+        name: "update_goal",
+        status: "error",
+        modelContent: "Unverified items",
+        output: { status: "met", check },
+        error: { code: "goal_unverified", message: "Unverified" },
+        usage: { inputTokens: 1200, outputTokens: 0 },
+        usageModel: { provider: "ai-studio", model: "gemini-decision-1" },
+        durationMs: 420,
+      },
+    });
+    expect(decodeDurableEvent(encodeDurableEvent(withUsage))).toEqual(withUsage);
+
+    const legacy = makeEvent({
+      type: "tool.completed",
+      turnId: "t1",
+      payload: {
+        callId: "c2",
+        name: "read",
+        status: "ok",
+        modelContent: "hello",
+      },
+    });
+    expect(decodeDurableEvent(encodeDurableEvent(legacy))).toEqual(legacy);
+    expect(LOG_FORMAT_VERSION).toBe(1);
   });
 });

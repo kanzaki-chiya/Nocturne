@@ -124,6 +124,7 @@ export const TOOL_ABORT_GRACE_MS = 2_000;
 export interface ToolExecutorOptions {
   /** 覆盖中断/超时后的宽限期（毫秒，默认 `TOOL_ABORT_GRACE_MS`）。 */
   abortGraceMs?: number | undefined;
+  sensitiveForModel?: (subjects: readonly PermissionSubject[]) => boolean;
 }
 
 const GRACE_EXPIRED = Symbol("grace_expired");
@@ -222,6 +223,7 @@ export function createToolExecutor(
       let maxModelChars: number | undefined;
       let maxOutputChars: number | undefined;
       let toolUi: ToolDefinition["ui"];
+      let sensitiveForModel = false;
 
       /** 步骤 9：唯一出口——归一化 + 发出恰好一个 tool.completed */
       async function finish(
@@ -313,6 +315,10 @@ export function createToolExecutor(
               : {}),
             ...(result.files?.length ? { files: result.files } : {}),
             ...(toolUi !== undefined ? { ui: toolUi } : {}),
+            ...(sensitiveForModel ? { sensitiveForModel: true as const } : {}),
+            ...(result.usage === undefined
+              ? {}
+              : { usage: result.usage, usageModel: result.usageModel }),
             durationMs: Date.now() - startedAt,
           },
           { turnId },
@@ -522,6 +528,7 @@ export function createToolExecutor(
         );
       }
 
+      sensitiveForModel = options?.sensitiveForModel?.(subjects) ?? false;
       // 5. 权限（闸门封装 ask 的等待与取消）
       if (aborted(scope.signal)) {
         return finish("cancelled", errorResult("cancelled", "调用已被中断"));

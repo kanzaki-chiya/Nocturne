@@ -41,6 +41,20 @@ const AUTH_DATA_LABEL = "修改 Nocturne 授权配置";
 const ATTACHMENTS_LABEL = "本会话落盘目录";
 const PROJECT_PAGES_LABEL = "同项目面板页面";
 
+/** 同一组路径用于授权保护和工具证据的外发分类。 */
+export function authorizationDataPatterns(nocturneHome: string, caseSensitive: boolean): string[] {
+  const home = normalizePathText(nocturneHome, caseSensitive);
+  return [
+    "config.json",
+    "trust.json",
+    "grants/**",
+    "providers.json",
+    "mcp.json",
+    "external-agents.json",
+    "settings.json",
+  ].map((name) => `${home}/${name}`);
+}
+
 interface BroadRule {
   kind?: PermissionRule["kind"];
   pattern: string;
@@ -212,15 +226,7 @@ export function presetRules(name: PermissionPresetName, ctx: PresetContext): Pre
       // 授权数据组（permissions.md 第 6 节）：providers.json 是向导写入的
       // 服务商清单，与 config.json/trust.json/grants 同级保护；
       // credentials.json 不在这里——它是内置硬拒绝（policy.ts），非 ask
-      for (const pattern of [
-        `${home}/config.json`,
-        `${home}/trust.json`,
-        `${home}/grants/**`,
-        `${home}/providers.json`,
-        `${home}/mcp.json`,
-        `${home}/external-agents.json`,
-        `${home}/settings.json`,
-      ]) {
+      for (const pattern of authorizationDataPatterns(ctx.nocturneHome, ctx.caseSensitive)) {
         rules.push({
           kind: "edit",
           pattern,

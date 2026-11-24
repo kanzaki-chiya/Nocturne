@@ -511,6 +511,9 @@ const payloadSchemas = {
         surface: z.string().optional(),
       })
       .optional(),
+    sensitiveForModel: z.literal(true).optional(),
+    usage: usageSchema.optional(),
+    usageModel: modelRefSchema.optional(),
     durationMs: z.number().optional(),
   }),
   "instructions.loaded": z.object({

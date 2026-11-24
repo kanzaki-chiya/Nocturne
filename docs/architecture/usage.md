@@ -11,6 +11,7 @@
 | attachment.described | 同上，计入图片描述请求 |
 | page.model_called | 按事件中的 provider/model 统计页面调用。记录的用量计入会话，独立于 Turn 的用量 |
 | permission.reviewed | 有模型与用量且 cached=false 时计入，缓存结果不重复收费 |
+| tool.completed | 带 `usage` 时计入工具执行期间产生的辅助模型用量（按 `usageModel` 归属模型，省略时回落会话当前模型；不按工具名判断、不计入 Turn 与延迟/性能序列，[ADR-0119](../decisions/ADR-0119-goal-check.md) §7） |
 | context.compacted | 有模型与用量时计入摘要请求；旧日志与 prune 不贡献用量 |
 | turn.completed | 不计入用量，避免重复；只计算对应 started 到 completed 的时长 |
 
@@ -62,6 +63,8 @@ max(0, 输入 − 缓存读 − 缓存写) × 输入价
 
 `cacheSavings` 为（全部输入按输入价的费用 − 实际输入侧费用）÷ 全部输入按输入价的费用：两者都按 `estimateCost` 逐请求计算，前者把同一次请求的 inputTokens 视为未缓存（档位规则相同），后者取未命中输入、缓存读取与缓存写入三项之和。缓存写入价高于输入价时可能为负。未计价模型省略。
 
+工具辅助请求的 token 和费用按实计入。整体与逐模型缓存命中率及缓存节省率排除这些请求。整体命中率由 `UsageStats.cacheHitRate` 返回。当前会话的缓存命中率通过 `sessionCacheUsageSoFar` 从累计用量扣除工具辅助请求。
+
 Runtime 内存按文件路径、大小、mtimeMs 缓存逐文件用量聚合（不是费用；计时样本一并缓存），只重读变化文件；删除文件时移除缓存。损坏或读取失败的文件整份跳过并计数，含未终止尾行；缓存失败文件直到元数据变化，不修复日志。
 
 ## 已知缺口
@@ -74,5 +77,5 @@ Runtime 内存按文件路径、大小、mtimeMs 缓存逐文件用量聚合（�
 - 只有 message.assistant 计时；标题、图片描述、权限审查与摘要请求没有计时，不进延迟统计。
 - 旧日志的 message.assistant 没有 timing，不补算；用量页对这些模型显示「—」。
 - 不统计错误率（见上文）。
-- 当前会话视图仍累计 turn.completed.usage，不含角色请求，与跨会话统计口径不同。
+- 当前会话视图累计 `turn.completed.usage`、页面与工具辅助调用的用量。跨会话统计还读取上表中的其他角色事件。
 - 并发写日志时观察到不完整尾行会暂时跳过该文件，下一次刷新元数据变化后重读。

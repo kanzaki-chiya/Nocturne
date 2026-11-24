@@ -89,7 +89,7 @@ interface ModelCapabilities {
 
 ```ts
 interface ModelRequest {
-  purpose?: "vision" | "title"    // 本地请求用途标记（ADR-0040），不写入服务商请求体
+  purpose?: "vision" | "title" | "page" | "goal_check"  // 本地请求用途标记，服务商请求体省略此字段
   model: string                   // Provider 内的模型 id
   system: SystemBlock[]
   messages: ModelMessage[]

@@ -56,6 +56,7 @@ const reservedFields = new Set([
   "model",
   "modelRoles",
   "decisionModel",
+  "goalCheck",
   "subagents",
   "reasoningEffort",
   "permissions",
@@ -93,6 +94,7 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
     Object.keys(input).some(
       (key) =>
         key !== "decisionModel" &&
+        key !== "goalCheck" &&
         key !== "permissions.preset" &&
         key !== "permission.reviewer" &&
         key !== "permission.reviewerRules" &&
@@ -110,7 +112,7 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
     )
   ) {
     throw new TypeError(
-      "仅支持 decisionModel、permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.*、notifications.*、subagents.profiles.*、appearance.themePreset、appearance.customThemes、memory.global 与 memory.project；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 decisionModel、goalCheck、permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.*、notifications.*、subagents.profiles.*、appearance.themePreset、appearance.customThemes、memory.global 与 memory.project；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
@@ -171,6 +173,7 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
         }),
       ),
       ...(patch.decisionModel != null ? { decisionModel: patch.decisionModel } : {}),
+      ...(patch.goalCheck != null ? { goalCheck: patch.goalCheck } : {}),
       ...(patch["compaction.threshold"] != null || patch["compaction.pruneLimit"] != null
         ? {
             compaction: {
@@ -237,6 +240,7 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
     "model",
     "modelRoles",
     "decisionModel",
+    "goalCheck",
     "subagents",
     "reasoningEffort",
     "shell",
@@ -711,6 +715,11 @@ export async function loadSettingsStore(
           if (decisionModel !== undefined) {
             if (decisionModel === null) delete next.decisionModel;
             else next.decisionModel = decisionModel;
+          }
+          const goalCheck = patch.goalCheck;
+          if (goalCheck !== undefined) {
+            if (goalCheck === null) delete next.goalCheck;
+            else next.goalCheck = goalCheck;
           }
           const reviewer = patch["permission.reviewer"];
           if (reviewer !== undefined) {
