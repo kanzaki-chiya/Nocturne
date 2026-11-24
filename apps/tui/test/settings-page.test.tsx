@@ -390,7 +390,7 @@ describe("ADR-0045 设置页", () => {
     await screen.down(1);
     expect(selected(screen.lastFrame())).toContain("安全审查");
     await screen.input("\r");
-    expect(screen.lastFrame()).toContain("后端");
+    expect(screen.lastFrame()).toContain("审查器");
     await screen.input("\x1b[D");
     await screen.input("\r");
     expect(screen.lastFrame()).toContain("安全审查模型");
@@ -400,42 +400,35 @@ describe("ADR-0045 设置页", () => {
     expect(screen.update).toHaveBeenCalledWith({
       "permission.reviewer": { backend: "model", model: { provider: "fake", model: "m" } },
     });
-    await waitFor(() => !(screen.lastFrame() ?? "").includes("后端"));
+    await waitFor(() => !(screen.lastFrame() ?? "").includes("/settings · 安全审查"));
     screen.unmount();
   });
 
-  it("Jev：密钥独立传递，披露确认后一次落盘并记一次披露", async () => {
+  it("决策模型：密钥独立传递，设置后再启用决策模型审查显示一次披露", async () => {
     const screen = page();
     await screen.ready();
-    await screen.click("row:reviewer");
-    await screen.click("row:reviewer");
-    await screen.click("backend:1");
-    expect(screen.lastFrame()).toContain("opencode-go");
+    await screen.click("row:decisionModel");
+    await screen.click("row:decisionModel");
+    expect(screen.lastFrame()).toContain("/settings · 决策模型");
+    await screen.input("\x1b[C"); // Gemini
     await screen.click("credential");
-    await screen.input("\x1b[B");
-    await screen.input("\x1b[B");
-    await screen.input("\r");
+    await screen.input("\x1b[C"); // 单独密钥
+    await screen.click("value");
     await screen.input("test-secret");
     expect(screen.lastFrame()).not.toContain("test-secret");
-    await screen.click("save");
-    expect(screen.lastFrame()).toContain("首次开启 Jev");
-    expect(screen.update).not.toHaveBeenCalled();
     await screen.click("save");
     await waitFor(() => screen.update.mock.calls.length === 1);
     expect(screen.update).toHaveBeenCalledWith(
       {
-        "permission.reviewer": {
-          backend: "jev",
-          endpoint: "opencode-zen",
-          model: "jev-1.13-free",
+        decisionModel: {
+          source: "gemini",
+          endpoint: "ai-studio",
+          model: "gemini-decision-1",
           credential: { stored: true },
-          minConfidence: 0.7,
         },
       },
-      { reviewerKey: "test-secret" },
+      { decisionModelKey: "test-secret" },
     );
-    await waitFor(() => screen.preference.mock.calls.length === 1);
-    expect(screen.preference).toHaveBeenCalledWith("jevDisclosureAccepted", "yes");
     screen.unmount();
   });
 

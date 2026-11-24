@@ -11,6 +11,7 @@ import type {
 } from "@nocturne/core/protocol";
 import { useEffect, useRef, useState } from "react";
 import type {
+  DecisionModelConfig,
   ModelRole,
   PermissionPresetName,
   Runtime,
@@ -27,6 +28,7 @@ import { CompactionThresholdDialog } from "./compaction-threshold-dialog.js";
 import { ModelPicker } from "./model-picker.js";
 import { PickList } from "./pick-list.js";
 import { PageShell, type ShellNotice, type ShellRow, type ShellSpan } from "./page/page-shell.js";
+import { DecisionModelDialog } from "./decision-model-dialog.js";
 import { ReviewerDialog } from "./reviewer-dialog.js";
 import { ThemePage } from "./theme-page.js";
 
@@ -55,7 +57,7 @@ const SUBTITLE = "默认值对新会话生效；当前会话用 Alt+M 切换权�
 /** 每一项的一句话说明，显示在说明区（TUI 侧维护，不进 Core） */
 const EXPLAIN: Record<string, string> = {
   preset: "新会话的权限预设；规则拦下的操作按预设直接执行、先交审查器判断或询问你",
-  reviewer: "smart 预设下由审查器判断待确认的操作，可选 Jev 或本地小模型；Enter 打开设置",
+  reviewer: "smart 预设下由审查器判断待确认的操作，可选决策模型或小模型；Enter 打开设置",
   defaultModel: "新会话使用的模型与思考档位，成对保存；到 /model 页选「设为默认」修改",
   theme: "界面深浅配色；←→ 立即切换，Enter 打开预览页",
   shell: "shell 工具使用的命令行；auto 按探测结果选择，Enter 选择",
@@ -63,9 +65,10 @@ const EXPLAIN: Record<string, string> = {
   task: "default 子代理档位使用的模型；未设置时跟随当前模型，Enter 选择",
   vision: "当前模型不能看图时，由它先描述图片再发送；只列支持图片输入的模型，Enter 选择",
   smol: "生成会话标题等轻量任务使用的模型；未设置时跟随当前模型，Enter 选择",
+  decisionModel: "安全审查使用的决策模型（Gemini 或 Jev）；Enter 打开设置",
 };
 
-type Nested = "theme" | "shell" | "reviewer" | "threshold" | ModelRole;
+type Nested = "theme" | "shell" | "reviewer" | "decisionModel" | "threshold" | ModelRole;
 const FULL_PAGE: readonly Nested[] = ["theme", "shell", ...ROLES];
 
 function legacyReviewer(value: string | undefined): SecurityReviewerConfig | undefined {
@@ -80,10 +83,18 @@ function legacyReviewer(value: string | undefined): SecurityReviewerConfig | und
     : undefined;
 }
 
-function reviewerText(reviewer: SecurityReviewerConfig | undefined): string {
+function reviewerText(
+  reviewer: SecurityReviewerConfig | undefined,
+  decisionModel?: DecisionModelConfig | undefined,
+): string {
   if (!reviewer || reviewer.backend === "off") return "关闭";
+  if (reviewer.backend === "decision") {
+    return decisionModel === undefined
+      ? "决策模型 · 未设置"
+      : `${decisionModel.model} ${decisionModel.source === "gemini" ? "Gemini" : "Jev"}`;
+  }
   return reviewer.backend === "jev"
-    ? `Jev · ${reviewer.endpoint} · ${reviewer.model}`
+    ? `${reviewer.model} Jev`
     : `小模型 · ${reviewer.model.provider}/${reviewer.model.model}`;
 }
 
@@ -168,7 +179,7 @@ export function SettingsPage({
 
   const commit = async (
     patch: SettingsPatch,
-    options?: { reviewerKey: string },
+    options?: { reviewerKey?: string; decisionModelKey?: string },
   ): Promise<string | undefined> => {
     try {
       const next =
@@ -249,6 +260,7 @@ export function SettingsPage({
     );
   };
 
+  const effectiveDecisionModel = item("decisionModel")?.decisionModel?.effective;
   const effectiveReviewer =
     item("permission.reviewer")?.reviewer?.effective ??
     legacyReviewer(item("permission.reviewer")?.effective);
@@ -267,7 +279,10 @@ export function SettingsPage({
     {
       id: "reviewer",
       group: "session",
-      cells: [{ text: "安全审查" }, { text: reviewerText(effectiveReviewer) }],
+      cells: [
+        { text: "安全审查" },
+        { text: reviewerText(effectiveReviewer, effectiveDecisionModel) },
+      ],
       trail: [trail("permission.reviewer")],
       search: `安全审查 ${EXPLAIN.reviewer}`,
     },
@@ -319,6 +334,22 @@ export function SettingsPage({
         search: `${ROLE_LABELS[role]} ${EXPLAIN[role]}`,
       };
     }),
+    {
+      id: "decisionModel",
+      group: "roles",
+      cells: [
+        { text: "决策模型" },
+        {
+          text:
+            effectiveDecisionModel === undefined
+              ? "未设置"
+              : `${effectiveDecisionModel.model} ${effectiveDecisionModel.source === "gemini" ? "Gemini" : "Jev"}`,
+          ...(effectiveDecisionModel === undefined ? { tone: "muted" as const } : {}),
+        },
+      ],
+      trail: [trail("decisionModel")],
+      search: `决策模型 ${EXPLAIN.decisionModel}`,
+    },
     ...items
       .filter((item) => item.key.startsWith("subagents.profiles."))
       .map((item): ShellRow => {
@@ -389,21 +420,25 @@ export function SettingsPage({
               ? "Shell"
               : id === "threshold"
                 ? "压缩阈值"
-                : ROLE_LABELS[id as ModelRole];
+                : id === "decisionModel"
+                  ? "决策模型"
+                  : ROLE_LABELS[id as ModelRole];
   const keyOf = (id: string): SettingItem["key"] | undefined =>
     id === "preset"
       ? "permissions.preset"
       : id === "reviewer"
         ? "permission.reviewer"
-        : id === "defaultModel"
-          ? "defaultModel"
-          : id === "shell"
-            ? "shell"
-            : id === "threshold"
-              ? "compaction.threshold"
-              : ROLES.includes(id as ModelRole)
-                ? (`modelRoles.${id}` as SettingItem["key"])
-                : undefined;
+        : id === "decisionModel"
+          ? "decisionModel"
+          : id === "defaultModel"
+            ? "defaultModel"
+            : id === "shell"
+              ? "shell"
+              : id === "threshold"
+                ? "compaction.threshold"
+                : ROLES.includes(id as ModelRole)
+                  ? (`modelRoles.${id}` as SettingItem["key"])
+                  : undefined;
 
   const describe = (row: ShellRow | undefined): ShellSpan[][] => {
     if (row === undefined) return [];
@@ -542,7 +577,7 @@ export function SettingsPage({
           }}
         />
       </Box>
-      {nested === "threshold" || nested === "reviewer" ? (
+      {nested === "threshold" || nested === "reviewer" || nested === "decisionModel" ? (
         <Box position="absolute" width={width} height={height}>
           {nested === "threshold" ? (
             <CompactionThresholdDialog
@@ -559,25 +594,51 @@ export function SettingsPage({
                 return failure;
               }}
             />
-          ) : (
-            <ReviewerDialog
+          ) : nested === "decisionModel" ? (
+            <DecisionModelDialog
               runtime={runtime}
-              initial={effectiveReviewer}
+              initial={item("decisionModel")?.decisionModel?.saved ?? effectiveDecisionModel}
               width={width}
               height={height}
               onCancel={() => {
                 setNested(undefined);
               }}
               onMouseFrame={onMouseFrame}
-              onApply={async (selected, key, accepted) => {
+              onApply={async (selected, key) => {
                 const failure = await commit(
-                  { "permission.reviewer": selected },
-                  key === undefined ? undefined : { reviewerKey: key },
+                  { decisionModel: selected },
+                  key === undefined ? undefined : { decisionModelKey: key },
                 );
                 if (failure !== undefined) return failure;
-                if (accepted === true) {
+                setNested(undefined);
+                return undefined;
+              }}
+            />
+          ) : (
+            <ReviewerDialog
+              runtime={runtime}
+              initial={effectiveReviewer}
+              decisionModel={effectiveDecisionModel}
+              width={width}
+              height={height}
+              onOpenDecisionModel={() => {
+                setNested("decisionModel");
+              }}
+              onCancel={() => {
+                setNested(undefined);
+              }}
+              onMouseFrame={onMouseFrame}
+              onApply={async (selected, acceptedRecipient) => {
+                const failure = await commit({ "permission.reviewer": selected });
+                if (failure !== undefined) return failure;
+                if (acceptedRecipient !== undefined) {
                   try {
-                    await runtime.setPreference("jevDisclosureAccepted", "yes");
+                    const prev = (runtime.getPreference("decisionDisclosureAccepted") ?? "")
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter((s) => s !== "");
+                    if (!prev.includes(acceptedRecipient)) prev.push(acceptedRecipient);
+                    await runtime.setPreference("decisionDisclosureAccepted", prev.join(","));
                   } catch (cause) {
                     return message(cause);
                   }

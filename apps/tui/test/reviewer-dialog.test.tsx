@@ -1,8 +1,9 @@
 import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultJevReviewer, type JevReviewerConfig, type ProviderOverview } from "@nocturne/core";
+import type { DecisionModelConfig, ProviderOverview, SecurityReviewerConfig } from "@nocturne/core";
 import { createRuntimeStub } from "@nocturne/core/testing";
+import { DecisionModelDialog } from "../src/components/decision-model-dialog.js";
 import { ReviewerDialog } from "../src/components/reviewer-dialog.js";
 import type { DialogMouseFrame } from "../src/components/dialog/mouse.js";
 import { detectTuiEnv, TuiEnvContext } from "../src/env.js";
@@ -13,55 +14,23 @@ const borrowed = {
   host: "opencode.ai",
   keySource: "credential",
 } as ProviderOverview;
-const initial = defaultJevReviewer("opencode-zen", [borrowed]);
+
+const geminiDecision: DecisionModelConfig = {
+  source: "gemini",
+  endpoint: "ai-studio",
+  model: "gemini-decision-1",
+  credential: { env: "GEMINI_API_KEY" },
+};
+
 const screens: ReturnType<typeof render>[] = [];
 afterEach(() => {
   for (const screen of screens.splice(0)) screen.unmount();
 });
-function dialog(
-  options: {
-    initial?: JevReviewerConfig;
-    fallback?: boolean;
-    accepted?: boolean;
-    width?: number;
-    height?: number;
-    ascii?: boolean;
-  } = {},
+
+function makeHelper(
+  screen: ReturnType<typeof render>,
+  getMouse: () => DialogMouseFrame | undefined,
 ) {
-  const apply = vi.fn(() => Promise.resolve(undefined as string | undefined));
-  const cancel = vi.fn();
-  const list = vi.fn(async (_config: JevReviewerConfig, _signal?: AbortSignal) =>
-    options.fallback
-      ? { models: ["jev-1.13-free"], warning: "模型列表拉取失败，已退回默认模型；也可手动输入" }
-      : { models: ["jev-1.13-free", "jev-1.13"] },
-  );
-  const runtime = createRuntimeStub({
-    getPreference: () => (options.accepted ? "yes" : undefined),
-    defaultReviewer: async (endpoint: JevReviewerConfig["endpoint"], url?: string) =>
-      defaultJevReviewer(endpoint, [borrowed], url),
-    listReviewerModels: list,
-    listReviewerProviders: async () => [borrowed],
-  });
-  let mouse: DialogMouseFrame | undefined;
-  const screen = render(
-    createElement(
-      TuiEnvContext.Provider,
-      { value: { ...detectTuiEnv(), ascii: options.ascii ?? false } },
-      createElement(ReviewerDialog, {
-        runtime,
-        initial: options.initial,
-        width: options.width ?? 100,
-        height: options.height ?? 28,
-        onApply: apply,
-        onCancel: cancel,
-        onMouseFrame: (frame) => {
-          mouse = frame;
-        },
-      }),
-    ),
-  );
-  screens.push(screen);
-  // 先等帧变化（不变的按键最多等 300ms），再冲刷到新组件接上 useInput，避免丢键。
   const settle = async (before: string | undefined) => {
     if (screen.lastFrame() === before) {
       await vi
@@ -76,7 +45,8 @@ function dialog(
     await settle(before);
   };
   const click = async (id: string, offset?: number) => {
-    const box = mouse?.boxes.find((box) => box.id === id);
+    const mouse = getMouse();
+    const box = mouse?.boxes.find((b) => b.id === id);
     if (!box) throw new Error(`无可点击区域：${id}`);
     const before = screen.lastFrame();
     mouse?.click(id, {
@@ -88,152 +58,185 @@ function dialog(
     await settle(before);
   };
   const ready = () => settle("");
-  return { ...screen, apply, cancel, list, input, click, ready, mouse: () => mouse };
+  return { input, click, ready };
 }
-describe("ADR-0036 安全审查对话框", () => {
-  it("Jev 流程、主机匹配借用、模型列表、一次披露与返回草稿", async () => {
-    const s = dialog();
+
+function reviewerDialog(
+  options: {
+    initial?: SecurityReviewerConfig;
+    decisionModel?: DecisionModelConfig;
+    accepted?: string;
+    legacyAccepted?: boolean;
+    width?: number;
+    height?: number;
+  } = {},
+) {
+  const apply = vi.fn(() => Promise.resolve(undefined as string | undefined));
+  const cancel = vi.fn();
+  const openDecisionModel = vi.fn();
+  const runtime = createRuntimeStub({
+    getPreference: (key: string) =>
+      key === "decisionDisclosureAccepted"
+        ? options.accepted
+        : key === "jevDisclosureAccepted" && options.legacyAccepted
+          ? "yes"
+          : undefined,
+  });
+  let mouse: DialogMouseFrame | undefined;
+  const screen = render(
+    createElement(
+      TuiEnvContext.Provider,
+      { value: { ...detectTuiEnv(), ascii: false } },
+      createElement(ReviewerDialog, {
+        runtime,
+        initial: options.initial,
+        decisionModel: options.decisionModel,
+        width: options.width ?? 100,
+        height: options.height ?? 28,
+        onOpenDecisionModel: openDecisionModel,
+        onApply: apply,
+        onCancel: cancel,
+        onMouseFrame: (frame) => {
+          mouse = frame;
+        },
+      }),
+    ),
+  );
+  screens.push(screen);
+  return {
+    ...screen,
+    ...makeHelper(screen, () => mouse),
+    apply,
+    cancel,
+    openDecisionModel,
+  };
+}
+
+function decisionDialog(
+  options: {
+    initial?: DecisionModelConfig;
+    models?: string[];
+    width?: number;
+    height?: number;
+  } = {},
+) {
+  const apply = vi.fn(() => Promise.resolve(undefined as string | undefined));
+  const cancel = vi.fn();
+  const listDecisionModels = vi.fn(async () => ({
+    models: options.models ?? ["gemini-decision-1", "gemini-decision-2"],
+  }));
+  const runtime = createRuntimeStub({
+    listReviewerProviders: async () => [borrowed],
+    listDecisionModels,
+  });
+  let mouse: DialogMouseFrame | undefined;
+  const screen = render(
+    createElement(
+      TuiEnvContext.Provider,
+      { value: { ...detectTuiEnv(), ascii: false } },
+      createElement(DecisionModelDialog, {
+        runtime,
+        initial: options.initial,
+        width: options.width ?? 100,
+        height: options.height ?? 28,
+        onApply: apply,
+        onCancel: cancel,
+        onMouseFrame: (frame) => {
+          mouse = frame;
+        },
+      }),
+    ),
+  );
+  screens.push(screen);
+  return {
+    ...screen,
+    ...makeHelper(screen, () => mouse),
+    apply,
+    cancel,
+    listDecisionModels,
+  };
+}
+
+describe("ADR-0117 TUI 决策模型与安全审查对话框", () => {
+  it("决策模型对话框：切换来源 Gemini、单独密钥遮盖与保存；Esc 取消", async () => {
+    const s = decisionDialog();
     await s.ready();
-    expect(s.lastFrame()).toContain("关闭");
-    expect(s.lastFrame()).toContain("小模型");
+    expect(s.lastFrame()).toContain("未设置");
+    expect(s.lastFrame()).toContain("Gemini");
+    expect(s.lastFrame()).toContain("Jev");
+
+    // 切到 Gemini
     await s.input("\x1b[C");
-    expect(s.lastFrame()).toContain("opencode-go");
-    expect(s.lastFrame()).toContain("0.7");
-    await s.input("\r");
-    await s.input("\r");
-    expect(s.lastFrame()).toContain("选择 Jev 审查模型");
-    expect(s.list).toHaveBeenCalledWith(initial, expect.any(AbortSignal));
-    await s.input("\x1b[B");
-    await s.input("\r");
-    expect(s.lastFrame()).toContain("jev-1.13");
-    await s.click("save");
-    expect(s.lastFrame()).toContain("首次开启 Jev");
-    expect(s.lastFrame()).toContain("工作目录、全部用户消息");
-    expect(s.lastFrame()).toContain("OpenCode 与 TypeSafe");
-    expect(s.lastFrame()).toContain("https://opencode.ai/zen/v1");
-    expect(s.apply).not.toHaveBeenCalled();
-    await s.click("save");
-    expect(s.apply).toHaveBeenCalledWith({ ...initial, model: "jev-1.13" }, undefined, true);
-  });
-  it("拉取失败显示默认模型并可手动输入；已披露不再提示", async () => {
-    const s = dialog({ initial, fallback: true, accepted: true });
-    await s.ready();
-    await s.click("model");
-    expect(s.lastFrame()).toContain("退回默认模型");
-    expect(s.lastFrame()).toContain("jev-1.13-free");
-    expect(s.lastFrame()).toContain("手动输入模型 id");
-    await s.input("\x1b[B");
-    await s.input("\r");
-    await s.input("\x15");
-    await s.input("jev-manual");
-    await s.input("\r");
-    expect(s.lastFrame()).toContain("jev-manual");
-    await s.click("save");
-    expect(s.apply).toHaveBeenCalledWith({ ...initial, model: "jev-manual" }, undefined, false);
-    expect(s.lastFrame()).not.toContain("首次开启 Jev");
-  });
-  it("独立密钥在实际帧中遮盖，只随确认回调传递；Esc 不保存", async () => {
-    const s = dialog({ initial, accepted: true });
-    await s.ready();
+    expect(s.lastFrame()).toContain("Google AI Studio");
+    expect(s.lastFrame()).toContain("gemini-decision-1");
+
+    // 焦点移到凭据 -> 切到单独密钥 -> 焦点移到值 -> 输入假密钥
     await s.click("credential");
-    await s.input("\x1b[B");
-    await s.input("\x1b[B");
-    await s.input("\r");
-    await s.input("test-secret");
-    expect(s.lastFrame()).not.toContain("test-secret");
-    expect(s.lastFrame()).toContain("***********");
+    await s.input("\x1b[C");
+    await s.click("value");
+    await s.input("fake-tui-secret");
+    expect(s.lastFrame()).not.toContain("fake-tui-secret");
+    expect(s.lastFrame()).toContain("***************");
+
     await s.click("save");
     expect(s.apply).toHaveBeenCalledWith(
-      { ...initial, credential: { stored: true } },
-      "test-secret",
-      false,
+      {
+        source: "gemini",
+        endpoint: "ai-studio",
+        model: "gemini-decision-1",
+        credential: { stored: true },
+      },
+      "fake-tui-secret",
     );
-    const cancelled = dialog({ initial, accepted: true });
+
+    const cancelled = decisionDialog({ initial: geminiDecision });
     await cancelled.ready();
     await cancelled.input("\x1b");
     expect(cancelled.cancel).toHaveBeenCalledOnce();
     expect(cancelled.apply).not.toHaveBeenCalled();
   });
-  it("环境变量可编辑，内置接入点不写 baseURL，鼠标选择 TypeSafe", async () => {
-    const s = dialog({ initial, accepted: true });
+
+  it("审查对话框：新分段关闭/决策模型/小模型；未设置决策模型时报错；可跳转决策模型", async () => {
+    const s = reviewerDialog();
     await s.ready();
-    await s.click("endpoint:1");
-    expect(s.lastFrame()).toContain("typesafe");
-    expect(s.lastFrame()).toContain("jev-latest");
-    await s.click("value");
-    await s.input("\x15");
-    await s.input("CUSTOM_JEV_KEY");
-    expect(s.lastFrame()).toContain("CUSTOM_JEV_KEY");
+    expect(s.lastFrame()).toContain("关闭");
+    expect(s.lastFrame()).toContain("决策模型");
+    expect(s.lastFrame()).toContain("小模型");
+
+    // 切到决策模型，未设置时保存报错
+    await s.input("\x1b[C");
+    expect(s.lastFrame()).toContain("未设置");
     await s.click("save");
-    expect(s.apply).toHaveBeenCalledWith(
-      {
-        backend: "jev",
-        endpoint: "typesafe",
-        model: "jev-latest",
-        credential: { env: "CUSTOM_JEV_KEY" },
-        minConfidence: 0.7,
-      },
-      undefined,
-      false,
-    );
+    expect(s.lastFrame()).toContain("先设置决策模型");
+    expect(s.apply).not.toHaveBeenCalled();
+
+    // 点决策模型行触发跳转
+    await s.click("decisionModel");
+    expect(s.openDecisionModel).toHaveBeenCalledOnce();
   });
-  it("文本框鼠标按列定位，标签不作为输入框点击区", async () => {
-    const s = dialog({ initial: defaultJevReviewer("typesafe"), accepted: true });
+
+  it("审查对话框：已设 Gemini 决策模型时首次外发显示 Google 说明，确认后保存", async () => {
+    const s = reviewerDialog({ decisionModel: geminiDecision });
     await s.ready();
-    const fields = s.mouse()?.boxes.filter((box) => box.id === "value");
-    expect(fields).toHaveLength(1);
-    await s.click("value", 2);
-    await s.input("CUSTOM_");
-    expect(s.lastFrame()).toContain("CUSTOM_TYPESAFE_API_KEY");
+    await s.input("\x1b[C");
+    expect(s.lastFrame()).toContain("gemini-decision-1");
     await s.click("save");
-    expect(s.apply).toHaveBeenCalledWith(
-      { ...defaultJevReviewer("typesafe"), credential: { env: "CUSTOM_TYPESAFE_API_KEY" } },
-      undefined,
-      false,
-    );
+    expect(s.lastFrame()).toContain("首次启用决策模型审查");
+    expect(s.lastFrame()).toContain("Google");
+    expect(s.apply).not.toHaveBeenCalled();
+
+    await s.click("save");
+    expect(s.apply).toHaveBeenCalledWith({ backend: "decision", minConfidence: 0.7 }, "google");
   });
-  it("custom 地址与置信度校验；关闭不需要凭据或披露", async () => {
-    const s = dialog({
-      initial: defaultJevReviewer("custom", [], "https://custom.invalid/v1"),
-      accepted: true,
+
+  it("审查对话框：已接受偏好时不再重复显示外发说明", async () => {
+    const s = reviewerDialog({
+      decisionModel: geminiDecision,
+      accepted: "google",
     });
     await s.ready();
-    expect(s.lastFrame()).toContain("https://custom.invalid/v1");
-    await s.click("threshold");
-    await s.input("\x15");
-    await s.input("2");
+    await s.input("\x1b[C");
     await s.click("save");
-    expect(s.lastFrame()).toContain("0–1");
-    expect(s.apply).not.toHaveBeenCalled();
-    await s.click("threshold");
-    await s.input("\x15");
-    await s.input("0.8");
-    await s.click("save");
-    expect(s.apply).toHaveBeenCalledWith(
-      expect.objectContaining({ baseURL: "https://custom.invalid/v1", minConfidence: 0.8 }),
-      undefined,
-      false,
-    );
-    const off = dialog();
-    await off.ready();
-    await off.click("save");
-    expect(off.apply).toHaveBeenCalledWith({ backend: "off" }, undefined, false);
-  });
-  it("ASCII 窄屏保持焦点字段和按钮，加载时 Esc 取消请求", async () => {
-    const s = dialog({ initial, width: 36, height: 15, ascii: true });
-    await s.ready();
-    expect(s.lastFrame()).toContain("安全审查");
-    await s.input("\x1b[Z");
-    expect(s.lastFrame()).toContain("保存");
-    expect(s.lastFrame()?.split("\n").length).toBe(15);
-    const loading = dialog({ initial });
-    await loading.ready();
-    loading.list.mockImplementation(() => new Promise(() => undefined));
-    await loading.click("model");
-    expect(loading.lastFrame()).toContain("正在拉取");
-    const signal = loading.list.mock.calls[0]?.[1];
-    await loading.input("\x1b");
-    expect(signal?.aborted).toBe(true);
-    expect(loading.lastFrame()).toContain("后端");
+    expect(s.apply).toHaveBeenCalledWith({ backend: "decision", minConfidence: 0.7 }, undefined);
   });
 });
