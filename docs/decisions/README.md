@@ -126,6 +126,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0116](ADR-0116-quote-reply.md) | 选中对话文字引用回复（桌面选中浮出「回复」、输入框引用列表、`message.user.quotes` 与首部引用块、已发消息引用与跳回高亮、TUI/CLI 弱色 `> ` 显示） | 已接受 |
 | [ADR-0117](ADR-0117-decision-model.md) | 决策模型（`decisionModel` 独立配置 Gemini Decisions / Jev、`permission.reviewer` 新增 `backend: "decision"`、旧 Jev 原子迁移与凭据迁库、桌面与 TUI 设置页改造） | 已接受 |
 | [ADR-0118](ADR-0118-subdir-instructions.md) | 子目录 AGENTS.md 按需加载、日志快照与摘要补注 | 已接受 |
+| [ADR-0119](ADR-0119-goal-check.md) | `/goal` 完成时独立抽查工具证据与清单覆盖 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 

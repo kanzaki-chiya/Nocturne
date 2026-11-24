@@ -113,6 +113,8 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 四种执行方式（`/grill-me`、`/goal`、`/plan`、`/fugue`）的入口、状态存放、上限与各端支持见 [ADR-0076](decisions/ADR-0076-work-modes.md)；第五种执行方式 `/ensemble`（指挥（Maestro，`@maestro`）不写文件、常驻命名成员、公开任务书与共享留言板、成员权限请求等用户确认）见 [ADR-0089](decisions/ADR-0089-ensemble.md)。华彩执行方式 `/cadenza` 见 [ADR-0076 修订](decisions/ADR-0076-work-modes.md#修订2026-11-23华彩)。
 
+目标完成时独立抽查工具证据与清单覆盖见 [ADR-0119](decisions/ADR-0119-goal-check.md)。
+
 外部 agent 经 MCP 驱动 Nocturne 会话（`nctrn mcp` 桥、本机管道、配对与范围）见 [ADR-0074](decisions/ADR-0074-mcp-server-for-outside-agents.md)。
 
 后台子代理（准入、启动即返回、结果作为待发输入交付、生命周期）见 [ADR-0073](decisions/ADR-0073-background-subagents.md)，一次性内置子代理权限确认向父会话转发（实时聚合、直接回应、树共享授权与等待暂停超时）见 [ADR-0091](decisions/ADR-0091-subagent-permission-forward.md)，主文档是 [subagent.md](architecture/subagent.md)。
