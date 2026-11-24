@@ -77,6 +77,8 @@
 
 [decisions/README.md](decisions/README.md) 列出全部 ADR 及其状态。
 
+子目录 `AGENTS.md` 按需加载与摘要保留见 [ADR-0118](decisions/ADR-0118-subdir-instructions.md)。
+
 `edit` 未命中诊断与 diff 显示方案见 [ADR-0027](decisions/ADR-0027-edit-diagnostics-diff-display.md)。
 
 会话任务清单工具与进度显示方案见 [ADR-0028](decisions/ADR-0028-session-task-list.md)。

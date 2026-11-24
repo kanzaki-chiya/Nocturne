@@ -66,6 +66,7 @@ runTurn(session, input, signal):
       #   tools.md 第 3 节 2.6 步）→ 权限主体 → 解析资源 → 权限（ask 时先经
       #   PermissionRequest Hook，可能等待用户）→ tool.started → 执行
       #   → PostToolUse Hook → 归一化 → tool.completed
+      if outcome.approvedSubjects: load and persist any new subdirectory instructions
       if outcome.stopTurn: return finish("aborted")         # 用户选择"拒绝并停止"；剩余调用由 finish 结算
       if loopGuard 命中 stopAt:                            # ADR-0063；签名与计数见第 3.9 节
         return finish("error", { code: "loop_detected", message })

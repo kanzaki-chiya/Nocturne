@@ -124,6 +124,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0114](ADR-0114-project-page-library.md) | 项目页面库（共用项目键、来源派生 `origin`、跨会话聚合与旁路缓存、桌面侧栏「页面」入口、`list_pages` 与 `render_html` 跨会话接着改、同项目面板页面只读放行） | 已接受 |
 | [ADR-0115](ADR-0115-page-comment-threads.md) | 面板评论即时发送、跨版本讨论串、回复与解决 | 已接受 |
 | [ADR-0116](ADR-0116-quote-reply.md) | 选中对话文字引用回复（桌面选中浮出「回复」、输入框引用列表、`message.user.quotes` 与首部引用块、已发消息引用与跳回高亮、TUI/CLI 弱色 `> ` 显示） | 已接受 |
+| [ADR-0118](ADR-0118-subdir-instructions.md) | 子目录 AGENTS.md 按需加载、日志快照与摘要补注 | 已接受 |
 
 状态取值：`提议`（等待确认）、`已接受`、`已废弃`、`被 ADR-xxxx 取代`。已接受的 ADR 不修改正文；改变决定时新增 ADR 并更新旧 ADR 的状态。
 
