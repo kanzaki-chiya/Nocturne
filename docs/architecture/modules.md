@@ -100,7 +100,7 @@
 
 - **负责**：`Provider` 接口；`ModelInfo` 与能力声明；各模型服务适配器，把中性请求转换为服务协议、把流式响应归一化为 `ModelStreamEvent`、把错误归一化为 `ProviderError`。
 - **不负责**：重试策略（由 agent 决定）；工具执行；上下文裁剪。
-- **公开接口**：见 [provider-api.md](../protocols/provider-api.md)。
+- **公开接口**：见 [provider-api.md](../protocols/provider-api.md)。`provider/index` 也导出 Gemini Decisions 与 Jev 共用的 `requestDecisions`，供安全审查与目标核对传入共享文本和题表，返回各题答案、用量或结构化失败原因。详见 [ADR-0119](../decisions/ADR-0119-goal-check.md)。
 - **依赖**：protocol。**不能依赖**：agent、session、tools、context。
 - 详见 [providers.md](providers.md)。
 

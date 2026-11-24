@@ -1,4 +1,11 @@
+import {
+  parseDecisionAnswerTable,
+  type DecisionAnswer,
+  type DecisionQuestion,
+} from "../provider/index.js";
 import type { ReviewInput, ReviewResult } from "./types.js";
+
+export const DEFAULT_REVIEW_CONFIDENCE = 0.7;
 
 /**
  * reviewer v2 七题共享模块（reviewer-v2-rules.md §4）。
@@ -248,11 +255,7 @@ export function buildReviewSystemPrompt(context?: ReviewPromptContext): string {
   );
 }
 
-export interface JevChoiceQuestion {
-  type: "choice";
-  instructions: string;
-  criteria: { yes: string; no: string };
-}
+export type JevChoiceQuestion = DecisionQuestion;
 
 /** Jev 后端七个编号 choice 题，每题 criteria 为 yes / no。 */
 export function buildJevQuestions(
@@ -336,23 +339,22 @@ export interface ResolvedJevAnswers {
   lowConfidenceKeys: number[];
 }
 
-function readJevAnswer(raw: unknown, number: number): unknown {
-  if (Array.isArray(raw)) return raw[number - 1];
-  if (raw !== null && typeof raw === "object") {
-    return (raw as Record<string, unknown>)[String(number)];
-  }
-  return undefined;
-}
-
-/**
- * Jev 七题答案归一：兼容对象与数组两种形式。
- * 置信度低于阈值时往保守方向取值：Q1 取否，Q2–Q7 取是。
- * 任一题缺失或 choice / confidence 非法即解析失败。
- */
+/** Jev 七题答案归一，保留用于独立验证审查判定的入口。 */
 export function resolveJevAnswers(
   raw: unknown,
   minConfidence: number,
 ): { ok: true; resolved: ResolvedJevAnswers } | { ok: false } {
+  const answers = parseDecisionAnswerTable(raw, buildJevQuestions());
+  return answers
+    ? { ok: true, resolved: applyReviewConfidence(answers, minConfidence) }
+    : { ok: false };
+}
+
+/** 置信度低于阈值时往保守方向取值：Q1 取否，Q2–Q7 取是。 */
+export function applyReviewConfidence(
+  normalized: Record<string, DecisionAnswer>,
+  minConfidence: number,
+): ResolvedJevAnswers {
   const answers: Record<keyof ReviewAnswers, boolean> = {
     requested: false,
     destroys: true,
@@ -364,26 +366,12 @@ export function resolveJevAnswers(
   };
   const lowConfidenceKeys: number[] = [];
   for (const question of REVIEW_QUESTIONS) {
-    const entry = readJevAnswer(raw, question.number);
-    if (entry === null || typeof entry !== "object") return { ok: false };
-    const record = entry as Record<string, unknown>;
-    const choice: unknown = record.choice;
-    const confidence: unknown = record.confidence;
-    if (
-      (choice !== "yes" && choice !== "no") ||
-      typeof confidence !== "number" ||
-      !Number.isFinite(confidence) ||
-      confidence < 0 ||
-      confidence > 1
-    ) {
-      return { ok: false };
-    }
-    if (confidence < minConfidence) {
+    const answer = normalized[String(question.number)];
+    if (answer === undefined || answer.confidence < minConfidence) {
       lowConfidenceKeys.push(question.number);
-      answers[question.key] = question.key === "requested" ? false : true;
     } else {
-      answers[question.key] = choice === "yes";
+      answers[question.key] = answer.choice === "yes";
     }
   }
-  return { ok: true, resolved: { answers, lowConfidenceKeys } };
+  return { answers, lowConfidenceKeys };
 }

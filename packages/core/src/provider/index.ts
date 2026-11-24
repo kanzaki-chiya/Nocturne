@@ -3,6 +3,7 @@ export * from "./types.js";
 export * from "./auth.js";
 export { externalAuthPath } from "./adapters/external-file-auth.js";
 export * from "./http.js";
+export * from "./decisions.js";
 export * from "./timeout.js";
 export * from "./errors.js";
 export * from "./catalog.js";

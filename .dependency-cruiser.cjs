@@ -170,6 +170,13 @@ module.exports = {
       },
     },
     {
+      name: "decision-client-public-entry",
+      severity: "error",
+      comment: "决策客户端由 provider/index 公开，模块外不直接导入实现（ADR-0119）",
+      from: { path: "^packages/core/src/", pathNot: "^packages/core/src/provider/" },
+      to: { path: "^packages/core/src/provider/decisions\\.ts$" },
+    },
+    {
       name: "config-deps",
       severity: "error",
       comment: "config 只能依赖 protocol 与 platform",
