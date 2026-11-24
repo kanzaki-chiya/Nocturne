@@ -85,7 +85,7 @@ function legacyReviewer(value: string | undefined): SecurityReviewerConfig | und
 
 function reviewerText(
   reviewer: SecurityReviewerConfig | undefined,
-  decisionModel?: DecisionModelConfig | undefined,
+  decisionModel?: DecisionModelConfig,
 ): string {
   if (!reviewer || reviewer.backend === "off") return "关闭";
   if (reviewer.backend === "decision") {

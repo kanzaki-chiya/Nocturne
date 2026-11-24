@@ -552,7 +552,8 @@ describe("SettingsPage", () => {
     const server2 = fakeServer(
       handlers({
         "runtime.describeSettings": itemsWithDm,
-        "runtime.getPreference": (p) => (p.key === "jevDisclosureAccepted" ? "yes" : null),
+        "runtime.getPreference": (p: unknown) =>
+          (p as { key?: string }).key === "jevDisclosureAccepted" ? "yes" : null,
         "runtime.updateSettings": itemsWithDm,
         "runtime.setPreference": null,
       }),

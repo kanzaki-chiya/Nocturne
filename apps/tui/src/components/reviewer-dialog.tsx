@@ -100,7 +100,7 @@ export function ReviewerDialog({
 
   const recipient = decisionModel !== undefined ? decisionModelRecipient(decisionModel) : undefined;
   const recipientDisplay =
-    decisionModel !== undefined && decisionModel.endpoint === "custom"
+    decisionModel?.endpoint === "custom"
       ? (decisionModel.baseURL ?? "自定义地址")
       : (recipient?.label ?? "");
 
@@ -216,7 +216,8 @@ export function ReviewerDialog({
         const step = key.leftArrow ? -1 : 1;
         if (focus === "backend") {
           const i = BACKENDS.indexOf(backend);
-          setBackend(BACKENDS[(i + step + BACKENDS.length) % BACKENDS.length]!);
+          const next = BACKENDS[(i + step + BACKENDS.length) % BACKENDS.length];
+          if (next) setBackend(next);
           setNotice(undefined);
           return;
         }

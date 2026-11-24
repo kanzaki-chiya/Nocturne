@@ -34,7 +34,7 @@ import {
 } from "./notify";
 import { Scrim } from "./ProvidersPage";
 import { refKey, shellGroups } from "./session-controls";
-import { modelKeyText, modelRefText } from "./model-ref";
+import { modelKeyText } from "./model-ref";
 import { ChoiceMenu } from "./Menu";
 import type {
   DecisionModelConfig,
@@ -323,7 +323,7 @@ function DecisionModelValue({
 
 function reviewerText(
   cfg: SecurityReviewerConfig | undefined,
-  decisionModel?: DecisionModelConfig | undefined,
+  decisionModel?: DecisionModelConfig,
 ): ReactNode {
   if (cfg === undefined || cfg.backend === "off") return "关闭";
   if (cfg.backend === "model") return refText(refKey(cfg.model));
@@ -1841,10 +1841,14 @@ function decisionRecipient(config: DecisionModelConfig): {
   id: DecisionRecipientId;
   label: string;
 } {
+  const customLabel =
+    config.baseURL !== undefined && config.baseURL.trim() !== ""
+      ? config.baseURL.trim()
+      : "自定义地址";
   if (config.source === "gemini") {
     return config.endpoint === "ai-studio"
       ? { id: "google", label: "Google" }
-      : { id: "custom", label: config.baseURL?.trim() || "自定义地址" };
+      : { id: "custom", label: customLabel };
   }
   if (config.endpoint === "opencode-zen") {
     return { id: "opencode-zen", label: "OpenCode 与 TypeSafe" };
@@ -1852,7 +1856,7 @@ function decisionRecipient(config: DecisionModelConfig): {
   if (config.endpoint === "typesafe") {
     return { id: "typesafe", label: "TypeSafe" };
   }
-  return { id: "custom", label: config.baseURL?.trim() || "自定义地址" };
+  return { id: "custom", label: customLabel };
 }
 
 function parseAcceptedRecipients(

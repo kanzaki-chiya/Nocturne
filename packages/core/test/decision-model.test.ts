@@ -281,7 +281,10 @@ describe("backend: decision、旧 Jev 迁移与环境变量剥离", () => {
       interactive: false,
     });
 
-    const sampleId = REVIEWER_SAMPLES[0]!.id;
+    const firstSample = REVIEWER_SAMPLES[0];
+    expect(firstSample).toBeDefined();
+    if (!firstSample) return;
+    const sampleId = firstSample.id;
     await runtime.updateSettings({
       "permissions.preset": "smart",
       "permission.reviewer": { backend: "decision" },
@@ -312,7 +315,6 @@ describe("backend: decision、旧 Jev 迁移与环境变量剥离", () => {
       providers: [unsetProvider],
       config,
       interactive: false,
-      permissions: { preset: "smart" },
     });
     const unsetSession = await unsetRuntime.createSession({
       model: { provider: "fake", model: "fake-1" },
@@ -413,7 +415,6 @@ describe("backend: decision、旧 Jev 迁移与环境变量剥离", () => {
         providers: [provider],
         config,
         interactive: false,
-        permissions: { preset: "bypass" },
       });
       await runtime.updateSettings({
         "permissions.preset": "bypass",

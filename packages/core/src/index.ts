@@ -1319,8 +1319,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     if (decisionModel === undefined) {
       return {
         backend: "decision",
-        async review() {
-          return { verdict: "unsure", reason: "决策模型未设置" };
+        review() {
+          return Promise.resolve({ verdict: "unsure" as const, reason: "决策模型未设置" });
         },
       };
     }
@@ -2218,11 +2218,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         config === undefined ? resolved : config.resolvedSettings(meta.workspaceRoot);
       const selected = wsSettings?.permissionReviewer;
       if (!selected || selected.backend === "off") return undefined;
-      const decisionModel = selected.backend === "decision" ? wsSettings?.decisionModel : undefined;
+      const decisionModel = selected.backend === "decision" ? wsSettings.decisionModel : undefined;
       const key = JSON.stringify([selected, decisionModel]);
       if (key !== reviewerKey) {
         reviewerKey = key;
-        const providers = wsSettings?.providers ?? resolved?.providers ?? [];
+        const providers = wsSettings.providers;
         if (selected.backend === "decision") {
           modelReviewer = buildDecisionReviewer(
             decisionModel,

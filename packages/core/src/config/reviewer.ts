@@ -193,7 +193,7 @@ export function defaultJevReviewer(
 
 export function reviewerText(
   reviewer: SecurityReviewerConfig | undefined,
-  decisionModel?: DecisionModelConfig | undefined,
+  decisionModel?: DecisionModelConfig,
 ): string {
   if (!reviewer || reviewer.backend === "off") return "off";
   if (reviewer.backend === "model") return `${reviewer.model.provider}/${reviewer.model.model}`;

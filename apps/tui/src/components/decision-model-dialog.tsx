@@ -305,16 +305,19 @@ export function DecisionModelDialog({
         const step = key.leftArrow ? -1 : 1;
         if (focus === "source") {
           const i = SOURCES.indexOf(source);
-          switchSource(SOURCES[(i + step + SOURCES.length) % SOURCES.length]!);
+          const next = SOURCES[(i + step + SOURCES.length) % SOURCES.length];
+          if (next) switchSource(next);
           return;
         }
         if (focus === "endpoint") {
           if (source === "gemini") {
             const i = GEMINI_EPS.indexOf(geminiEndpoint);
-            setGeminiEndpoint(GEMINI_EPS[(i + step + GEMINI_EPS.length) % GEMINI_EPS.length]!);
+            const next = GEMINI_EPS[(i + step + GEMINI_EPS.length) % GEMINI_EPS.length];
+            if (next) setGeminiEndpoint(next);
           } else if (source === "jev") {
             const i = JEV_EPS.indexOf(jevEndpoint);
-            switchJevEndpoint(JEV_EPS[(i + step + JEV_EPS.length) % JEV_EPS.length]!);
+            const next = JEV_EPS[(i + step + JEV_EPS.length) % JEV_EPS.length];
+            if (next) switchJevEndpoint(next);
           }
           return;
         }
@@ -323,7 +326,8 @@ export function DecisionModelDialog({
             ? ["provider", "env", "stored"]
             : ["env", "stored"];
           const i = kinds.indexOf(effectiveCredKind);
-          setCredKind(kinds[(i + step + kinds.length) % kinds.length]!);
+          const next = kinds[(i + step + kinds.length) % kinds.length];
+          if (next) setCredKind(next);
           return;
         }
         if (focus === "cancel" || focus === "save") {
