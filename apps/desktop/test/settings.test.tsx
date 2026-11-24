@@ -466,47 +466,125 @@ describe("SettingsPage", () => {
     server.close();
   });
 
-  it("Jev 单独密钥：password 输入，经 reviewerKey 提交；首次启用先显示外发说明", async () => {
+  it("决策模型弹窗：切来源、custom 地址、凭据切换、单独密钥经 decisionModelKey 提交与清除", async () => {
     const server = fakeServer(
       handlers({
-        "runtime.defaultReviewer": {
-          backend: "jev",
-          endpoint: "opencode-zen",
-          model: "jev-1",
-          credential: { stored: true },
-        },
         "runtime.updateSettings": ITEMS,
-        "runtime.setPreference": null,
       }),
     );
     await server.initialize();
-    render(<SettingsPage {...props(server.client)} />);
-    await screen.findByText("安全审查");
-    fireEvent.click(row("安全审查").querySelector("button") ?? document.body);
-    await screen.findByRole("dialog", { name: "安全审查" });
-    fireEvent.click(screen.getByRole("button", { name: "Jev" }));
-    await waitFor(() => {
-      expect(screen.getByLabelText("模型")).toHaveProperty("value", "jev-1");
+    render(<SettingsPage {...props(server.client, { section: "models" })} />);
+    await screen.findByText("决策模型");
+    fireEvent.click(row("决策模型").querySelector("button") ?? document.body);
+    const dlg = await screen.findByRole("dialog", { name: "决策模型" });
+
+    // 切到 Gemini + 自定义地址 + 单独密钥
+    fireEvent.click(screen.getByRole("button", { name: "Gemini" }));
+    fireEvent.click(screen.getByRole("button", { name: "自定义地址" }));
+    fireEvent.change(screen.getByLabelText("自定义地址"), {
+      target: { value: "https://gateway.example.invalid/v1beta" },
     });
+    expect(within(dlg).getByLabelText("模型")).toHaveProperty("value", "gemini-decision-1");
     fireEvent.click(screen.getByRole("button", { name: "单独密钥" }));
-    const key = screen.getByLabelText("审查器密钥");
+    const key = screen.getByLabelText("单独密钥");
     expect(key.getAttribute("type")).toBe("password");
-    fireEvent.change(key, { target: { value: "sk-reviewer" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    await screen.findByText("首次启用 Jev");
+    fireEvent.change(key, { target: { value: "sk-decision-fake" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => {
       const call = server.calls.find((c) => c.method === "runtime.updateSettings");
-      expect(call?.params.reviewerKey).toBe("sk-reviewer");
+      expect(call?.params.decisionModelKey).toBe("sk-decision-fake");
+      expect((call?.params.patch as Record<string, unknown>).decisionModel).toEqual({
+        source: "gemini",
+        endpoint: "custom",
+        baseURL: "https://gateway.example.invalid/v1beta",
+        model: "gemini-decision-1",
+        credential: { stored: true },
+      });
+    });
+
+    // 重新打开并清除（来源切回未设置）
+    server.calls.length = 0;
+    fireEvent.click(row("决策模型").querySelector("button") ?? document.body);
+    await screen.findByRole("dialog", { name: "决策模型" });
+    fireEvent.click(screen.getByRole("button", { name: "未设置" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      const call = server.calls.find((c) => c.method === "runtime.updateSettings");
+      expect((call?.params.patch as Record<string, unknown>).decisionModel).toBeNull();
+    });
+    server.close();
+  });
+
+  it("安全审查弹窗：未设置决策模型报错并可跳转模型页；首次向新接收方外发显示一次说明", async () => {
+    const onOpenModels = vi.fn();
+    const server1 = fakeServer(handlers({ "runtime.updateSettings": ITEMS }));
+    await server1.initialize();
+    const first = render(<SettingsPage {...props(server1.client)} onOpenModels={onOpenModels} />);
+    await screen.findByText("安全审查");
+    fireEvent.click(row("安全审查").querySelector("button") ?? document.body);
+    await screen.findByRole("dialog", { name: "安全审查" });
+    fireEvent.click(screen.getByRole("button", { name: "决策模型" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await screen.findByText("先设置决策模型");
+    fireEvent.click(screen.getByRole("button", { name: "设置 › 模型" }));
+    expect(onOpenModels).toHaveBeenCalledOnce();
+    first.unmount();
+    server1.close();
+
+    // 已配置 Gemini 决策模型：首次启用向 Google 外发显示一次说明
+    const geminiDm = {
+      source: "gemini",
+      endpoint: "ai-studio",
+      model: "gemini-decision-1",
+      credential: { env: "GEMINI_API_KEY" },
+    } as const;
+    const itemsWithDm: SettingItem[] = [
+      ...ITEMS,
+      {
+        key: "decisionModel",
+        effective: "Gemini · ai-studio · gemini-decision-1",
+        source: "settings",
+        saved: "Gemini · ai-studio · gemini-decision-1",
+        overridden: false,
+        decisionModel: { effective: geminiDm, saved: geminiDm },
+      },
+    ];
+    const server2 = fakeServer(
+      handlers({
+        "runtime.describeSettings": itemsWithDm,
+        "runtime.getPreference": (p) => (p.key === "jevDisclosureAccepted" ? "yes" : null),
+        "runtime.updateSettings": itemsWithDm,
+        "runtime.setPreference": null,
+      }),
+    );
+    await server2.initialize();
+    render(<SettingsPage {...props(server2.client)} />);
+    await screen.findByText("安全审查");
+    fireEvent.click(row("安全审查").querySelector("button") ?? document.body);
+    await screen.findByRole("dialog", { name: "安全审查" });
+    fireEvent.click(screen.getByRole("button", { name: "决策模型" }));
+    expect(screen.getByText("gemini-decision-1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await screen.findByText("首次启用决策模型审查");
+    expect(screen.getByText(/Google/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      const call = server2.calls.find((c) => c.method === "runtime.updateSettings");
+      expect((call?.params.patch as Record<string, unknown>)["permission.reviewer"]).toEqual({
+        backend: "decision",
+      });
     });
     await waitFor(() => {
       expect(
-        server.calls.some(
-          (c) => c.method === "runtime.setPreference" && c.params.key === "jevDisclosureAccepted",
+        server2.calls.some(
+          (c) =>
+            c.method === "runtime.setPreference" &&
+            c.params.key === "decisionDisclosureAccepted" &&
+            String(c.params.value).includes("google"),
         ),
       ).toBe(true);
     });
-    server.close();
+    server2.close();
   });
 
   describe("安全审查：追加规则与样例检查（ADR-0057）", () => {

@@ -2747,6 +2747,9 @@ export function App({ host }: { host: DesktopHost }) {
                       onOpenSubagents={() => {
                         setPage("agents");
                       }}
+                      onOpenModels={() => {
+                        setPage("models");
+                      }}
                       appearance={{
                         uiFont: p.uiFont,
                         codeFont: p.codeFont,

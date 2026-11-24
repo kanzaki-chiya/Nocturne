@@ -37,6 +37,8 @@ import { refKey, shellGroups } from "./session-controls";
 import { modelKeyText, modelRefText } from "./model-ref";
 import { ChoiceMenu } from "./Menu";
 import type {
+  DecisionModelConfig,
+  GeminiDecisionEndpoint,
   JevEndpoint,
   JevReviewerConfig,
   ModelInfo,
@@ -303,15 +305,41 @@ function ModelValue({
   );
 }
 
-function reviewerText(cfg: SecurityReviewerConfig | undefined): ReactNode {
+function DecisionModelValue({
+  config,
+  overrideTitle,
+}: {
+  config: DecisionModelConfig;
+  overrideTitle?: string | undefined;
+}) {
+  const sourceLabel = config.source === "gemini" ? "Gemini" : "Jev";
+  return (
+    <span className="model-value" title={overrideTitle ?? `${config.model} · ${sourceLabel}`}>
+      <span className="model-primary">{config.model}</span>
+      <span className="model-provider">{sourceLabel}</span>
+    </span>
+  );
+}
+
+function reviewerText(
+  cfg: SecurityReviewerConfig | undefined,
+  decisionModel?: DecisionModelConfig | undefined,
+): ReactNode {
   if (cfg === undefined || cfg.backend === "off") return "关闭";
   if (cfg.backend === "model") return refText(refKey(cfg.model));
-  const endpoint = cfg.endpoint === "custom" ? (cfg.baseURL ?? "自定义地址") : cfg.endpoint;
+  if (cfg.backend === "decision") {
+    return decisionModel !== undefined ? <DecisionModelValue config={decisionModel} /> : "决策模型";
+  }
   return (
-    <>
-      Jev
-      <span className="muted-value">{modelRefText({ provider: endpoint, model: cfg.model })}</span>
-    </>
+    <DecisionModelValue
+      config={{
+        source: "jev",
+        endpoint: cfg.endpoint,
+        ...(cfg.endpoint === "custom" && cfg.baseURL !== undefined ? { baseURL: cfg.baseURL } : {}),
+        model: cfg.model,
+        credential: cfg.credential,
+      }}
+    />
   );
 }
 
@@ -335,6 +363,7 @@ export function SettingsPage({
   notifications,
   onConfigSaved,
   onOpenSubagents,
+  onOpenModels,
   appearance,
 }: {
   section: SettingsPageSection;
@@ -378,6 +407,7 @@ export function SettingsPage({
   /** 写设置成功后调用：桌面端据此刷新会话列表 */
   onConfigSaved?: () => void;
   onOpenSubagents?: () => void;
+  onOpenModels?: () => void;
   /** 外观页的字体与字号；不给时不显示这两组 */
   appearance?: AppearanceControls | undefined;
 }) {
@@ -408,7 +438,7 @@ export function SettingsPage({
   /** 单值项保存中的乐观值；失败时清掉即回到原值 */
   const [pendingPreset, setPendingPreset] = useState<string | null>(null);
   const [dialog, setDialog] = useState<
-    null | "defaultModel" | "reviewer" | "threshold" | { role: RoleKey }
+    null | "defaultModel" | "decisionModel" | "reviewer" | "threshold" | { role: RoleKey }
   >(null);
   const [themeDialog, setThemeDialog] = useState<CustomThemeDialogRequest | null>(null);
   const [localCustomThemes, setLocalCustomThemes] = useState<readonly CustomTheme[]>(
@@ -533,7 +563,7 @@ export function SettingsPage({
     key: string,
     label: string,
     patch: SettingsPatch,
-    options?: { reviewerKey: string },
+    options?: { reviewerKey?: string; decisionModelKey?: string },
   ): Promise<string | undefined> => {
     if (client === undefined) return "后台尚未就绪";
     setRowErr(key, null);
@@ -558,11 +588,13 @@ export function SettingsPage({
   const defaultModelItem = item("defaultModel");
   const effortItem = item("reasoningEffort");
   const presetItem = item("permissions.preset");
+  const decisionModelItem = item("decisionModel");
   const reviewerItem = item("permission.reviewer");
   const reviewerRulesItem = item("permission.reviewerRules");
   const thresholdItem = item("compaction.threshold");
   const pruneLimitItem = item("compaction.pruneLimit");
   const shellItem = item("shell");
+  const decisionModelCfg = decisionModelItem?.decisionModel?.effective;
   const reviewerCfg = reviewerItem?.reviewer?.effective;
 
   // ── 通知（ADR-0056）：生效值读自 describeSettings，逐项保存 ──
@@ -716,7 +748,7 @@ export function SettingsPage({
                     overrideTitle={settingOverrideTitle(reviewerItem)}
                     error={errs("permission.reviewer")}
                   >
-                    <span className="val">{reviewerText(reviewerCfg)}</span>
+                    <span className="val">{reviewerText(reviewerCfg, decisionModelCfg)}</span>
                     <Button
                       size="sm"
                       onClick={() => {
@@ -1106,6 +1138,28 @@ export function SettingsPage({
                       </SettingsRow>
                     );
                   })}
+                  <SettingsRow
+                    label="决策模型"
+                    overrideTitle={settingOverrideTitle(decisionModelItem)}
+                    error={errs("decisionModel")}
+                  >
+                    {decisionModelCfg === undefined ? (
+                      <span className="val dim">未设置</span>
+                    ) : (
+                      <DecisionModelValue
+                        config={decisionModelCfg}
+                        overrideTitle={settingOverrideTitle(decisionModelItem)}
+                      />
+                    )}
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setDialog("decisionModel");
+                      }}
+                    >
+                      选择
+                    </Button>
+                  </SettingsRow>
                 </SettingsGroup>
               </>
             )}
@@ -1314,18 +1368,37 @@ export function SettingsPage({
           }}
         />
       )}
-      {dialog === "reviewer" && client !== undefined && (
-        <ReviewerDialog
+      {dialog === "decisionModel" && client !== undefined && (
+        <DecisionModelDialog
           client={client}
-          models={models}
           providers={reviewerProviders}
-          current={reviewerItem?.reviewer?.saved ?? reviewerCfg}
-          currentRules={reviewerRulesItem?.reviewerRules?.saved}
+          current={decisionModelItem?.decisionModel?.saved ?? decisionModelCfg}
           onClose={() => {
             setDialog(null);
           }}
           onSave={async (patch, options) => {
-            const err = await save("permission.reviewer", "安全审查", patch, options);
+            const err = await save("decisionModel", "决策模型", patch, options);
+            if (err === undefined) setDialog(null);
+            return err;
+          }}
+        />
+      )}
+      {dialog === "reviewer" && client !== undefined && (
+        <ReviewerDialog
+          client={client}
+          models={models}
+          decisionModel={decisionModelCfg}
+          current={reviewerItem?.reviewer?.saved ?? reviewerCfg}
+          currentRules={reviewerRulesItem?.reviewerRules?.saved}
+          onOpenModels={() => {
+            setDialog(null);
+            onOpenModels?.();
+          }}
+          onClose={() => {
+            setDialog(null);
+          }}
+          onSave={async (patch) => {
+            const err = await save("permission.reviewer", "安全审查", patch);
             if (err === undefined) setDialog(null);
             return err;
           }}
@@ -1751,11 +1824,337 @@ function RoleDialog({
 
 /* ---------------- 安全审查 ---------------- */
 
+const GEMINI_DECISION_ENDPOINTS: { v: GeminiDecisionEndpoint; label: string }[] = [
+  { v: "ai-studio", label: "Google AI Studio" },
+  { v: "custom", label: "自定义地址" },
+];
+
 const JEV_ENDPOINTS: { v: JevEndpoint; label: string }[] = [
   { v: "opencode-zen", label: "opencode-zen" },
   { v: "typesafe", label: "typesafe" },
   { v: "custom", label: "自定义地址" },
 ];
+
+type DecisionRecipientId = "google" | "typesafe" | "opencode-zen" | "custom";
+
+function decisionRecipient(config: DecisionModelConfig): {
+  id: DecisionRecipientId;
+  label: string;
+} {
+  if (config.source === "gemini") {
+    return config.endpoint === "ai-studio"
+      ? { id: "google", label: "Google" }
+      : { id: "custom", label: config.baseURL?.trim() || "自定义地址" };
+  }
+  if (config.endpoint === "opencode-zen") {
+    return { id: "opencode-zen", label: "OpenCode 与 TypeSafe" };
+  }
+  if (config.endpoint === "typesafe") {
+    return { id: "typesafe", label: "TypeSafe" };
+  }
+  return { id: "custom", label: config.baseURL?.trim() || "自定义地址" };
+}
+
+function parseAcceptedRecipients(
+  raw: string | undefined,
+  legacyJev: string | undefined,
+): Set<string> {
+  const set = new Set(
+    (raw ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== ""),
+  );
+  if (legacyJev === "yes") set.add("opencode-zen");
+  return set;
+}
+
+const DEFAULT_DECISION_MODELS = new Set(["gemini-decision-1", "jev-1.13-free", "jev-latest"]);
+const DEFAULT_DECISION_ENVS = new Set(["GEMINI_API_KEY", "OPENCODE_API_KEY", "TYPESAFE_API_KEY"]);
+
+function DecisionModelDialog({
+  client,
+  providers,
+  current,
+  onClose,
+  onSave,
+}: {
+  client: RpcClient;
+  providers: string[];
+  current: DecisionModelConfig | undefined;
+  onClose: () => void;
+  onSave: (
+    patch: SettingsPatch,
+    options: { decisionModelKey: string } | undefined,
+  ) => Promise<string | undefined>;
+}) {
+  const [source, setSource] = useState<"unset" | "gemini" | "jev">(current?.source ?? "unset");
+  const [geminiEndpoint, setGeminiEndpoint] = useState<GeminiDecisionEndpoint>(
+    current?.source === "gemini" ? current.endpoint : "ai-studio",
+  );
+  const [jevEndpoint, setJevEndpoint] = useState<JevEndpoint>(
+    current?.source === "jev" ? current.endpoint : "opencode-zen",
+  );
+  const [baseURL, setBaseURL] = useState(current?.baseURL ?? "");
+  const [model, setModel] = useState(current?.model ?? "gemini-decision-1");
+  const [credKind, setCredKind] = useState<"provider" | "env" | "stored">(() => {
+    if (current === undefined) return "env";
+    if ("provider" in current.credential) return "provider";
+    if ("env" in current.credential) return "env";
+    return "stored";
+  });
+  const [credProvider, setCredProvider] = useState(
+    current !== undefined && "provider" in current.credential
+      ? current.credential.provider
+      : (providers[0] ?? ""),
+  );
+  const [credEnv, setCredEnv] = useState(
+    current !== undefined && "env" in current.credential
+      ? current.credential.env
+      : "GEMINI_API_KEY",
+  );
+  const [secretKey, setSecretKey] = useState("");
+  const { busy, error, setError, run } = useDialogSave();
+
+  const canBorrowProvider =
+    source === "jev" && jevEndpoint === "opencode-zen" && providers.length > 0;
+
+  const switchSource = (next: "unset" | "gemini" | "jev") => {
+    setSource(next);
+    setError(null);
+    if (next === "gemini") {
+      if (credKind === "provider") setCredKind("env");
+      if (model.trim() === "" || DEFAULT_DECISION_MODELS.has(model)) setModel("gemini-decision-1");
+      if (credEnv.trim() === "" || DEFAULT_DECISION_ENVS.has(credEnv)) setCredEnv("GEMINI_API_KEY");
+    } else if (next === "jev") {
+      if (jevEndpoint !== "opencode-zen" && credKind === "provider") setCredKind("env");
+      if (model.trim() === "" || DEFAULT_DECISION_MODELS.has(model)) {
+        setModel(jevEndpoint === "opencode-zen" ? "jev-1.13-free" : "jev-latest");
+      }
+      if (credEnv.trim() === "" || DEFAULT_DECISION_ENVS.has(credEnv)) {
+        setCredEnv(jevEndpoint === "opencode-zen" ? "OPENCODE_API_KEY" : "TYPESAFE_API_KEY");
+      }
+      if (jevEndpoint === "opencode-zen" && current?.source !== "jev") {
+        client.runtime
+          .defaultReviewer("opencode-zen")
+          .then((d: JevReviewerConfig) => {
+            if ("provider" in d.credential) {
+              setCredKind("provider");
+              setCredProvider(d.credential.provider);
+            }
+          })
+          .catch(() => undefined);
+      }
+    }
+  };
+
+  const switchJevEndpoint = (next: JevEndpoint) => {
+    setJevEndpoint(next);
+    setError(null);
+    if (next !== "opencode-zen" && credKind === "provider") setCredKind("env");
+    if (model.trim() === "" || DEFAULT_DECISION_MODELS.has(model)) {
+      setModel(next === "opencode-zen" ? "jev-1.13-free" : "jev-latest");
+    }
+    if (credEnv.trim() === "" || DEFAULT_DECISION_ENVS.has(credEnv)) {
+      setCredEnv(next === "opencode-zen" ? "OPENCODE_API_KEY" : "TYPESAFE_API_KEY");
+    }
+  };
+
+  const build = ():
+    { patch: SettingsPatch; options: { decisionModelKey: string } | undefined } | string => {
+    if (source === "unset") return { patch: { decisionModel: null }, options: undefined };
+    const trimmedModel = model.trim();
+    if (trimmedModel === "") return "模型必填";
+    const key = secretKey.trim();
+    if (source === "gemini") {
+      if (geminiEndpoint === "custom" && baseURL.trim() === "") return "自定义地址必填";
+      let credential: { env: string } | { stored: true };
+      if (credKind === "stored") {
+        credential = { stored: true };
+      } else {
+        if (credEnv.trim() === "") return "填写环境变量名";
+        credential = { env: credEnv.trim() };
+      }
+      const cfg: DecisionModelConfig = {
+        source: "gemini",
+        endpoint: geminiEndpoint,
+        ...(geminiEndpoint === "custom" ? { baseURL: baseURL.trim() } : {}),
+        model: trimmedModel,
+        credential,
+      };
+      return {
+        patch: { decisionModel: cfg },
+        options: credKind === "stored" && key !== "" ? { decisionModelKey: key } : undefined,
+      };
+    }
+    if (jevEndpoint === "custom" && baseURL.trim() === "") return "自定义地址必填";
+    let credential: JevReviewerConfig["credential"];
+    if (credKind === "provider" && canBorrowProvider) {
+      if (credProvider === "") return "选择沿用哪个服务商的凭据";
+      credential = { provider: credProvider };
+    } else if (credKind === "stored") {
+      credential = { stored: true };
+    } else {
+      if (credEnv.trim() === "") return "填写环境变量名";
+      credential = { env: credEnv.trim() };
+    }
+    const cfg: DecisionModelConfig = {
+      source: "jev",
+      endpoint: jevEndpoint,
+      ...(jevEndpoint === "custom" ? { baseURL: baseURL.trim() } : {}),
+      model: trimmedModel,
+      credential,
+    };
+    return {
+      patch: { decisionModel: cfg },
+      options: credKind === "stored" && key !== "" ? { decisionModelKey: key } : undefined,
+    };
+  };
+
+  const submit = () => {
+    const built = build();
+    if (typeof built === "string") {
+      setError(built);
+      return;
+    }
+    run(async () => {
+      const err = await onSave(built.patch, built.options);
+      if (err === undefined) setSecretKey("");
+      return err;
+    });
+  };
+
+  const seg = <V extends string>(
+    label: string,
+    value: V,
+    options: readonly (readonly [V, string])[],
+    onPick: (v: V) => void,
+  ) => (
+    <SegmentedControl
+      aria-label={label}
+      value={value}
+      options={options.map(([v, text]) => ({ value: v, label: text }))}
+      onChange={onPick}
+    />
+  );
+
+  return (
+    <Dialog
+      title="决策模型"
+      width={520}
+      error={error}
+      busy={busy}
+      onClose={onClose}
+      onSave={submit}
+    >
+      <Field label="来源">
+        {seg(
+          "来源",
+          source,
+          [
+            ["unset", "未设置"],
+            ["gemini", "Gemini"],
+            ["jev", "Jev"],
+          ] as const,
+          switchSource,
+        )}
+      </Field>
+      {source !== "unset" && (
+        <>
+          <Field label="接入点">
+            {source === "gemini"
+              ? seg(
+                  "接入点",
+                  geminiEndpoint,
+                  GEMINI_DECISION_ENDPOINTS.map((e) => [e.v, e.label] as const),
+                  (v) => {
+                    setGeminiEndpoint(v);
+                    setError(null);
+                  },
+                )
+              : seg(
+                  "接入点",
+                  jevEndpoint,
+                  JEV_ENDPOINTS.map((e) => [e.v, e.label] as const),
+                  switchJevEndpoint,
+                )}
+            {((source === "gemini" && geminiEndpoint === "custom") ||
+              (source === "jev" && jevEndpoint === "custom")) && (
+              <input
+                id="dm-url"
+                aria-label="自定义地址"
+                className="input lg mono"
+                spellCheck={false}
+                value={baseURL}
+                onChange={(e) => {
+                  setBaseURL(e.target.value);
+                }}
+              />
+            )}
+          </Field>
+          <Field label="模型" htmlFor="dm-model">
+            <input
+              id="dm-model"
+              className="input lg mono"
+              spellCheck={false}
+              value={model}
+              onChange={(e) => {
+                setModel(e.target.value);
+              }}
+            />
+          </Field>
+          <Field label="凭据">
+            {seg(
+              "凭据",
+              canBorrowProvider ? credKind : credKind === "provider" ? "env" : credKind,
+              [
+                ...(canBorrowProvider ? [["provider", "沿用服务商"] as const] : []),
+                ["env", "环境变量"] as const,
+                ["stored", "单独密钥"] as const,
+              ],
+              (v) => {
+                setCredKind(v);
+                setError(null);
+              },
+            )}
+            {credKind === "provider" && canBorrowProvider && (
+              <Dropdown
+                label="沿用服务商"
+                appearance="lg"
+                value={credProvider}
+                options={providers.map((p) => ({ value: p, label: p }))}
+                onChange={setCredProvider}
+              />
+            )}
+            {(credKind === "env" || (credKind === "provider" && !canBorrowProvider)) && (
+              <input
+                className="input lg mono"
+                spellCheck={false}
+                value={credEnv}
+                aria-label="环境变量"
+                onChange={(e) => {
+                  setCredEnv(e.target.value);
+                }}
+              />
+            )}
+            {credKind === "stored" && (
+              <input
+                className="input lg mono"
+                type="password"
+                autoComplete="off"
+                value={secretKey}
+                aria-label="单独密钥"
+                onChange={(e) => {
+                  setSecretKey(e.target.value);
+                }}
+              />
+            )}
+          </Field>
+        </>
+      )}
+    </Dialog>
+  );
+}
 
 const RULES_LIMIT = 1000;
 
@@ -1824,90 +2223,61 @@ function ReviewerRuleList({
 function ReviewerDialog({
   client,
   models,
-  providers,
+  decisionModel,
   current,
   currentRules,
+  onOpenModels,
   onClose,
   onSave,
 }: {
   client: RpcClient;
   models: ModelInfo[];
-  providers: string[];
+  decisionModel: DecisionModelConfig | undefined;
   current: SecurityReviewerConfig | undefined;
   /** settings.json 里已保存的追加规则 */
   currentRules: ReviewerRules | undefined;
+  onOpenModels: () => void;
   onClose: () => void;
-  onSave: (
-    patch: SettingsPatch,
-    options: { reviewerKey: string } | undefined,
-  ) => Promise<string | undefined>;
+  onSave: (patch: SettingsPatch) => Promise<string | undefined>;
 }) {
-  const [backend, setBackend] = useState<"off" | "model" | "jev">(current?.backend ?? "off");
+  const [backend, setBackend] = useState<"off" | "decision" | "model">(() => {
+    if (current?.backend === "model") return "model";
+    if (current?.backend === "decision" || current?.backend === "jev") return "decision";
+    return "off";
+  });
   const [modelRef, setModelRef] = useState<string | null>(
     current?.backend === "model" ? refKey(current.model) : null,
   );
-  const jev = current?.backend === "jev" ? current : undefined;
-  const [endpoint, setEndpoint] = useState<JevEndpoint>(jev?.endpoint ?? "opencode-zen");
-  const [baseURL, setBaseURL] = useState(jev?.baseURL ?? "");
-  const [jevModel, setJevModel] = useState(jev?.model ?? "");
-  const [credKind, setCredKind] = useState<"provider" | "env" | "stored">(() => {
-    if (jev === undefined) return providers.length > 0 ? "provider" : "stored";
-    if ("provider" in jev.credential) return "provider";
-    if ("env" in jev.credential) return "env";
-    return "stored";
-  });
-  const [credProvider, setCredProvider] = useState(
-    jev !== undefined && "provider" in jev.credential
-      ? jev.credential.provider
-      : (providers[0] ?? ""),
+  const [minConfidence, setMinConfidence] = useState(() =>
+    current !== undefined &&
+    (current.backend === "decision" || current.backend === "jev") &&
+    current.minConfidence !== undefined
+      ? String(current.minConfidence)
+      : "",
   );
-  const [credEnv, setCredEnv] = useState(
-    jev !== undefined && "env" in jev.credential ? jev.credential.env : "",
-  );
-  /** 凭据库里的审查器密钥：只经 reviewerKey 提交，保存后清空，界面不留存 */
-  const [reviewerKey, setReviewerKey] = useState("");
-  const [minConfidence, setMinConfidence] = useState(
-    jev?.minConfidence !== undefined ? String(jev.minConfidence) : "",
-  );
-  /** 首次启用 Jev 的数据外发说明（与 TUI 同一偏好 jevDisclosureAccepted） */
-  const [disclosure, setDisclosure] = useState<"unknown" | "needed" | "shown" | "accepted">(
-    "unknown",
-  );
+  /** 首次向某接收方外发审查数据的披露状态（ADR-0117 §5；兼容旧偏好 jevDisclosureAccepted） */
+  const [acceptedRecipients, setAcceptedRecipients] = useState<Set<string> | null>(null);
+  const [disclosure, setDisclosure] = useState<"idle" | "shown">("idle");
   const [rulesAsk, setRulesAsk] = useState(() => ruleRows(currentRules?.ask));
   const [rulesAllow, setRulesAllow] = useState(() => ruleRows(currentRules?.allow));
   const { busy, error, setError, run } = useDialogSave();
 
   useEffect(() => {
     let cancelled = false;
-    client.runtime
-      .getPreference("jevDisclosureAccepted")
-      .then((v) => {
-        if (!cancelled) setDisclosure(v === "yes" ? "accepted" : "needed");
+    Promise.all([
+      client.runtime.getPreference("decisionDisclosureAccepted").catch(() => undefined),
+      client.runtime.getPreference("jevDisclosureAccepted").catch(() => undefined),
+    ])
+      .then(([raw, legacy]) => {
+        if (!cancelled) setAcceptedRecipients(parseAcceptedRecipients(raw, legacy));
       })
       .catch(() => {
-        if (!cancelled) setDisclosure("needed");
+        if (!cancelled) setAcceptedRecipients(new Set());
       });
     return () => {
       cancelled = true;
     };
   }, [client]);
-
-  // 切到 Jev 或换接入点时，模型为空就带出 Core 的默认模型
-  const jevModelRef = useRef(jevModel);
-  jevModelRef.current = jevModel;
-  useEffect(() => {
-    if (backend !== "jev" || (endpoint === "custom" && baseURL.trim() === "")) return;
-    let cancelled = false;
-    client.runtime
-      .defaultReviewer(endpoint, endpoint === "custom" ? baseURL.trim() : undefined)
-      .then((d: JevReviewerConfig) => {
-        if (!cancelled && jevModelRef.current === "") setJevModel(d.model);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [client, backend, endpoint, baseURL]);
 
   /** 两段追加规则随审查器配置一起保存；全空表示清除 */
   const rulesPatch = (): SettingsPatch => {
@@ -1921,56 +2291,34 @@ function ReviewerDialog({
     };
   };
 
-  const build = ():
-    { patch: SettingsPatch; options: { reviewerKey: string } | undefined } | string => {
+  const build = (): SettingsPatch | string => {
     const built = buildReviewer();
     if (typeof built === "string") return built;
     if (ruleText(rulesAsk).length > RULES_LIMIT || ruleText(rulesAllow).length > RULES_LIMIT)
       return `规则不能超过 ${RULES_LIMIT} 字`;
-    return { patch: { ...built.patch, ...rulesPatch() }, options: built.options };
+    return { ...built, ...rulesPatch() };
   };
 
-  const buildReviewer = ():
-    { patch: SettingsPatch; options: { reviewerKey: string } | undefined } | string => {
-    if (backend === "off")
-      return { patch: { "permission.reviewer": { backend: "off" } }, options: undefined };
+  const buildReviewer = (): SettingsPatch | string => {
+    if (backend === "off") return { "permission.reviewer": { backend: "off" } };
     if (backend === "model") {
       const info = models.find((m) => refKey(m.ref) === modelRef);
       if (info === undefined) return "选择一个模型";
-      return {
-        patch: { "permission.reviewer": { backend: "model", model: info.ref } },
-        options: undefined,
-      };
+      return { "permission.reviewer": { backend: "model", model: info.ref } };
     }
-    if (endpoint === "custom" && baseURL.trim() === "") return "自定义地址必填";
-    if (jevModel.trim() === "") return "模型必填";
+    if (decisionModel === undefined) return "先设置决策模型";
     const confidence = minConfidence.trim() === "" ? undefined : Number(minConfidence);
     if (confidence !== undefined && !(confidence >= 0 && confidence <= 1))
       return "置信度阈值应在 0–1 之间";
-    let credential: JevReviewerConfig["credential"];
-    if (credKind === "provider") {
-      if (credProvider === "") return "选择沿用哪个服务商的凭据";
-      credential = { provider: credProvider };
-    } else if (credKind === "env") {
-      if (credEnv.trim() === "") return "填写环境变量名";
-      credential = { env: credEnv.trim() };
-    } else {
-      credential = { stored: true };
-    }
-    const cfg: JevReviewerConfig = {
-      backend: "jev",
-      endpoint,
-      ...(endpoint === "custom" ? { baseURL: baseURL.trim() } : {}),
-      model: jevModel.trim(),
-      credential,
-      ...(confidence !== undefined ? { minConfidence: confidence } : {}),
-    };
-    const key = reviewerKey.trim();
     return {
-      patch: { "permission.reviewer": cfg },
-      options: credKind === "stored" && key !== "" ? { reviewerKey: key } : undefined,
+      "permission.reviewer": {
+        backend: "decision",
+        ...(confidence !== undefined ? { minConfidence: confidence } : {}),
+      },
     };
   };
+
+  const recipient = decisionModel !== undefined ? decisionRecipient(decisionModel) : undefined;
 
   const submit = () => {
     const built = build();
@@ -1978,17 +2326,25 @@ function ReviewerDialog({
       setError(built);
       return;
     }
-    if (backend === "jev" && disclosure !== "accepted" && disclosure !== "shown") {
+    if (
+      backend === "decision" &&
+      recipient !== undefined &&
+      !(acceptedRecipients?.has(recipient.id) ?? false) &&
+      disclosure !== "shown"
+    ) {
       setDisclosure("shown");
       return;
     }
-    const accepting = backend === "jev" && disclosure === "shown";
+    const accepting = backend === "decision" && recipient !== undefined && disclosure === "shown";
     run(async () => {
-      const err = await onSave(built.patch, built.options);
-      if (err === undefined) {
-        setReviewerKey("");
-        if (accepting)
-          await client.runtime.setPreference("jevDisclosureAccepted", "yes").catch(() => undefined);
+      const err = await onSave(built);
+      if (err === undefined && accepting) {
+        const next = new Set(acceptedRecipients ?? []);
+        next.add(recipient.id);
+        setAcceptedRecipients(next);
+        await client.runtime
+          .setPreference("decisionDisclosureAccepted", [...next].join(","))
+          .catch(() => undefined);
       }
       return err;
     });
@@ -2017,12 +2373,12 @@ function ReviewerDialog({
       onClose={onClose}
       onSave={submit}
     >
-      {disclosure === "shown" ? (
+      {disclosure === "shown" && recipient !== undefined ? (
         <div className="pbanner">
-          首次启用 Jev
+          首次启用决策模型审查
           <span>
             将把待确认操作的类别、目标或命令、工作目录、全部用户消息（约 8000 字内）、项目说明前
-            2000 字和 git remote 地址发送给 {endpoint === "custom" ? baseURL.trim() : endpoint}
+            2000 字和 git remote 地址发送给 {recipient.label}
             ，可能包含任务代码或命令文本。点「保存」表示同意。
           </span>
         </div>
@@ -2034,7 +2390,7 @@ function ReviewerDialog({
               backend,
               [
                 ["off", "关闭"],
-                ["jev", "Jev"],
+                ["decision", "决策模型"],
                 ["model", "小模型"],
               ] as const,
               (v) => {
@@ -2046,93 +2402,29 @@ function ReviewerDialog({
           {backend === "model" && (
             <ModelPicker models={models} picked={modelRef} onPick={setModelRef} />
           )}
-          {backend === "jev" && (
+          {backend === "decision" && (
             <>
-              <Field label="接入点">
-                {seg(
-                  "接入点",
-                  endpoint,
-                  JEV_ENDPOINTS.map((e) => [e.v, e.label] as const),
-                  setEndpoint,
-                )}
-              </Field>
-              {endpoint === "custom" && (
-                <Field label="地址" htmlFor="rv-url">
-                  <input
-                    id="rv-url"
-                    className="input lg mono"
-                    spellCheck={false}
-                    value={baseURL}
-                    placeholder="https://"
-                    onChange={(e) => {
-                      setBaseURL(e.target.value);
-                    }}
-                  />
-                </Field>
-              )}
-              <Field label="模型" htmlFor="rv-model">
-                <input
-                  id="rv-model"
-                  className="input lg mono"
-                  spellCheck={false}
-                  value={jevModel}
-                  onChange={(e) => {
-                    setJevModel(e.target.value);
-                  }}
-                />
-              </Field>
-              <Field label="凭据">
-                {seg(
-                  "凭据",
-                  credKind,
-                  [
-                    ...(providers.length > 0 ? [["provider", "沿用服务商"] as const] : []),
-                    ["env", "环境变量"] as const,
-                    ["stored", "单独密钥"] as const,
-                  ],
-                  setCredKind,
-                )}
-                {credKind === "provider" && (
-                  <Dropdown
-                    label="沿用的服务商"
-                    appearance="lg"
-                    value={credProvider}
-                    options={providers.map((p) => ({ value: p, label: p }))}
-                    onChange={setCredProvider}
-                  />
-                )}
-                {credKind === "env" && (
-                  <input
-                    className="input lg mono"
-                    spellCheck={false}
-                    value={credEnv}
-                    aria-label="环境变量名"
-                    placeholder="环境变量名"
-                    onChange={(e) => {
-                      setCredEnv(e.target.value);
-                    }}
-                  />
-                )}
-                {credKind === "stored" && (
-                  <input
-                    className="input lg"
-                    type="password"
-                    autoComplete="off"
-                    value={reviewerKey}
-                    aria-label="审查器密钥"
-                    placeholder="留空则沿用已保存的密钥"
-                    onChange={(e) => {
-                      setReviewerKey(e.target.value);
-                    }}
-                  />
-                )}
-              </Field>
+              <div className="card">
+                <div className="srow">
+                  <div className="lab">
+                    {decisionModel === undefined ? (
+                      <span className="val dim">未设置</span>
+                    ) : (
+                      <DecisionModelValue config={decisionModel} />
+                    )}
+                  </div>
+                  <div className="ctl">
+                    <Button size="sm" onClick={onOpenModels}>
+                      设置 › 模型
+                    </Button>
+                  </div>
+                </div>
+              </div>
               <Field label="置信度阈值" htmlFor="rv-conf">
                 <input
                   id="rv-conf"
                   className="input mono sm-w"
                   value={minConfidence}
-                  placeholder="0.7"
                   onChange={(e) => {
                     setMinConfidence(e.target.value);
                   }}

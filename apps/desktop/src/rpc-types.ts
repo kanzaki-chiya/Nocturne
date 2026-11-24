@@ -32,6 +32,10 @@ export type SkillImportCommit = Extract<
 export type SettingsPatch = Parameters<RpcRuntime["updateSettings"]>[0];
 export type ModelInfo = Awaited<ReturnType<RpcRuntime["listModels"]>>[number];
 export type ModelRoleInfo = Awaited<ReturnType<RpcRuntime["describeModelRoles"]>>[number];
+export type DecisionModelConfig = NonNullable<SettingsPatch["decisionModel"]>;
+export type GeminiDecisionModelConfig = Extract<DecisionModelConfig, { source: "gemini" }>;
+export type JevDecisionModelConfig = Extract<DecisionModelConfig, { source: "jev" }>;
+export type GeminiDecisionEndpoint = GeminiDecisionModelConfig["endpoint"];
 export type JevReviewerConfig = Awaited<ReturnType<RpcRuntime["defaultReviewer"]>>;
 export type SecurityReviewerConfig = NonNullable<SettingsPatch["permission.reviewer"]>;
 /** ADR-0057：用户追加的审查规则（需要确认 / 自动放行） */
