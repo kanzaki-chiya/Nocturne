@@ -498,6 +498,7 @@ function mount(
       | "images"
       | "fileLinks"
       | "onResubmit"
+      | "pickImages"
       | "onApprovePlan"
       | "onFork"
       | "busy"
@@ -4204,5 +4205,287 @@ describe("会话区提示", () => {
       delete document.documentElement.dataset.reduceMotion;
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("Conversation 原位编辑框：尺寸、附件与 0 轮提示", () => {
+  const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+  const jpgBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 5, 6, 7, 8]);
+  const webpBytes = new Uint8Array([0x52, 0x49, 0x46, 0x46, 9, 10, 11, 12]);
+
+  function userWithImages(
+    text: string,
+    attachments: {
+      file: string;
+      mimeType: "image/png" | "image/jpeg" | "image/webp";
+      sha256: string;
+      label?: string;
+      bytes?: number;
+    }[],
+    seq = 1,
+  ): UserEntry {
+    return {
+      kind: "user",
+      key: `u-${seq}`,
+      seq,
+      turnId: `t-${seq}`,
+      content: text === "" ? [] : [{ type: "text", text }],
+      attachments: attachments.map((att) => ({
+        type: "image",
+        file: att.file,
+        mimeType: att.mimeType,
+        bytes: att.bytes ?? 8,
+        sha256: att.sha256,
+        ...(att.label !== undefined ? { label: att.label } : {}),
+        source: "paste",
+      })),
+    };
+  }
+
+  it("编辑时原图预载且可移除，留存原图随重发提交", async () => {
+    const onResubmit = vi.fn<NonNullable<ConversationProps["onResubmit"]>>(async () => undefined);
+    const images = createAttachmentImageSource();
+    await images.register(pngBytes, "image/png");
+    const cachedSha = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", pngBytes)))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    const view = createSessionView();
+    view.entries = [
+      userWithImages("看这两张图", [
+        { file: "img-1.png", mimeType: "image/png", sha256: cachedSha, label: "first.png" },
+        { file: "img-2.jpg", mimeType: "image/jpeg", sha256: "uncached-sha", label: "second.jpg" },
+      ]),
+    ];
+    const rendered = mount(view, { onResubmit, images });
+    Object.assign(rendered.methods, {
+      rewindTargets: vi.fn<RpcSession["rewindTargets"]>().mockResolvedValue([]),
+      readAttachment: vi.fn<RpcSession["readAttachment"]>().mockResolvedValue({
+        data: jpgBytes,
+        mimeType: "image/jpeg",
+        bytes: jpgBytes.byteLength,
+      }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑并重发" }));
+    const box = await screen.findByLabelText<HTMLTextAreaElement>("编辑消息");
+    const editBox = box.closest(".u-edit") as HTMLElement;
+    expect(within(editBox).getByRole("button", { name: "移除 first.png" })).toBeTruthy();
+    expect(within(editBox).getByRole("button", { name: "移除 second.jpg" })).toBeTruthy();
+    // 第一张命中缓存，只对未命中的第二张调用 readAttachment
+    expect(rendered.methods.readAttachment).toHaveBeenCalledTimes(1);
+    expect(rendered.methods.readAttachment).toHaveBeenCalledWith("img-2.jpg");
+
+    // 移除第一张原图后重发，只提交留存的第二张
+    fireEvent.click(within(editBox).getByRole("button", { name: "移除 first.png" }));
+    expect(within(editBox).queryByRole("button", { name: "移除 first.png" })).toBeNull();
+    fireEvent.click(within(editBox).getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(onResubmit).toHaveBeenCalledTimes(1));
+    const call = onResubmit.mock.calls[0];
+    expect(call?.slice(0, 5)).toEqual([1, "看这两张图", "both", undefined, undefined]);
+    expect(call?.[5]).toEqual([
+      {
+        data: jpgBytes,
+        mimeType: "image/jpeg",
+        label: "second.jpg",
+        source: "paste",
+      },
+    ]);
+  });
+
+  it("编辑框粘贴、选图与拖入图片后重发带附件，且纯图无文字可发送", async () => {
+    const onResubmit = vi.fn<NonNullable<ConversationProps["onResubmit"]>>(async () => undefined);
+    const pickImages = vi.fn(async () => [{ name: "picked.jpg", data: jpgBytes }]);
+    const view = createSessionView();
+    view.entries = [userWithImages("原文字", [])];
+    const rendered = mount(view, { onResubmit, pickImages });
+    Object.assign(rendered.methods, {
+      rewindTargets: vi.fn<RpcSession["rewindTargets"]>().mockResolvedValue([]),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑并重发" }));
+    const box = await screen.findByLabelText<HTMLTextAreaElement>("编辑消息");
+    const editBox = box.closest(".u-edit") as HTMLElement;
+
+    // 粘贴一张 PNG
+    const pastedFile = new File([pngBytes], "pasted.png", { type: "image/png" });
+    fireEvent.paste(box, {
+      clipboardData: {
+        items: [{ kind: "file", getAsFile: () => pastedFile }],
+        getData: () => "",
+      },
+    });
+    await within(editBox).findByRole("button", { name: "移除 pasted.png" });
+
+    // 点击附件按钮选一张 JPEG
+    fireEvent.click(within(editBox).getByRole("button", { name: "添加文件" }));
+    await within(editBox).findByRole("button", { name: "移除 picked.jpg" });
+
+    // 拖入一张 WebP
+    const droppedFile = new File([webpBytes], "dropped.webp", { type: "image/webp" });
+    fireEvent.drop(editBox, {
+      dataTransfer: { files: [droppedFile], types: ["Files"] },
+    });
+    await within(editBox).findByRole("button", { name: "移除 dropped.webp" });
+
+    // 清空文本，只有图片也允许发送
+    fireEvent.change(box, { target: { value: "" } });
+    const sendBtn = within(editBox).getByRole("button", { name: "发送" }) as HTMLButtonElement;
+    expect(sendBtn.disabled).toBe(false);
+    fireEvent.click(sendBtn);
+
+    await waitFor(() => expect(onResubmit).toHaveBeenCalledTimes(1));
+    const attachments = onResubmit.mock.calls[0]?.[5];
+    expect(attachments).toHaveLength(3);
+    expect(attachments?.map((item) => [item.label, item.mimeType])).toEqual([
+      ["pasted.png", "image/png"],
+      ["picked.jpg", "image/jpeg"],
+      ["dropped.webp", "image/webp"],
+    ]);
+  });
+
+  it("直接点击「重发」也保留原消息的图片附件", async () => {
+    const onResubmit = vi.fn<NonNullable<ConversationProps["onResubmit"]>>(async () => undefined);
+    const view = createSessionView();
+    view.entries = [
+      userWithImages("重发这张图", [
+        { file: "img-9.png", mimeType: "image/png", sha256: "sha-9", label: "keep.png" },
+      ]),
+    ];
+    const rendered = mount(view, { onResubmit });
+    Object.assign(rendered.methods, {
+      readAttachment: vi.fn<RpcSession["readAttachment"]>().mockResolvedValue({
+        data: pngBytes,
+        mimeType: "image/png",
+        bytes: pngBytes.byteLength,
+      }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "重发" }));
+    await waitFor(() => expect(onResubmit).toHaveBeenCalledTimes(1));
+    expect(onResubmit.mock.calls[0]?.[5]).toEqual([
+      {
+        data: pngBytes,
+        mimeType: "image/png",
+        label: "keep.png",
+        source: "paste",
+      },
+    ]);
+  });
+
+  it("0 轮回复时不显示「将撤回」，无文件改动时整行不渲染；有后续回复时正常显示", async () => {
+    const view = createSessionView();
+    view.entries = [userWithImages("/kc 下载", [])];
+    const rendered = mount(view);
+    Object.assign(rendered.methods, {
+      rewindTargets: vi.fn<RpcSession["rewindTargets"]>().mockResolvedValue([]),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑并重发" }));
+    const box = await screen.findByLabelText<HTMLTextAreaElement>("编辑消息");
+    const editBox = box.closest(".u-edit") as HTMLElement;
+    expect(editBox.querySelector(".u-edit-info")).toBeNull();
+    expect(screen.queryByText(/将撤回/)).toBeNull();
+    rendered.unmount();
+
+    // 0 轮但有还原文件与未追踪调用：只显示文件与未追踪，不带「将撤回」和前导标点
+    const renderedFiles = mount(view);
+    Object.assign(renderedFiles.methods, {
+      rewindTargets: vi.fn<RpcSession["rewindTargets"]>().mockResolvedValue([
+        {
+          seq: 1,
+          firstLine: "/kc 下载",
+          text: "/kc 下载",
+          time: "2026-11-24T00:00:00.000Z",
+          hasImages: false,
+          files: [{ path: "Z:/project/a.txt", action: "restore", external: false }],
+          untrackedCalls: 2,
+          untrackedByKind: [{ kind: "shell", count: 2 }],
+        },
+      ]),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "编辑并重发" }));
+    await screen.findByLabelText<HTMLTextAreaElement>("编辑消息");
+    const info = renderedFiles.container.querySelector(".u-edit-info");
+    expect(info?.textContent).toBe("将还原 1 个文件：a.txt；命令 2 次的改动不还原");
+    renderedFiles.unmount();
+
+    // 后续有 2 轮助手回复时照常显示「将撤回 2 轮回复」
+    const multiView = createSessionView();
+    multiView.entries = [
+      userWithImages("第一问", [], 1),
+      {
+        kind: "assistant",
+        key: "a-2",
+        seq: 2,
+        turnId: "t-1",
+        messageId: "m-1",
+        text: "答 1",
+        reasoning: "",
+        time: "2026-11-24T00:00:00.000Z",
+        toolCalls: [],
+        model: { provider: "fake", model: "fake-1" },
+        usage: { inputTokens: 0, outputTokens: 0 },
+        finishReason: "stop",
+      },
+      userWithImages("第二问", [], 3),
+      {
+        kind: "assistant",
+        key: "a-4",
+        seq: 4,
+        turnId: "t-3",
+        messageId: "m-2",
+        text: "答 2",
+        reasoning: "",
+        time: "2026-11-24T00:00:01.000Z",
+        toolCalls: [],
+        model: { provider: "fake", model: "fake-1" },
+        usage: { inputTokens: 0, outputTokens: 0 },
+        finishReason: "stop",
+      },
+    ];
+    const renderedMulti = mount(multiView);
+    Object.assign(renderedMulti.methods, {
+      rewindTargets: vi.fn<RpcSession["rewindTargets"]>().mockResolvedValue([]),
+    });
+    const firstEditButton = screen.getAllByRole("button", { name: "编辑并重发" })[0];
+    if (firstEditButton === undefined) throw new Error("缺少编辑并重发按钮");
+    fireEvent.click(firstEditButton);
+    await screen.findByLabelText<HTMLTextAreaElement>("编辑消息");
+    expect(renderedMulti.container.querySelector(".u-edit-info")?.textContent).toBe(
+      "将撤回 2 轮回复",
+    );
+  });
+
+  it("编辑文本框至少 4 行并随 scrollHeight 自动长高，超过 12 行后内部滚动", async () => {
+    const view = createSessionView();
+    view.entries = [userWithImages("短消息", [])];
+    const rendered = mount(view);
+    Object.assign(rendered.methods, {
+      rewindTargets: vi.fn<RpcSession["rewindTargets"]>().mockResolvedValue([]),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑并重发" }));
+    const box = await screen.findByLabelText<HTMLTextAreaElement>("编辑消息");
+    expect(box.rows).toBe(4);
+    // jsdom fallback lineHeight=21：最小 4 行 = 84px，最大 12 行 = 252px
+    expect(parseInt(box.style.height, 10)).toBeGreaterThanOrEqual(84);
+    expect(box.style.overflowY).toBe("hidden");
+
+    // 模拟自动换行长段落：scrollHeight 160px（4–12 行之间）
+    let currentScrollHeight = 160;
+    Object.defineProperty(box, "scrollHeight", {
+      configurable: true,
+      get: () => currentScrollHeight,
+    });
+    fireEvent.change(box, { target: { value: "很长一段会自动换行但没有换行符的文字".repeat(12) } });
+    expect(box.style.height).toBe("160px");
+    expect(box.style.overflowY).toBe("hidden");
+
+    // 超过 12 行（scrollHeight 420px）：封顶并开启内部滚动
+    currentScrollHeight = 420;
+    fireEvent.change(box, { target: { value: "超长内容".repeat(120) } });
+    expect(box.style.height).toBe("252px");
+    expect(box.style.overflowY).toBe("auto");
   });
 });

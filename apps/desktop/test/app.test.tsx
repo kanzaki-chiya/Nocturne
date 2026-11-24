@@ -840,11 +840,12 @@ it("用户消息操作：复制、编辑并重发（仅对话）、重发与忙�
   fireEvent.click(within(stream()).getByRole("button", { name: "复制" }));
   await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith("gamma 正文"));
 
-  // 编辑并重发：编辑框带原文、撤回信息取自 rewindTargets，选「仅对话」→ mode=conversation
+  // 编辑并重发：编辑框带原文、撤回信息取自 rewindTargets，0 轮不显示「将撤回」，选「仅对话」→ mode=conversation
   fireEvent.click(screen.getByRole("button", { name: "编辑并重发" }));
   const box = await screen.findByLabelText<HTMLTextAreaElement>("编辑消息");
   expect(box.value).toBe("gamma 正文");
-  await screen.findByText(/将撤回 0 轮回复，将还原 1 个文件：gamma\.txt/);
+  await screen.findByText(/将还原 1 个文件：gamma\.txt/);
+  expect(screen.queryByText(/将撤回/)).toBeNull();
   expect(screen.getByText(/命令 1 次的改动不还原/)).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: "仅对话" }));
   fireEvent.change(box, { target: { value: "改写后的正文" } });

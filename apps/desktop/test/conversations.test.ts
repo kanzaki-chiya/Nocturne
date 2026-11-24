@@ -1165,6 +1165,43 @@ describe("每轮文件更改查询与文件撤销", () => {
       workMode: "plan",
     });
   });
+  it("重发转发附件；附件超限时在回退前拒绝，不触发 rewind", async () => {
+    const f = fixture();
+    await f.controller.open("a", "project");
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    await f.controller.resubmit(3, "带图重发", "both", undefined, undefined, [
+      { data: png, mimeType: "image/png", label: "shot.png", source: "paste" },
+    ]);
+    const rewindAt = f.calls.findIndex((c) => c.method === "session.rewind");
+    const submitAt = f.calls.findIndex((c) => c.method === "session.submit");
+    expect(submitAt).toBeGreaterThan(rewindAt);
+    expect(f.calls[submitAt]?.params).toMatchObject({
+      text: "带图重发",
+      attachments: [
+        {
+          mimeType: "image/png",
+          label: "shot.png",
+          source: "paste",
+        },
+      ],
+    });
+    expect(
+      (f.calls[submitAt]?.params as { attachments?: { data: string }[] }).attachments?.[0]?.data,
+    ).toBe(Buffer.from(png).toString("base64"));
+
+    // 超过 10 个附件：在 rewind 前直接抛出，不破坏会话历史
+    const rewindsBefore = f.calls.filter((c) => c.method === "session.rewind").length;
+    const tooMany = Array.from({ length: 11 }, (_, i) => ({
+      data: png,
+      mimeType: "image/png",
+      label: `img-${i}.png`,
+      source: "paste" as const,
+    }));
+    await expect(
+      f.controller.resubmit(3, "超限", "both", undefined, undefined, tooMany),
+    ).rejects.toThrow("每条消息最多 10 个附件");
+    expect(f.calls.filter((c) => c.method === "session.rewind")).toHaveLength(rewindsBefore);
+  });
   it("懒加载 diff 命中缓存；计数变化清缓存，external 单独变化不清", async () => {
     const f = fixture();
     const turn = change();

@@ -1,7 +1,7 @@
 import { webcrypto } from "node:crypto";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { within } from "@testing-library/react";
+import { fireEvent, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   createMemoryTransportPair,
@@ -638,4 +638,148 @@ it("执行方式消息重发带原 workMode；Runtime 写入的模式消息没�
   expect(calls).toEqual(["rewind", "submit"]);
   expect(submit).toHaveBeenCalledWith({ text: "加功能", workMode: "plan" });
   client.close();
+});
+
+it("手机端编辑并重发：预载原图并粘贴新图后随提交一并发送", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe = vi.fn();
+      disconnect = vi.fn();
+    },
+  );
+  const origCreate = URL.createObjectURL;
+  const origRevoke = URL.revokeObjectURL;
+  let blobSeq = 0;
+  URL.createObjectURL = vi.fn(() => `blob:test-${++blobSeq}`);
+  URL.revokeObjectURL = vi.fn();
+  try {
+    const [transport] = createMemoryTransportPair();
+    const client = createRpcClient(transport, { clientName: "test" });
+    const storage = memoryStorage();
+    await storage.putHost({ hostId: "host", hostPub: "pub", name: "电脑 1", pairedAt: 1 });
+    await storage.identity();
+    let receive: ((e: RuntimeEvent) => void) | undefined;
+    const origBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2]);
+    const newBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 3, 4]);
+    const submit = vi.fn<RpcSession["submit"]>(() => Promise.resolve("done"));
+    const rewind = vi.fn(() => Promise.resolve([]));
+    const readAttachment = vi.fn(async (file: string) => ({
+      file,
+      data: origBytes,
+      mimeType: "image/png",
+      bytes: origBytes.byteLength,
+    }));
+    const session = fakeSession({
+      id: "s-img",
+      submit,
+      rewind,
+      rewindTargets: vi.fn(async () => []),
+      readAttachment,
+      subscribe: (fn: typeof receive) => {
+        receive = fn;
+        return Promise.resolve({ lastSeq: 0, unsubscribe: vi.fn() });
+      },
+    });
+    vi.spyOn(client.runtime, "listSessions").mockResolvedValue([
+      {
+        id: "s-img",
+        createdAt: new Date().toISOString(),
+        model: { provider: "fake", model: "fake-1" },
+        cwd: "Z:/work",
+        workspaceRoot: "Z:/work",
+        mtimeMs: 1,
+        locked: true,
+        firstText: "带图会话",
+      },
+    ]);
+    vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({
+      session,
+      opened: { warnings: [] as string[] } as SessionOpened,
+    } as Awaited<ReturnType<typeof client.runtime.resumeSession>>);
+    const push = new PhonePush({
+      registration: () => Promise.reject(new Error("unsupported")),
+      permission: () => "default",
+      requestPermission: vi.fn(),
+      info: vi.fn(),
+      changed: vi.fn(),
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<PhoneApp storage={storage} push={push} />);
+    });
+    await act(async () => {
+      await shared.connect?.(client, { subscribePush: vi.fn(), unsubscribePush: vi.fn() });
+    });
+    const project = [...container.querySelectorAll<HTMLButtonElement>(".phone-row")].find((row) =>
+      row.textContent?.includes("work"),
+    );
+    await act(() => project?.click());
+    await act(() => container.querySelector<HTMLButtonElement>(".phone-row.session")?.click());
+    await act(() =>
+      receive?.({
+        sessionId: "s-img",
+        seq: 1,
+        time: new Date().toISOString(),
+        turnId: "t1",
+        type: "message.user",
+        payload: {
+          messageId: "m1",
+          content: [{ type: "text", text: "看原图" }],
+          attachments: [
+            {
+              type: "image",
+              file: "img-1.png",
+              mimeType: "image/png",
+              bytes: origBytes.byteLength,
+              sha256: "orig-sha",
+              label: "orig.png",
+              source: "paste",
+            },
+          ],
+        },
+      }),
+    );
+
+    const editBtn = within(container).getByRole("button", { name: "编辑并重发" });
+    await act(async () => {
+      editBtn.click();
+      await Promise.resolve();
+    });
+    const box = await within(container).findByLabelText<HTMLTextAreaElement>("编辑消息");
+    const editBox = box.closest(".u-edit") as HTMLElement;
+    expect(within(editBox).getByRole("button", { name: "移除 orig.png" })).toBeTruthy();
+
+    // 通过隐藏 file input 选一张新图
+    const fileInput = editBox.querySelector<HTMLInputElement>('input[type="file"]');
+    if (fileInput === null) throw new Error("缺少隐藏文件输入");
+    const addedFile = new File([newBytes], "added.jpg", { type: "image/jpeg" });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [addedFile] } });
+      await Promise.resolve();
+    });
+    await within(editBox).findByRole("button", { name: "移除 added.jpg" });
+
+    await act(async () => {
+      within(editBox).getByRole("button", { name: "发送" }).click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(rewind).toHaveBeenCalledWith(1, "both");
+    const sent = submit.mock.calls[0]?.[0];
+    expect(sent?.text).toBe("看原图");
+    expect(sent?.attachments?.map((a) => [a.label, a.mimeType])).toEqual([
+      ["orig.png", "image/png"],
+      ["added.jpg", "image/jpeg"],
+    ]);
+    client.close();
+  } finally {
+    URL.createObjectURL = origCreate;
+    URL.revokeObjectURL = origRevoke;
+  }
 });
