@@ -171,6 +171,36 @@ describe("定时任务页", () => {
     expect(name.className).toContain("err");
   });
 
+  it.each([
+    ["error", "run_failed", "出错", "运行失败"],
+    ["error", "provider_error", "出错", "服务商请求失败"],
+    ["error", "upstream: socket closed", "出错", "upstream: socket closed"],
+    ["aborted", "max_duration", "已中断", ""],
+    ["aborted", "stopped", "已中断", ""],
+    ["aborted", "process_exited", "已中断", ""],
+  ] as const)("%s / %s 在摘要和历史中使用相同文案", async (result, error, status, detail) => {
+    const entry = {
+      id: "h1",
+      taskId: "daily",
+      scheduledAt: "2026-10-25T01:00:00.000Z",
+      trigger: "manual" as const,
+      result,
+      error,
+    };
+    const client = api({
+      listSchedules: vi.fn(async () => ({ ...list(), tasks: [task({ lastRun: entry })] })),
+      scheduleHistory: vi.fn(async () => [entry]),
+    });
+    render(<SchedulePage api={client} workspaces={[]} onOpenSession={vi.fn()} />);
+    await screen.findByDisplayValue("每日提交汇总");
+    const summary = screen.getByRole("group", { name: "上次运行" });
+    expect(summary.textContent).toContain(detail ? `${status}（${detail}）` : status);
+    fireEvent.click(screen.getByRole("tab", { name: "历史" }));
+    const table = await screen.findByRole("table", { name: "运行历史" });
+    const resultCell = within(table).getAllByRole("cell")[2];
+    expect(resultCell?.textContent).toBe(status + detail);
+  });
+
   it("历史可打开会话；立即运行把新会话交给外面；表头与数据列共用同一套 5 列定义", async () => {
     const open = vi.fn();
     const client = api();

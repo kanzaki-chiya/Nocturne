@@ -23,6 +23,7 @@ import {
   formatDuration,
   formatDurationClock,
   formatScheduleWhen,
+  scheduleErrorLabel,
   scheduleResultLabel,
   scheduleSkipLabel,
   scheduleTriggerLabel,
@@ -229,7 +230,9 @@ const SCHED_HIST_COLUMNS: readonly {
         {entry.result === "done" && (entry.denied ?? 0) > 0 && (
           <small>{entry.denied} 项被拒绝</small>
         )}
-        {entry.result === "error" && entry.error !== undefined && <small>{entry.error}</small>}
+        {entry.result === "error" && entry.error !== undefined && (
+          <small>{scheduleErrorLabel(entry.error)}</small>
+        )}
         {entry.trigger === "catchup" &&
           entry.result === "done" &&
           entry.startedAt !== undefined && (

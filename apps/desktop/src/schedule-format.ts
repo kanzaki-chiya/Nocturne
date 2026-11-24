@@ -60,6 +60,41 @@ export function scheduleResultLabel(result: ScheduleRunResult): string {
   }
 }
 
+const scheduleErrorLabels = new Map([
+  ["run_failed", "运行失败"],
+  ["process_exited", "进程已退出"],
+  ["max_duration", "超时"],
+  ["stopped", "已中断"],
+  ["workspace_missing", "工作区不存在"],
+  ["no_model", "没有可用的模型"],
+  ["invalid_model", "模型不可用"],
+  ["invalid_command", "命令无效"],
+  ["truncated", "回复已截断"],
+  ["refused", "已拒绝"],
+  ["max_steps", "已达到最大步骤数"],
+  ["error", "发生错误"],
+  ["hook_blocked", "Hook 拦截"],
+  ["compaction_failed", "上下文压缩失败"],
+  ["unexpected_finish", "模型意外结束"],
+  ["loop_detected", "检测到工具调用循环"],
+  ["runtime_internal", "运行时内部错误"],
+  ["provider_error", "服务商请求失败"],
+  ["provider_empty_response", "服务商返回空响应"],
+  ["provider_auth", "服务商认证失败"],
+  ["provider_rate_limit", "服务商限流"],
+  ["provider_overloaded", "服务商负载过高"],
+  ["provider_invalid_request", "服务商拒绝请求"],
+  ["provider_content_filter", "服务商内容过滤"],
+  ["provider_network", "服务地址不通"],
+  ["provider_timeout", "服务商请求超时"],
+  ["provider_server", "服务商服务器错误"],
+  ["provider_unknown", "服务商未知错误"],
+]);
+
+export function scheduleErrorLabel(error: string): string {
+  return scheduleErrorLabels.get(error) ?? error;
+}
+
 export function scheduleSkipLabel(reason: ScheduleSkipReason | undefined): string {
   switch (reason) {
     case "previous_running":
@@ -100,7 +135,7 @@ export function describeLastRun(entry: ScheduleHistoryEntry | undefined, now = n
     entry.result === "done" && (entry.denied ?? 0) > 0
       ? `（${entry.denied} 项被拒绝）`
       : entry.result === "error" && entry.error !== undefined
-        ? `（${entry.error}）`
+        ? `（${scheduleErrorLabel(entry.error)}）`
         : entry.trigger === "catchup" && entry.result === "done"
           ? "（补跑）"
           : entry.result === "skipped"
