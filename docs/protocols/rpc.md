@@ -45,14 +45,14 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 | `listPages` | `{ projectKey?: string, workspaceRoot?: string }` → `PageLibraryListResult`（`{ projectKey, items: PageLibraryItem[] }`）；按共用项目键列出顶层会话（含已归档）中的面板页面，按来源 `origin` 合并为最近副本、按最近更新倒序；不含本机绝对路径，只读、不取锁，见 [ADR-0114](../decisions/ADR-0114-project-page-library.md) |
 | `listPageProjects` | `{ workspaceRoot?: string }` → `PageLibraryProjectsResult`（`{ currentProjectKey, currentProjectName, currentProjectIsDefault, projects: PageLibraryProject[] }`）；列出有面板页面的项目（含默认工作区「对话」）以及 `workspaceRoot` 对应的当前项目键；不含本机绝对路径，只读、不取锁 |
 | `listModels` / `defaultModel` / `listRecentModels` | 模型列表 / `ModelRef \| null` / `ModelRef[]`；前两者可带 `workspaceRoot`；`listModels` 另可带 `includeDisabled`（[ADR-0054](../decisions/ADR-0054-provider-model-toggle.md)：true 时含停用模型并带 `disabled`，默认滤除；停用模型也带 `unavailable`） |
-| `describeSettings` / `updateSettings` | `SettingItem[]`；均可带 `workspaceRoot`，`updateSettings { patch, reviewerKey? }`；`describeSettings` 的模型设置项可带 `disabled: "provider" \| "model"`，由注册表解析派生，供设置值显示停用状态，模型选择列表仍用默认 `listModels()` |
+| `describeSettings` / `updateSettings` | `SettingItem[]`；均可带 `workspaceRoot`，`updateSettings { patch, reviewerKey?, decisionModelKey? }`；`describeSettings` 的 `decisionModel` 项带结构化 `decisionModel: { effective, saved }`，模型设置项可带 `disabled: "provider" \| "model"`，由注册表解析派生，供设置值显示停用状态，模型选择列表仍用默认 `listModels()` |
 | `listShells` | `{ workspaceRoot? }` → 全部已知种类的 DetectedShell[]（含不可用项） |
 | `readFile` | `{ path }` → `{ kind: "text", absolutePath, text, bytes }` 或 `{ kind: "image", absolutePath, data: base64, mimeType, bytes }`；桌面右侧面板「文件」标签读本机文件（[ADR-0060](../decisions/ADR-0060-desktop-side-panel.md) 及其 2026-10-18 修订），不需要会话，只读、不产生事件、不经权限层，也不是 agent 工具。规则见下文 |
 | `setShellSetting` | `{ kind, workspaceRoot? }` → `SettingItem[]`；先验证可用性再写设置，覆盖来源随结果返回，已有会话按实际变化记配置事件 |
 | `setDefaultModel` | `{ model, reasoningEffort, workspaceRoot? }` → `SettingItem[]` |
 | `describeModelRoles` / `setModelRole` | `ModelRoleInfo[]`；`setModelRole { role, ref }` → `SettingItem[]`；均可带 `workspaceRoot` |
 | `getPreference` / `setPreference` | `{ key }` → `string \| null`；`{ key, value? }` → `null` |
-| `listReviewerProviders` / `defaultReviewer` / `listReviewerModels` | 智能权限审查模型相关（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)）；均可带 `workspaceRoot` |
+| `listReviewerProviders` / `defaultReviewer` / `listDecisionModels` / `listReviewerModels` | 决策模型与智能权限审查模型相关（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)、[ADR-0117](../decisions/ADR-0117-decision-model.md)）；`listDecisionModels` 统一拉取 Gemini 与 Jev 决策模型列表，旧 `listReviewerModels` 保留兼容；均可带 `workspaceRoot` |
 | `listReviewerSamples` / `testReviewerSample` | `{}` → `{ id, title, expect }[]`（内置审查样例的说明与期望，ADR-0057）；`{ sampleId, workspaceRoot? }` → `{ id, title, expected, actual, match, durationMs, reason }`，用已保存的审查器配置（含追加规则）跑一条样例，客户端逐条调用并汇总命中率。审查器关闭 / 未配置报 `invalid_command`，模型不可用报 `invalid_model`，未知样例报 `invalid_command`；审查失败或超过 30 秒记为 `actual: "ask"` 并带原因，不报错。取消 = 客户端不再发后续请求 |
 | `reloadConfig` | `{}` → `null`；重新读取配置文件并重建 Provider 注册表，响应之前依次推 `runtime.providersChanged` 与 `runtime.settingsChanged`；**变更方法**，走同一配置队列 |
 
@@ -597,7 +597,7 @@ Core 的 signal 可在建立和实时阶段取消观察，unsubscribe 同样幂�
 - 会话已被其他连接打开时，`resumeSession` 的 `model` / `force` 被忽略，返回当前状态。
 - 权限判定只在 Runtime 的权限层。RPC 层只转发 `permission.requested` / `subagent.permissions` 事件与 `respondPermission` / `respondSubagentPermission` 回复，不判断"要不要确认"。
 - 诊断记录（`diagnostics` 回调）只含连接状态（含 `origin`）、方法名与结果（成功与否、错误码）、agent 后台持久化失败的错误码（见第 11 节），**不含任何参数与通知内容**——参数里可能有密钥明文（`provider.prepareProvider`、`provider.setCredential`）或用户输入，通知里可能有一次性密钥（`login.completed.unstoredKey`）。
-- **敏感参数**：服务端维护一张敏感方法表（`SENSITIVE_METHODS`）——`runtime.updateSettings` 的 `reviewerKey`、`provider.prepareProvider` 中 `credential.kind === "apiKey"` 的 `key`、`provider.setCredential` 的 `key`、`provider.updateSetupProvider` 的 `patch.headers` 各值、`provider.probeSetupProviderModels` 的 `headers` 各值、`login.submitManual` 的 `text`。这些方法失败时，错误响应 `message` 与 `data` 里出现的秘密值一律替换为 `[redacted]`；其他方法沿用 Core 的固定文案错误（Core 错误本身不含秘密）。通知内容不进诊断，密钥只经其语义通道传递（如 `login.completed.unstoredKey` 恰好一次）。
+- **敏感参数**：服务端维护一张敏感方法表（`SENSITIVE_METHODS`）——`runtime.updateSettings` 的 `reviewerKey` 与 `decisionModelKey`、`provider.prepareProvider` 中 `credential.kind === "apiKey"` 的 `key`、`provider.setCredential` 的 `key`、`provider.updateSetupProvider` 的 `patch.headers` 各值、`provider.probeSetupProviderModels` 的 `headers` 各值、`login.submitManual` 的 `text`。这些方法失败时，错误响应 `message` 与 `data` 里出现的秘密值一律替换为 `[redacted]`；其他方法沿用 Core 的固定文案错误（Core 错误本身不含秘密）。通知内容不进诊断，密钥只经其语义通道传递（如 `login.completed.unstoredKey` 恰好一次）。
 
 ## 8. 与公开 API 保持一致
 

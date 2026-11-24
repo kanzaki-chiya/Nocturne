@@ -114,3 +114,7 @@
 ### 2026-10-17：为默认思考的模型预留审查输出预算
 
 第 6 节记录的 400 token 上限被思考耗尽，会把截断误报成格式错误。模型后端现改为 `maxOutputTokens=8192`，不传思考参数、沿用模型默认：主流模型默认思考且多数关不掉，思考和回答共用输出上限，审查质量优先，不专门降低思考档位。原权限文档所称「最低思考档位 off」并未在请求中实现，且省略参数并不代表关闭模型思考，现予以更正。`length` 或只有思考没有正文时仍按 `unsure`，单独标记「安全审查输出被截断」；20 秒超时、七题、判定、送审范围和缓存不变。当前行为以 [permissions.md 的 smart 审查分支](../architecture/permissions.md#smart-审查分支adr-0036) 为准。
+
+### 2026-11-24：决策模型独立配置
+
+Jev 接入点与凭据已抽离为独立设置项 `decisionModel` 并新增 Gemini Decisions 后端，`permission.reviewer` 新增 `backend: "decision"`，详见 [ADR-0117](ADR-0117-decision-model.md)。

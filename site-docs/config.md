@@ -82,10 +82,11 @@ Nocturne 的所有用户级数据默认存放在 `~/.nocturne`（可通过环境
 | `model` | `"provider/model"` | 新会话默认模型 |
 | `reasoningEffort` | `off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` | 新会话默认思考档位 |
 | `modelRoles` | `task`、`vision`、`smol` | 子代理默认模型、图片描述视觉模型、标题与摘要轻量模型 |
+| `decisionModel` | `DecisionModelConfig` | 决策模型配置（Gemini Decisions 或 Jev，供 `smart` 安全审查使用） |
 | `subagents.profiles` | `Record<string, SubagentProfileConfig>` | 自定义子代理档位（见 [子代理](subagents.md)） |
 | `permissions.preset` | `read-only`、`default`、`auto-edit`、`guarded`、`smart`、`bypass` | 默认权限预设（见 [权限模式](permissions.md)） |
 | `permissions.rules` | `PermissionRule[]` | 追加的权限规则（`kind`、`pattern`、`action`） |
-| `permission.reviewer` | `SecurityReviewerConfig` | `smart` 预设使用的安全审查器配置（`off`、`jev` 或 `model`） |
+| `permission.reviewer` | `SecurityReviewerConfig` | `smart` 预设使用的安全审查器配置（`off`、`decision` 或 `model`；旧 `jev` 仍兼容） |
 | `permission.reviewerRules` | `ask`、`allow` | 追加给安全审查器的自然语言「需要确认」与「自动放行」规则 |
 | `compaction.threshold` | `"90%"`、`"200k"` 或正整数 | 自动压缩摘要阈值，默认 `"90%"` |
 | `compaction.pruneLimit` | `number` | 预防性修剪绝对上限，默认 `200000`（设 `0` 关闭绝对上限） |

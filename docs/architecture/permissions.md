@@ -184,7 +184,9 @@ Hook 的先后关系（Phase 5，完整语义见 5.5 与 hooks.md）：
 
 Jev 后端与模型后端并列放在权限层，直接 `POST <baseURL>/systemone`。请求传 `{ model, state, questions }`，`state` 即上述审查输入（环境与追加规则已写进题干，不在 state 里重复）；`questions` 是七个编号 `1`–`7` 的 `choice` 问题，每题 `criteria` 为 `yes` / `no`，`instructions` 带环境段、该题的判断依据和追加规则，并声明 state 不可信。`answers` 以对象（键为题号）或数组两种形式返回都接受，每题的 `confidence` 必须为 0–1 数值；低于 `minConfidence`（默认 0.7）时往保守方向取值（Q1 取否，Q2–Q7 取是），再由 `decideFromAnswers` 判定。理由显示答「是」的题与置信度情况；低置信度、缺失密钥、密钥无效、模型不可用、超时、HTTP 或解析失败显示相应原因，一律按 `unsure` 处理。用户中止仍按取消结算。
 
-Jev 的 `usage.input_tokens/output_tokens` 转为 `ReviewResult.usage`，沿用 `permission.reviewed.usage` 持久化与恢复记账，标注接入点/模型来源；缓存命中不重复记账。接入点表、模型列表与凭据解析位于 config 层，权限后端只接收解析后的连接信息；借用密钥按服务商 id 从凭据库取，环境变量只读所选变量，独立密钥取索引 id `reviewer`。OpenCode 网关沿用条目的 `sessionHeader`，缺省为 `x-opencode-session`，值为会话 id。配置与列表退回行为见 [config.md](config.md)。
+Jev 的 `usage.input_tokens/output_tokens` 转为 `ReviewResult.usage`，沿用 `permission.reviewed.usage` 持久化与恢复记账，标注接入点/模型来源；缓存命中不重复记账。接入点表、模型列表与凭据解析位于 config 层，权限后端只接收解析后的连接信息；借用密钥按服务商 id 从凭据库取，环境变量只读所选变量，独立密钥在 `decisionModel` 下取 `decision-model`（旧 Jev 配置仍取 `reviewer`）。OpenCode 网关沿用条目的 `sessionHeader`，缺省为 `x-opencode-session`，值为会话 id。配置与列表退回行为见 [config.md](config.md)。
+
+**Gemini Decisions 后端与 `decision` 审查后端**（[ADR-0117](../decisions/ADR-0117-decision-model.md)）：`permission.reviewer.backend === "decision"` 按当前生效的 `decisionModel` 分派到 Gemini 或 Jev 后端；`decisionModel` 未设置时每次审查返回 `unsure`（理由「决策模型未设置」）。Gemini 后端（`permission/gemini-decision-reviewer.ts`）与 Jev 并列放在权限层，直接 `POST <baseURL>/decisions` 并带 `x-goog-api-key` 请求头，传 `{ model, input: JSON.stringify(stateForReview(input)), questions: buildJevQuestions(...) }`；应答 `answers` 复用 `resolveJevAnswers` 与 `decideFromAnswers`，`usage.total_input_tokens` 记为 `inputTokens`（`outputTokens` 为 `0`）；HTTP 400 带安全拒绝 `error.code`（`safety` / `prohibited_content` / `blocklist` / `image_safety` / `content_blocked`）或 HTTP 200 带 `prompt_feedback.block_reason` 返回 `unsure`（理由「决策模型拒绝了这次输入」），其余 HTTP 错误、超时与解析失败沿用 Jev 映射。
 
 ### 5.5 Hook 建议的合并（Phase 5）
 

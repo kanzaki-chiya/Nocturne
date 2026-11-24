@@ -163,7 +163,12 @@ describeToggleImpact({ provider, models? }): ToggleImpact
 
 压缩阈值是运行时设置：保存后当前及恢复会话在下一 Turn 按工作区读取最新生效值，子会话继承父工作区设置；`/context` 同样使用最新值，不把阈值写入会话配置快照。
 
-**安全审查器**（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)）：`permission.reviewer`（单数 permission）是独立设置，按通用分层覆盖，项目不可信时不参与放宽。模型后端的形状为：
+**决策模型 `decisionModel`**（[ADR-0117](../decisions/ADR-0117-decision-model.md)）：独立设置项，位于 `settings.json` 白名单并与 `config.json` 共用 schema，按通用分层高层覆盖低层，**不可信项目整段忽略**。支持两个来源：
+- `source: "gemini"`：接入点 `ai-studio`（`https://generativelanguage.googleapis.com/v1beta`，默认模型 `gemini-decision-1`，默认变量 `GEMINI_API_KEY`）或 `custom`；凭据为 `{ env }` 或 `{ stored: true }`。
+- `source: "jev"`：接入点沿用 `JEV_ENDPOINTS`（`opencode-zen` / `typesafe` / `custom`）；凭据在 `opencode-zen` 保留 `{ provider }` 借用，其余仅 `{ env }` 与 `{ stored: true }`。
+- `baseURL` 只在 `custom` 时保存（HTTP(S)、无内联凭据、无查询与片段）；对象拒绝未知字段与内联密钥。单独密钥经 `updateSettings(patch, { decisionModelKey })` 存系统凭据库 id `decision-model`（保存失败回滚）。`GEMINI_API_KEY` 与用户所选环境变量均从 shell 子进程环境剥离。`listDecisionModels(decisionModel)` 统一拉取 Gemini（`GET <baseURL>/models`，去掉 `models/` 前缀筛选含 `decision`）与 Jev 模型列表。
+
+**安全审查器**（[ADR-0036](../decisions/ADR-0036-smart-permissions.md)、[ADR-0117](../decisions/ADR-0117-decision-model.md)）：`permission.reviewer`（单数 permission）是独立设置，按通用分层覆盖，项目不可信时不参与放宽。支持四种形状：`{ "backend": "off" }`、`{ "backend": "decision", "minConfidence"?: number }`（读取当前生效的 `decisionModel`）、`{ "backend": "model", "model": { "provider": "…", "model": "…" } }`，以及继续兼容的旧 `{ "backend": "jev", endpoint, model, credential, minConfidence }`。旧 Jev 配置在未保存时行为不变，且在 `decisionModel` 未设置时由旧字段派生生效决策模型；在决策模型弹窗或审查弹窗任一处保存时，Core 在一次原子写入中改写为新形状（`decisionModel` + `{ backend: "decision", minConfidence }`），并将旧 `{ stored: true }` 密钥在凭据库内从 `reviewer` 迁到 `decision-model`。首次向某个接收方（Google、TypeSafe、OpenCode 与 TypeSafe 或自定义地址）外发审查数据时显示一次说明，已接受接收方记在偏好 `decisionDisclosureAccepted`（旧 `jevDisclosureAccepted: "yes"` 视为已接受 OpenCode 与 TypeSafe）。模型后端的形状为：
 
 ```json
 {
