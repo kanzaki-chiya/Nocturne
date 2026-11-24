@@ -26,7 +26,7 @@ import { SessionHeaderTools, sessionInputHistory } from "./SessionHeaderTools";
 import { SessionGrants, useSessionGrants } from "../SessionGrants";
 import { TodoPanel } from "../TodoList";
 import { loadTodosCollapsed, saveTodosCollapsed } from "./local";
-import { estimateSubmitBytes, formatBytes, SUBMIT_MESSAGE_LIMIT } from "./phone-images";
+import { checkSubmitSize, submitOversizeMessage } from "./phone-images";
 import {
   bindPhoneOutgoing,
   failPhoneOutgoing,
@@ -484,13 +484,9 @@ export function SessionScreen({
                 const list = attachments ?? [];
                 const invalid = validateDraftAttachments(list);
                 if (invalid !== undefined) throw new Error(invalid);
-                if (
-                  list.length > 0 &&
-                  (estimateSubmitBytes(text, list) > SUBMIT_MESSAGE_LIMIT ||
-                    list.reduce((sum, file) => sum + file.data.byteLength, 0) >
-                      Math.floor((SUBMIT_MESSAGE_LIMIT * 3) / 4) - 1024)
-                ) {
-                  throw new Error(`总大小超过 ${formatBytes(SUBMIT_MESSAGE_LIMIT)}，请减少附件`);
+                const { tooLarge, messageBytes } = checkSubmitSize(text, list);
+                if (tooLarge) {
+                  throw new Error(submitOversizeMessage(messageBytes));
                 }
                 setBusy(true);
                 try {

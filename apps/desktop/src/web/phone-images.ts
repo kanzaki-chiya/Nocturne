@@ -191,6 +191,30 @@ export function estimateSubmitBytes(
   return total;
 }
 
+export interface SubmitSizeCheck {
+  tooLarge: boolean;
+  messageBytes: number;
+}
+
+/**
+ * 判定一次 session.submit 是否超过远程连接单条上限，返回是否超限与估算字节数。
+ */
+export function checkSubmitSize(
+  text: string,
+  attachments: readonly { data: Uint8Array; label: string }[],
+): SubmitSizeCheck {
+  const messageBytes = estimateSubmitBytes(text, attachments);
+  const tooLarge =
+    messageBytes > SUBMIT_MESSAGE_LIMIT ||
+    attachments.reduce((sum, file) => sum + file.data.byteLength, 0) >
+      Math.floor((SUBMIT_MESSAGE_LIMIT * 3) / 4) - 1024;
+  return { tooLarge, messageBytes };
+}
+
+export function submitOversizeMessage(messageBytes: number): string {
+  return `这条消息约 ${formatBytes(messageBytes)}，超过远程连接单条上限 ${formatBytes(SUBMIT_MESSAGE_LIMIT)}，不会发送。请减少图片。`;
+}
+
 /** 文件卡片的类型标记：扩展名前 4 位大写，没有扩展名时为 FILE。 */
 export function fileIconText(name: string): string {
   const dot = name.lastIndexOf(".");

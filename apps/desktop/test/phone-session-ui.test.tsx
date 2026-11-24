@@ -12,6 +12,7 @@ import {
 } from "@nocturne/rpc/client";
 import type { RuntimeEvent, PendingPermission } from "@nocturne/core/protocol";
 import { PhoneApp } from "../src/web/App";
+import { estimateSubmitBytes, formatBytes, SUBMIT_MESSAGE_LIMIT } from "../src/web/phone-images";
 import { memoryStorage } from "../src/web/storage";
 import { PhonePush } from "../src/web/push";
 import { panelContext } from "./phone-panel-fixtures";
@@ -777,6 +778,157 @@ it("手机端编辑并重发：预载原图并粘贴新图后随提交一并发�
       ["orig.png", "image/png"],
       ["added.jpg", "image/jpeg"],
     ]);
+    client.close();
+  } finally {
+    URL.createObjectURL = origCreate;
+    URL.revokeObjectURL = origRevoke;
+  }
+});
+
+it("手机端编辑并重发：附件超过远程单条上限时显示输入框原句且不触发 rewind", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe = vi.fn();
+      disconnect = vi.fn();
+    },
+  );
+  const origCreate = URL.createObjectURL;
+  const origRevoke = URL.revokeObjectURL;
+  let blobSeq = 0;
+  URL.createObjectURL = vi.fn(() => `blob:test-${++blobSeq}`);
+  URL.revokeObjectURL = vi.fn();
+  try {
+    const [transport] = createMemoryTransportPair();
+    const client = createRpcClient(transport, { clientName: "test" });
+    const storage = memoryStorage();
+    await storage.putHost({ hostId: "host", hostPub: "pub", name: "电脑 1", pairedAt: 1 });
+    await storage.identity();
+    let receive: ((e: RuntimeEvent) => void) | undefined;
+    const chunkBytes = Math.floor((SUBMIT_MESSAGE_LIMIT / 3) * 0.8);
+    const origBytes = new Uint8Array(chunkBytes);
+    origBytes.set([0x89, 0x50, 0x4e, 0x47]);
+    const addedBytes = new Uint8Array(chunkBytes);
+    addedBytes.set([0xff, 0xd8, 0xff, 0xe0]);
+    const submit = vi.fn<RpcSession["submit"]>(() => Promise.resolve("done"));
+    const rewind = vi.fn(() => Promise.resolve([]));
+    const readAttachment = vi.fn(async (file: string) => ({
+      file,
+      data: origBytes,
+      mimeType: "image/png",
+      bytes: origBytes.byteLength,
+    }));
+    const session = fakeSession({
+      id: "s-oversize",
+      submit,
+      rewind,
+      rewindTargets: vi.fn(async () => []),
+      readAttachment,
+      subscribe: (fn: typeof receive) => {
+        receive = fn;
+        return Promise.resolve({ lastSeq: 0, unsubscribe: vi.fn() });
+      },
+    });
+    vi.spyOn(client.runtime, "listSessions").mockResolvedValue([
+      {
+        id: "s-oversize",
+        createdAt: new Date().toISOString(),
+        model: { provider: "fake", model: "fake-1" },
+        cwd: "Z:/work",
+        workspaceRoot: "Z:/work",
+        mtimeMs: 1,
+        locked: true,
+        firstText: "超限带图会话",
+      },
+    ]);
+    vi.spyOn(client.runtime, "resumeSession").mockResolvedValue({
+      session,
+      opened: { warnings: [] as string[] } as SessionOpened,
+    } as Awaited<ReturnType<typeof client.runtime.resumeSession>>);
+    const push = new PhonePush({
+      registration: () => Promise.reject(new Error("unsupported")),
+      permission: () => "default",
+      requestPermission: vi.fn(),
+      info: vi.fn(),
+      changed: vi.fn(),
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<PhoneApp storage={storage} push={push} />);
+    });
+    await act(async () => {
+      await shared.connect?.(client, { subscribePush: vi.fn(), unsubscribePush: vi.fn() });
+    });
+    const project = [...container.querySelectorAll<HTMLButtonElement>(".phone-row")].find((row) =>
+      row.textContent?.includes("work"),
+    );
+    await act(() => project?.click());
+    await act(() => container.querySelector<HTMLButtonElement>(".phone-row.session")?.click());
+    await act(() =>
+      receive?.({
+        sessionId: "s-oversize",
+        seq: 1,
+        time: new Date().toISOString(),
+        turnId: "t1",
+        type: "message.user",
+        payload: {
+          messageId: "m1",
+          content: [{ type: "text", text: "看原图" }],
+          attachments: [
+            {
+              type: "image",
+              file: "img-1.png",
+              mimeType: "image/png",
+              bytes: origBytes.byteLength,
+              sha256: "orig-oversize-sha",
+              label: "orig.png",
+              source: "paste",
+            },
+          ],
+        },
+      }),
+    );
+
+    const editBtn = within(container).getByRole("button", { name: "编辑并重发" });
+    await act(async () => {
+      editBtn.click();
+      await Promise.resolve();
+    });
+    const box = await within(container).findByLabelText<HTMLTextAreaElement>("编辑消息");
+    const editBox = box.closest(".u-edit") as HTMLElement;
+    await within(editBox).findByRole("button", { name: "移除 orig.png" });
+
+    const fileInput = editBox.querySelector<HTMLInputElement>('input[type="file"]');
+    if (fileInput === null) throw new Error("缺少隐藏文件输入");
+    const added1 = new File([addedBytes], "added-1.jpg", { type: "image/jpeg" });
+    const added2 = new File([addedBytes], "added-2.jpg", { type: "image/jpeg" });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [added1, added2] } });
+      await Promise.resolve();
+    });
+    await within(editBox).findByRole("button", { name: "移除 added-2.jpg" });
+
+    await act(async () => {
+      within(editBox).getByRole("button", { name: "发送" }).click();
+      await Promise.resolve();
+    });
+
+    const expectedBytes = estimateSubmitBytes("看原图", [
+      { data: origBytes, label: "orig.png" },
+      { data: addedBytes, label: "added-1.jpg" },
+      { data: addedBytes, label: "added-2.jpg" },
+    ]);
+    const expectedSentence = `这条消息约 ${formatBytes(expectedBytes)}，超过远程连接单条上限 ${formatBytes(SUBMIT_MESSAGE_LIMIT)}，不会发送。请减少图片。`;
+    await vi.waitFor(() => {
+      expect(editBox.textContent).toContain(expectedSentence);
+    });
+    expect(rewind).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
     client.close();
   } finally {
     URL.createObjectURL = origCreate;

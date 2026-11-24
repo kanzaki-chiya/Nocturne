@@ -36,10 +36,10 @@ import {
   IconStop,
 } from "./icons";
 import {
-  estimateSubmitBytes,
+  checkSubmitSize,
   formatBytes,
   preparePhoneImage,
-  SUBMIT_MESSAGE_LIMIT,
+  submitOversizeMessage,
   type PhoneImage,
 } from "./phone-images";
 import { BrandIcon } from "../BrandIcon";
@@ -433,14 +433,10 @@ export function PhoneComposer({
     });
     setError(undefined);
   };
-  const messageBytes = estimateSubmitBytes(
+  const { tooLarge, messageBytes } = checkSubmitSize(
     draft,
     attachments.map((attachment) => ({ data: attachment.data, label: attachment.name })),
   );
-  const tooLarge =
-    messageBytes > SUBMIT_MESSAGE_LIMIT ||
-    attachments.reduce((sum, file) => sum + file.data.byteLength, 0) >
-      Math.floor((SUBMIT_MESSAGE_LIMIT * 3) / 4) - 1024;
 
   const toggle = (kind: PopoverKind) => {
     setOpen((current) => (current === kind ? null : kind));
@@ -657,8 +653,7 @@ export function PhoneComposer({
       )}
       {tooLarge && (
         <div className="phone-composer-error" role="alert">
-          这条消息约 {formatBytes(messageBytes)}，超过远程连接单条上限{" "}
-          {formatBytes(SUBMIT_MESSAGE_LIMIT)}，不会发送。请减少图片。
+          {submitOversizeMessage(messageBytes)}
         </div>
       )}
       {!tooLarge && vision !== undefined && (
