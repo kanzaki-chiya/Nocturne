@@ -22,21 +22,27 @@ afterAll(async () => {
 });
 
 describe("static homepage", () => {
-  it("replaces every placeholder with the root package version", async () => {
+  it("replaces every placeholder with the root package version and allows only one inline script", async () => {
     expect(version).toBe(JSON.parse(await readFile(join(ROOT, "package.json"), "utf8")).version);
     for (const html of pages) {
       expect(html).not.toContain("{{");
       expect(html).toContain(`/v${version}/Nocturne_${version}_x64-setup.exe`);
-      expect(html).toContain(`npm install -g ./nctrn-${version}.tgz`);
+      expect(html).toContain(`/v${version}/Nocturne_${version}_aarch64.dmg`);
+      expect(html).toContain(`/v${version}/nctrn-${version}.tgz`);
+      expect(html).toContain(`/v${version}/nocturne-${version}.apk`);
       expect(html).toContain(`v${version}`);
-      expect(html).not.toMatch(/<script\b|fonts\.googleapis|fonts\.gstatic/i);
+      expect(html).not.toMatch(/fonts\.googleapis|fonts\.gstatic/i);
+      const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
+      expect(scripts).toHaveLength(1);
+      expect(scripts[0][1]).not.toMatch(/\bsrc\s*=/i);
+      expect(scripts[0][2].trim().length).toBeGreaterThan(0);
     }
   });
   it("links the two languages to each other", () => {
     expect(pages[0]).toMatch(/href="en\/"[^>]*hreflang="en"/);
     expect(pages[1]).toMatch(/href="\.\.\/"[^>]*hreflang="zh-CN"/);
   });
-  it("uses the shared masthead navigation and download anchor", () => {
+  it("uses the shared masthead navigation and download section", () => {
     const [zh, en] = pages;
     const nav = (html) => /<nav class="site-nav"[^>]*>([\s\S]*?)<\/nav>/.exec(html)?.[1] ?? "";
     expect(nav(zh)).toContain('href="docs/"');
@@ -44,8 +50,7 @@ describe("static homepage", () => {
     expect(nav(en)).toMatch(/href="\.\.\/docs\/"[^>]*hreflang="zh-CN"/);
     expect(nav(en)).toContain('href="../changelog/"');
     for (const html of pages) {
-      expect(html).toContain('id="download"');
-      expect(html).toContain('href="#download"');
+      expect(html).toContain('id="dl"');
       expect(html).not.toMatch(/#three|id="three"|#one|#two/);
       expect(html).toMatch(/<link rel="stylesheet" href="(?:\.\.\/)?assets\/base\.css"/);
     }
@@ -53,7 +58,7 @@ describe("static homepage", () => {
   it("offers a light variant for every themed screenshot", () => {
     for (const html of pages) {
       const pictures = html.match(/<picture>[\s\S]*?<\/picture>/g) ?? [];
-      expect(pictures.length).toBeGreaterThanOrEqual(5);
+      expect(pictures.length).toBeGreaterThanOrEqual(6);
       for (const picture of pictures) {
         expect(picture).toMatch(
           /<source\s+media="\(prefers-color-scheme: light\)"\s+srcset="[^"]+\.webp"/,
