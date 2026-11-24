@@ -11,14 +11,34 @@
   --layer: #0f0f12;
   --raised: #141417;
   --line: #1f1f24;
+  --line2: #2a2a31;
   --ink: #ededef;
   --body: #a0a0a8;
   --caption: #7a7a83;
   --moon: #a8a5ec;
   --moon-alt: #83c4c8;
   --on-moon: #17152b;
-  --hero-shadow: 0 32px 80px rgb(0 0 0 / 0.28);
+  --moon-soft: rgb(168 165 236 / 0.14);
+  --ok: #7fc79a;
+  --add: rgb(127 199 154 / 0.12);
+  --del: rgb(236 128 128 / 0.12);
+  --del-ink: #e48b8b;
+  --n0: #09090f;
+  --n1: #0c0b17;
+  --n2: #151229;
+  --n3: #2b1d33;
+  --dawn: 232 160 112;
+  --rail: #26263a;
+  --hl: rgb(255 255 255 / 0.05);
+  --hero-shadow: 0 32px 80px rgb(0 0 0 / 0.42);
+  --shot-shadow: 0 40px 120px rgb(0 0 0 / 0.55);
+  --term-bg: #0d0d10;
+  --term-line: #1c1c21;
+  --term-dot: #26262c;
+  --term-ink: #7a7a83;
   --serif: "Nocturne Serif", "Songti SC", SimSun, serif;
+  --sans:
+    "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
   --mono: "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
   scrollbar-color: var(--line) var(--bg);
 }
@@ -29,24 +49,44 @@
     --layer: #fafafa;
     --raised: #ffffff;
     --line: #ececef;
+    --line2: #e2e2e8;
     --ink: #0d0d10;
     --body: #55555c;
     --caption: #55555c;
     --moon: #5d50b0;
     --moon-alt: #24727a;
     --on-moon: #ffffff;
-    --hero-shadow: 0 20px 48px rgba(28, 24, 52, 0.18);
+    --moon-soft: rgb(93 80 176 / 0.1);
+    --ok: #2f8a55;
+    --add: rgb(47 138 85 / 0.1);
+    --del: rgb(200 70 70 / 0.09);
+    --del-ink: #b54848;
+    --n0: #f1f0f8;
+    --n1: #f6f5fb;
+    --n2: #f8f2f3;
+    --n3: #fde9d8;
+    --dawn: 233 138 79;
+    --rail: #dcdae8;
+    --hl: rgb(255 255 255 / 0.9);
+    --hero-shadow: 0 24px 60px rgba(28, 24, 52, 0.16);
+    --shot-shadow: 0 30px 80px rgba(40, 30, 80, 0.18);
+    --term-bg: #fbfbfc;
+    --term-line: #ececef;
+    --term-dot: #e2e2e8;
+    --term-ink: #55555c;
   }
 }
 * {
   box-sizing: border-box;
 }
+html {
+  background: var(--bg);
+}
 body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family:
-    "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  font-family: var(--sans);
   font-size: 16px;
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
@@ -59,7 +99,8 @@ a {
   color: inherit;
   text-decoration: none;
 }
-a:focus-visible {
+a:focus-visible,
+summary:focus-visible {
   outline: 2px solid var(--moon);
   outline-offset: 3px;
   border-radius: 4px;

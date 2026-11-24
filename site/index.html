@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="home-page">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -20,12 +20,12 @@
     <meta property="og:image" content="https://nocturne.koxia.cn/assets/images/social-zh.webp" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Nocturne 深色桌面端：对话和变更面板" />
+    <meta property="og:image:alt" content="Nocturne 主页首屏：深夜的代码，交给一个靠谱的同伴。" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Nocturne — 深夜的代码，交给一个靠谱的同伴。" />
     <meta name="twitter:description" content="开源的编码 Agent。桌面、终端、手机，同一套会话。" />
     <meta name="twitter:image" content="https://nocturne.koxia.cn/assets/images/social-zh.webp" />
-    <meta name="twitter:image:alt" content="Nocturne 深色桌面端：对话和变更面板" />
+    <meta name="twitter:image:alt" content="Nocturne 主页首屏：深夜的代码，交给一个靠谱的同伴。" />
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
     <link
       rel="preload"
@@ -37,7 +37,7 @@
     <link rel="stylesheet" href="assets/base.css" />
     <link rel="stylesheet" href="assets/site.css" />
   </head>
-  <body>
+  <body class="home-page">
     <a class="skip-link" href="#main">跳至正文</a>
     <header class="masthead">
       <div class="wrap">
@@ -59,20 +59,20 @@
                 <path d="M499.1 212.3A300 300 0 1 0 792.1 619.5A252 252 0 0 1 499.1 212.3Z" />
               </clipPath>
             </defs>
-            <g clip-path="url(#wordmark-moon-clip)">
-              <rect x="0" y="210" width="1024" height="40.1" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="264.2" width="1024" height="37.9" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="317.4" width="1024" height="35.8" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="369.6" width="1024" height="33.6" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="420.8" width="1024" height="31.4" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="471.1" width="1024" height="29.3" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="520.4" width="1024" height="27.1" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="568.8" width="1024" height="24.9" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="616.2" width="1024" height="22.7" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="662.6" width="1024" height="20.6" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="708" width="1024" height="18.4" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="752.5" width="1024" height="16.2" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="796" width="1024" height="54" fill="url(#wordmark-moon-g)" />
+            <g clip-path="url(#wordmark-moon-clip)" fill="url(#wordmark-moon-g)">
+              <rect y="210" width="1024" height="40.1" />
+              <rect y="264.2" width="1024" height="37.9" />
+              <rect y="317.4" width="1024" height="35.8" />
+              <rect y="369.6" width="1024" height="33.6" />
+              <rect y="420.8" width="1024" height="31.4" />
+              <rect y="471.1" width="1024" height="29.3" />
+              <rect y="520.4" width="1024" height="27.1" />
+              <rect y="568.8" width="1024" height="24.9" />
+              <rect y="616.2" width="1024" height="22.7" />
+              <rect y="662.6" width="1024" height="20.6" />
+              <rect y="708" width="1024" height="18.4" />
+              <rect y="752.5" width="1024" height="16.2" />
+              <rect y="796" width="1024" height="54" />
             </g>
           </svg>
           Nocturne
@@ -85,226 +85,753 @@
         </nav>
       </div>
     </header>
-    <main id="main">
-      <div class="wrap hero">
-        <h1>深夜的代码，<br />交给一个靠谱的同伴。</h1>
-        <p class="lede">开源的编码 Agent。桌面、终端、手机，同一套会话。</p>
-        <div class="actions">
-          <a
-            class="btn"
-            href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
-            >下载 Windows 版 <small>{{version}}</small></a
-          >
-          <a
-            class="link"
-            href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_aarch64.dmg"
-            >macOS 版</a
-          >
-          <a class="link" href="#download">全部下载</a>
-        </div>
-        <figure class="shot hero-shot">
-          <picture>
-            <source
-              media="(prefers-color-scheme: light)"
-              srcset="assets/images/desktop-zh-light.webp"
-              width="1440"
-              height="900"
-            />
-            <img
-              src="assets/images/desktop-zh-dark.webp"
-              width="1440"
-              height="900"
-              fetchpriority="high"
-              alt="Nocturne 桌面端：echo 项目里的登录超时修复对话，右侧变更面板显示 src/login.mjs 的改动"
-            />
-          </picture>
-        </figure>
-      </div>
 
-      <section class="wrap" aria-labelledby="surfaces-title">
-        <h2 id="surfaces-title">同一会话，三端使用</h2>
-        <div class="surfaces">
-          <div class="surface">
-            <div class="surface-head">
-              <h3>终端</h3>
-              <code>nctrn</code>
-            </div>
-            <figure class="shot">
-              <picture>
-                <source
-                  media="(prefers-color-scheme: light)"
-                  srcset="assets/images/terminal-zh-light.webp"
-                  width="960"
-                  height="600"
-                />
-                <img
-                  src="assets/images/terminal-zh-dark.webp"
-                  width="960"
-                  height="600"
-                  loading="lazy"
-                  alt="nctrn 终端里恢复的同一个登录超时修复会话"
-                />
-              </picture>
-            </figure>
-          </div>
-          <div class="surface phone-surface">
-            <div class="surface-head">
-              <h3>手机</h3>
-            </div>
-            <figure class="shot">
-              <picture>
-                <source
-                  media="(prefers-color-scheme: light)"
-                  srcset="assets/images/phone-zh-light.webp"
-                  width="390"
-                  height="844"
-                />
-                <img
-                  src="assets/images/phone-zh-dark.webp"
-                  width="390"
-                  height="844"
-                  loading="lazy"
-                  alt="手机网页里的登录超时修复会话和输入框"
-                />
-              </picture>
-            </figure>
-          </div>
-        </div>
-      </section>
-
-      <section class="wrap" aria-labelledby="control-title">
-        <h2 id="control-title">用量与开放</h2>
-        <div class="cards">
-          <article class="card">
-            <h3>上下文用量</h3>
-            <figure>
-              <picture>
-                <source
-                  media="(prefers-color-scheme: light)"
-                  srcset="assets/images/context-light.webp"
-                  width="720"
-                  height="340"
-                />
-                <img
-                  src="assets/images/context-dark.webp"
-                  width="720"
-                  height="340"
-                  loading="lazy"
-                  alt="桌面端的上下文用量浮层，按系统提示、工具定义、对话历史分项"
-                />
-              </picture>
-            </figure>
-          </article>
-          <article class="card">
-            <h3>用量统计</h3>
-            <figure>
-              <picture>
-                <source
-                  media="(prefers-color-scheme: light)"
-                  srcset="assets/images/usage-light.webp"
-                  width="885"
-                  height="418"
-                />
-                <img
-                  src="assets/images/usage-dark.webp"
-                  width="885"
-                  height="418"
-                  loading="lazy"
-                  alt="用量统计页的汇总数字和按日热力图"
-                />
-              </picture>
-            </figure>
-          </article>
-          <article class="card">
-            <h3>服务商</h3>
-            <div class="pad">
-              <ul class="providers">
-                <li>ChatGPT</li>
-                <li>Grok</li>
-                <li>OpenRouter</li>
-                <li>Anthropic</li>
-                <li>Gemini</li>
-                <li>OpenCode Zen</li>
-                <li>OpenCode Go</li>
-                <li>OpenAI 兼容</li>
-              </ul>
-            </div>
-          </article>
-          <article class="card">
-            <h3>开源</h3>
-            <div class="pad">
-              <p class="license">GPL-3.0</p>
-              <a class="link" href="https://github.com/kanzaki-chiya/Nocturne"
-                >kanzaki-chiya/Nocturne</a
+    <main id="main" class="night">
+      <section class="ch hero">
+        <div class="side-col">
+          <span class="time">23:00</span>
+          <h1>深夜的代码，交给一个靠谱的同伴。</h1>
+          <p class="lede">开源的编码 Agent。桌面、终端、手机，同一套会话。</p>
+          <div class="actions">
+            <div class="split">
+              <a
+                class="sp-main"
+                href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
+                ><span>下载 Windows 版</span><small>{{version}}</small></a
               >
+              <details class="sp-more">
+                <summary aria-label="其他平台">
+                  <svg class="i" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M4 6l4 4 4-4" />
+                  </svg>
+                </summary>
+                <div class="sp-menu">
+                  <a
+                    href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
+                    >Windows<span>x64 安装包</span></a
+                  >
+                  <a
+                    href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_aarch64.dmg"
+                    >macOS<span>Apple 芯片 dmg</span></a
+                  >
+                  <a
+                    href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nctrn-{{version}}.tgz"
+                    >终端 nctrn<span>tgz</span></a
+                  >
+                  <a
+                    href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nocturne-{{version}}.apk"
+                    >安卓<span>APK</span></a
+                  >
+                </div>
+              </details>
             </div>
-          </article>
+            <a class="ghost" href="https://github.com/kanzaki-chiya/Nocturne"
+              >GitHub<svg class="i" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M6 4h6v6M12 4L4 12" /></svg
+            ></a>
+          </div>
         </div>
-        <nav class="also" aria-label="文档">
-          <a href="docs/permissions/">权限</a>
-          <a href="docs/work-modes/">执行方式</a>
-          <a href="docs/mcp/">MCP</a>
-          <a href="docs/skills/">技能</a>
-          <a href="docs/subagents/">子代理</a>
-          <a href="docs/schedule/">定时任务</a>
-          <a href="docs/outside-agents/">外部 Agent</a>
-        </nav>
       </section>
 
-      <section class="wrap" id="download" aria-labelledby="download-title">
-        <h2 id="download-title">下载</h2>
-        <div class="downloads">
-          <div class="row">
-            <h3>Windows 桌面端</h3>
-            <p class="meta">安装包未签名，SmartScreen 提示时选「仍要运行」</p>
-            <a
-              class="row-btn"
-              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
-              >x64 安装包</a
-            >
-          </div>
-          <div class="row">
-            <h3>macOS 桌面端</h3>
-            <p class="meta">
-              Apple 芯片，macOS 14+；首次打开到 系统设置 › 隐私与安全性 点「仍要打开」
-            </p>
-            <a
-              class="row-btn"
-              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_aarch64.dmg"
-              >Apple 芯片 dmg</a
-            >
-          </div>
-          <div class="row">
-            <h3>终端 nctrn</h3>
-            <div class="meta">
-              <p>需要 Node.js 24.16+</p>
-              <pre>npm install -g ./nctrn-{{version}}.tgz</pre>
+      <section class="story" aria-label="演示">
+        <div class="stage">
+          <div class="ch">
+            <div class="side-col">
+              <div class="whens">
+                <div class="when x-inout" style="--r: 0% 0%; --r2: 29% 31%">
+                  <span class="time">23:10</span>
+                  <h2>写代码</h2>
+                  <p class="say">
+                    读代码、改文件、运行测试，一个会话内完成。按权限规则需要确认的操作，执行前交由你审批。
+                  </p>
+                </div>
+                <div class="when x-inout" style="--r: 33% 36%; --r2: 62% 64%">
+                  <span class="time">23:40</span>
+                  <h2>让它画出来</h2>
+                  <p class="say">
+                    选中回复中的文字即可引用追问。需要图示的内容生成为页面，在右侧面板打开，可直接在图上评论。
+                  </p>
+                </div>
+                <div class="when x-in" style="--r: 66.5% 69.5%">
+                  <span class="time">23:41</span>
+                  <h2>离开电脑接着聊</h2>
+                  <p class="say">通过手机远程打开同一会话，继续发送消息、审批工具调用。</p>
+                </div>
+              </div>
             </div>
+            <div class="floor" aria-hidden="true">
+              <div class="win x-shrink" style="--r: 67% 74%">
+                <div class="tbar">
+                  <svg viewBox="143 143 738 738" aria-hidden="true">
+                    <path
+                      fill="var(--moon)"
+                      d="M499.1 212.3A300 300 0 1 0 792.1 619.5A252 252 0 0 1 499.1 212.3Z"
+                    />
+                  </svg>
+                  Nocturne
+                  <span class="ctl"
+                    ><i></i
+                    ><svg class="i" viewBox="0 0 16 16" style="width: 10px; height: 10px">
+                      <rect x="2" y="2" width="12" height="12" /></svg
+                    ><svg class="i" viewBox="0 0 16 16" style="width: 10px; height: 10px">
+                      <path d="M3 3l10 10M13 3L3 13" /></svg
+                  ></span>
+                </div>
+                <div class="body">
+                  <aside class="side">
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>新会话
+                    </div>
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16">
+                        <circle cx="7" cy="7" r="4.5" />
+                        <path d="M10.5 10.5L14 14" /></svg
+                      >搜索
+                    </div>
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16">
+                        <circle cx="8" cy="8" r="6" />
+                        <path d="M8 5v3.5l2 1.5" /></svg
+                      >定时任务
+                    </div>
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16">
+                        <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" />
+                        <path d="M2.5 6.5h11M6.5 6.5v7" /></svg
+                      >组曲
+                    </div>
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16">
+                        <path d="M4 2.5h5l3 3v8H4z" />
+                        <path d="M9 2.5v3h3" /></svg
+                      >页面
+                    </div>
+                    <div class="h">对话</div>
+                    <div class="on">会话分叉测试</div>
+                    <div>登录超时修复</div>
+                    <div>发布 {{version}}</div>
+                    <div class="h">项目</div>
+                    <div>nocturne</div>
+                    <div class="grow"></div>
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16">
+                        <circle cx="8" cy="8" r="2.2" />
+                        <path
+                          d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4"
+                        /></svg
+                      >设置
+                    </div>
+                  </aside>
+
+                  <div class="main">
+                    <div class="chead">
+                      会话分叉测试
+                      <span class="ic"
+                        ><svg class="i" viewBox="0 0 16 16">
+                          <path d="M3 4h10M3 8h10M3 12h6" /></svg
+                        ><svg class="i" viewBox="0 0 16 16">
+                          <rect x="2" y="3" width="12" height="10" rx="1.5" />
+                          <path d="M9.5 3v10" /></svg
+                      ></span>
+                    </div>
+                    <div class="conv">
+                      <div class="thread x-thread" style="--r: 30% 34%">
+                        <div class="blk">
+                          <div class="u">给 rewind 补上分叉测试，跑通后推上去</div>
+                          <div class="row x-in" style="--r: 2% 4%">
+                            <span class="k">›</span><b>read</b
+                            ><code>packages/core/src/session/rewind.ts</code
+                            ><span class="st">完成</span>
+                          </div>
+                          <div class="row x-in" style="--r: 5% 7%">
+                            <span class="k">›</span><b>search</b><code>forkSession</code
+                            ><span class="st">6 处 · 完成</span>
+                          </div>
+                          <div class="row x-in" style="--r: 8% 10%">
+                            <span class="k">⌄</span><b>edit</b
+                            ><code>packages/core/test/rewind.test.ts</code
+                            ><span class="st"
+                              ><span class="n"
+                                ><span class="p">+38</span> <span class="m">−2</span></span
+                              >完成</span
+                            >
+                          </div>
+                          <!-- prettier-ignore -->
+                          <div class="diff x-grow" style="--r: 10% 13%">
+                            <div class="cx">  describe("fork", () =&gt; {</div>
+                            <div class="rm">-   it.todo("inherits prefix");</div>
+                            <div class="ad">+   it("inherits loaded events from the prefix", async () =&gt; {</div>
+                            <div class="ad">+     const fork = await forkSession(log, { at: turn(2) });</div>
+                            <div class="ad">+     expect(fork.events).toEqual(log.events.slice(0, 7));</div>
+                          </div>
+                          <div class="row x-in" style="--r: 14% 16%">
+                            <span class="k">›</span><b>shell</b><code>pnpm vitest run rewind</code
+                            ><span class="st"
+                              ><span class="tag x-fade" style="--r: 16% 18%">审查：放行</span
+                              >完成</span
+                            >
+                          </div>
+                          <div class="out x-in" style="--r: 18% 20%">
+                            Tests <span class="p">12 passed</span> (12)
+                          </div>
+                          <div class="perm x-in" style="--r: 21% 23%">
+                            <div class="t"><b>执行命令</b><span>审查器交给你确认</span></div>
+                            <code>git push origin r1124-fork</code>
+                            <div class="bt">
+                              <span class="x-press" style="--r: 25% 27%">允许一次</span
+                              ><span>本会话允许</span><span>拒绝</span>
+                            </div>
+                            <div class="done-row x-fade" style="--r: 27% 28.5%">
+                              <div class="row" style="width: 100%">
+                                <span class="k">›</span><b>shell</b
+                                ><code>git push origin r1124-fork</code><span class="st">完成</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="txt x-in" style="--r: 28.5% 30%">
+                            分叉会继承来源前缀里的事件，回退撤掉的事件不再算数。已推到 r1124-fork。
+                          </div>
+                        </div>
+
+                        <div class="blk">
+                          <div class="txt a" style="margin-top: 28px; position: relative">
+                            分叉会<span class="sel x-hl" style="--r: 36% 39%; --r2: 43% 44%"
+                              >继承来源前缀里的事件</span
+                            >，回退撤掉的事件不再算数。已推到 r1124-fork。
+                            <span class="qbtn x-fadeout" style="--r: 39% 40%; --r2: 42% 43%"
+                              ><svg class="i" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                                <path d="M6 4L2.5 7.5 6 11M3 7.5h7a3.5 3.5 0 0 1 3.5 3.5v1" /></svg
+                              >回复</span
+                            >
+                          </div>
+                          <div class="u x-in" style="--r: 43% 45%">
+                            <span class="q">继承来源前缀里的事件</span
+                            ><span
+                              ><span class="wm"
+                                ><svg
+                                  class="i"
+                                  viewBox="0 0 16 16"
+                                  style="width: 12px; height: 12px"
+                                >
+                                  <rect x="2" y="3" width="12" height="10" rx="1.5" />
+                                  <path d="M9.5 3v10" /></svg
+                                >华彩</span
+                              >
+                              画张图讲讲</span
+                            >
+                          </div>
+                          <div class="card x-in" style="--r: 46% 48%">
+                            <svg class="i" viewBox="0 0 16 16">
+                              <path d="M4 2.5h5l3 3v8H4z" />
+                              <path d="M9 2.5v3h3" /></svg
+                            >会话分叉<span class="v">v1 ›</span>
+                          </div>
+                          <div class="chip x-in" style="--r: 55% 57%">
+                            <svg class="i" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                              <path d="M3 3.5h10v7H7l-3 2.5v-2.5H3z" /></svg
+                            >会话分叉 v1 · 1
+                          </div>
+                          <div class="row x-in" style="--r: 58% 59.5%">
+                            <span class="k">›</span><b>reply_page_comment</b
+                            ><span class="st">完成</span>
+                          </div>
+                          <div class="card x-in" style="--r: 58.5% 60%">
+                            <svg class="i" viewBox="0 0 16 16">
+                              <path d="M4 2.5h5l3 3v8H4z" />
+                              <path d="M9 2.5v3h3" /></svg
+                            >会话分叉<span class="v">v2 ›</span>
+                          </div>
+                          <div class="txt x-in" style="--r: 60% 61.5%">已在第 2 轮标出回退点。</div>
+                          <div class="u x-in" style="--r: 84% 86%">再加一个测试</div>
+                          <div class="row x-in" style="--r: 87% 89%">
+                            <span class="k">›</span><b>edit</b
+                            ><code>packages/core/test/rewind.test.ts</code
+                            ><span class="st"><span class="spin"></span></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="composer">
+                      <span class="ph">输入消息</span>
+                      <div class="bar">
+                        <svg class="i" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>
+                        <span>default ⌄</span>
+                        <span class="r"
+                          ><span class="model">deepseek-v4.1 ⌄</span><span>high ⌄</span
+                          ><span class="send"
+                            ><svg class="i" viewBox="0 0 16 16" style="width: 11px; height: 11px">
+                              <path d="M8 13V3M4 7l4-4 4 4" /></svg></span
+                        ></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="panel x-panel" style="--r: 49% 53%">
+                    <div class="ptabs">
+                      <span class="ptab"
+                        ><svg class="i" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                          <path d="M4 2.5h5l3 3v8H4z" />
+                          <path d="M9 2.5v3h3" /></svg
+                        >会话分叉 <span class="x">×</span></span
+                      >
+                    </div>
+                    <div class="pver">
+                      ‹
+                      <span class="vv"
+                        ><span class="x-gone" style="--r: 59% 59.5%">1 / 1</span
+                        ><span class="x-fade" style="--r: 59.5% 60%">2 / 2</span></span
+                      >
+                      ›
+                      <span class="cm"
+                        ><svg class="i" viewBox="0 0 16 16">
+                          <path d="M3 3.5h10v7H7l-3 2.5v-2.5H3z" /></svg
+                        ><i class="x-fadeout" style="--r: 55% 56%; --r2: 62% 63%">1</i></span
+                      >
+                    </div>
+                    <div class="page x-fade" style="--r: 52% 54%">
+                      <h4>会话分叉</h4>
+                      <div class="sub">fork 继承来源前缀</div>
+                      <div class="fig">
+                        <svg viewBox="0 0 400 230">
+                          <path class="ln" d="M60 40V82M60 122V164" />
+                          <path class="br" d="M110 102H170Q190 102 190 122V164" />
+                          <path class="ln" d="M60 204V214" />
+                          <g class="nd">
+                            <rect x="10" y="10" width="100" height="30" rx="7" />
+                            <text x="22" y="30">会话打开</text>
+                          </g>
+                          <g class="nd">
+                            <rect x="10" y="82" width="100" height="40" rx="7" />
+                            <text x="22" y="100">第 2 轮</text>
+                            <text class="s" x="22" y="114">7 个事件</text>
+                          </g>
+                          <g class="nd">
+                            <rect x="10" y="164" width="100" height="40" rx="7" />
+                            <text x="22" y="182">第 3 轮</text>
+                            <text class="s" x="22" y="196">来源会话</text>
+                          </g>
+                          <g class="nd brn">
+                            <rect x="140" y="164" width="110" height="40" rx="7" />
+                            <text x="152" y="182">第 3 轮′</text>
+                            <text class="s" x="152" y="196">分叉会话</text>
+                          </g>
+                          <g class="mk x-fade" style="--r: 59% 60.5%">
+                            <line x1="0" y1="143" x2="330" y2="143" />
+                            <text x="122" y="137">回退点</text>
+                          </g>
+                        </svg>
+                        <span class="pin x-in" style="--r: 55% 56%"
+                          >1<span class="ok x-fade" style="--r: 62% 63%">✓</span></span
+                        >
+                        <div class="pop x-fadeout" style="--r: 56% 57%; --r2: 62% 63%">
+                          <span class="ck">✓</span>
+                          <div class="m">
+                            <span class="w">你 <small>v1</small></span
+                            >标出回退点
+                          </div>
+                          <div class="m x-in" style="--r: 60.5% 61.5%">
+                            <span class="w">Nocturne <small>v2</small></span
+                            >已在第 2 轮标出回退点。
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="phone x-slide" style="--r: 68% 75%">
+                <div class="screen">
+                  <div class="sbar"><span>23:41</span><span>●●●</span></div>
+                  <div class="phead">
+                    <svg class="i" viewBox="0 0 16 16">
+                      <path d="M2.5 4h11M2.5 8h11M2.5 12h11" /></svg
+                    >会话分叉测试<span class="ic">⋯</span>
+                  </div>
+                  <div class="pbody">
+                    <div class="txt">
+                      分叉会继承来源前缀里的事件，回退撤掉的事件不再算数。已推到 r1124-fork。
+                    </div>
+                    <div class="u">
+                      <span class="q">继承来源前缀里的事件</span
+                      ><span
+                        ><span class="wm"
+                          ><svg class="i" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                            <rect x="2" y="3" width="12" height="10" rx="1.5" />
+                            <path d="M9.5 3v10" /></svg
+                          >华彩</span
+                        >
+                        画张图讲讲</span
+                      >
+                    </div>
+                    <div class="card">
+                      <svg class="i" viewBox="0 0 16 16">
+                        <path d="M4 2.5h5l3 3v8H4z" />
+                        <path d="M9 2.5v3h3" /></svg
+                      >会话分叉<span class="v">v2 ›</span>
+                    </div>
+                    <div class="txt">已在第 2 轮标出回退点。</div>
+                    <div class="u x-in" style="--r: 80% 82%">再加一个测试</div>
+                  </div>
+                  <div class="pcomp">
+                    <span class="typed x-typeclear" style="--r: 75% 79%; --r2: 80% 80.5%"
+                      >再加一个测试</span
+                    ><span class="send"
+                      ><svg class="i" viewBox="0 0 16 16" style="width: 11px; height: 11px">
+                        <path d="M8 13V3M4 7l4-4 4 4" /></svg
+                    ></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="ch shot">
+        <div class="side-col">
+          <span class="time">00:30</span>
+          <h2>改了什么，一眼看完</h2>
+          <p class="say">
+            改动按文件汇总在「变更」面板，逐行对照增删。可撤销改动，也可回退到任一条消息重新开始。
+          </p>
+        </div>
+        <div class="bleed">
+          <figure class="frame fit">
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="assets/images/desktop-zh-light.webp"
+                width="2880"
+                height="1800"
+              />
+              <img
+                src="assets/images/desktop-zh-dark.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                alt="Nocturne 桌面端：修复登录超时，右侧变更面板显示 login.mjs 与 CHANGELOG.md 的改动"
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section class="ch shot">
+        <div class="side-col">
+          <span class="time">01:15</span>
+          <h2>该问的才问</h2>
+          <p class="say">
+            六种权限预设决定哪些操作自动执行。「智能」预设先交由审查器判断，无风险的直接放行，拿不准的再交给你确认。
+          </p>
+        </div>
+        <div class="bleed">
+          <figure class="frame fit">
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="assets/images/perm-zh-light.webp"
+                width="2880"
+                height="1800"
+              />
+              <img
+                src="assets/images/perm-zh-dark.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                alt="发布 1.4.0 时强制推送 rock-and-roll-all-nite 分支，审查器交给用户确认"
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section class="ch shot">
+        <div class="side-col">
+          <span class="time">02:30</span>
+          <h2>一队人一起干</h2>
+          <p class="say">
+            用
+            <code>/ensemble</code>
+            组建合奏：指挥负责拆解、派活和验收，有名字的成员各自实现，在公共留言板上协作。
+          </p>
+        </div>
+        <div class="bleed">
+          <figure class="frame fit">
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="assets/images/ensemble-zh-light.webp"
+                width="2880"
+                height="1800"
+              />
+              <img
+                src="assets/images/ensemble-zh-dark.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                alt="合奏「迁移设置页表单」：指挥与 violin-1、violin-2、cello-1 在留言板协作"
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section class="ch shot">
+        <div class="side-col">
+          <span class="time">04:00</span>
+          <h2>终端里也一样</h2>
+          <p class="say">
+            运行 <code>nctrn</code> 进入全屏终端界面。会话保存在本机同一位置，桌面端开过的会话可用
+            <code>--resume</code> 继续。
+          </p>
+        </div>
+        <div class="bleed">
+          <div class="mock m-term">
+            <div class="thead" aria-hidden="true">
+              <i></i><i></i><i></i><span>nctrn --resume</span>
+            </div>
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="assets/images/terminal-zh-light.webp"
+                width="960"
+                height="600"
+              />
+              <img
+                src="assets/images/terminal-zh-dark.webp"
+                width="960"
+                height="600"
+                loading="lazy"
+                alt="终端 nctrn 恢复修复登录超时的会话：改动、测试输出与任务清单"
+              />
+            </picture>
+          </div>
+        </div>
+      </section>
+
+      <section class="ch shot">
+        <div class="side-col">
+          <span class="time">05:30</span>
+          <h2>到点自己跑</h2>
+          <p class="say">
+            定时任务按计划在后台新建会话执行指令。每次运行的结果、用时和被拒次数记入历史，可打开对应会话查看全过程。
+          </p>
+        </div>
+        <div class="bleed">
+          <figure class="frame fit">
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="assets/images/sched-zh-light.webp"
+                width="2880"
+                height="1800"
+              />
+              <img
+                src="assets/images/sched-zh-dark.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                alt="定时任务「黎明前巡检」每天 05:30 运行，历史里列出每次的结果与用时"
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section class="ch more">
+        <div class="side-col">
+          <span class="time">06:30</span>
+          <h2>还有这些</h2>
+          <p class="say">内置 79 个服务商预设，也可接入任意 OpenAI 兼容或 Anthropic 兼容接口。</p>
+        </div>
+        <div class="main-col">
+          <figure class="usage-shot">
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="assets/images/usage-zh-light.webp"
+                width="1824"
+                height="809"
+              />
+              <img
+                src="assets/images/usage-zh-dark.webp"
+                width="1824"
+                height="809"
+                loading="lazy"
+                alt="用量统计与近一年的每日活跃热力图"
+              />
+            </picture>
+          </figure>
+          <dl class="idx">
+            <div>
+              <dt>回退和分叉</dt>
+              <dd>从任一条消息回退或分叉，对话与文件一并还原。</dd>
+            </div>
+            <div>
+              <dt>排队和插话</dt>
+              <dd>运行中继续发消息，不必先中断当前回合。</dd>
+            </div>
+            <div>
+              <dt>目标模式</dt>
+              <dd><code>/goal</code> 交办多步目标，模型自行推进到验证通过。</dd>
+            </div>
+            <div>
+              <dt>多代理攻坚</dt>
+              <dd><code>/fugue</code> 拆给多个后台子代理，各自在独立工作树修改后并回。</dd>
+            </div>
+            <div>
+              <dt>组曲</dt>
+              <dd>同一长期目标下的指挥对话、工作线程和共享说明集中管理。</dd>
+            </div>
+            <div>
+              <dt>子代理</dt>
+              <dd>查找、调研或跨文件修改交给独立子会话，只带回结果。</dd>
+            </div>
+            <div>
+              <dt>记忆</dt>
+              <dd>跨会话保存偏好、纠正过的做法和项目约束。</dd>
+            </div>
+            <div>
+              <dt>技能</dt>
+              <dd>按需加载的提示词与支持文件，用到时才读取正文。</dd>
+            </div>
+            <div>
+              <dt>上下文和用量</dt>
+              <dd>接近上限时自动两级压缩，跨会话统计 Token 与费用。</dd>
+            </div>
+            <div>
+              <dt>MCP</dt>
+              <dd>接入外部工具服务器，也可作为 MCP 服务器供其他工具调用。</dd>
+            </div>
+            <div>
+              <dt>插件</dt>
+              <dd>支持自有插件，并可只读接入本机已装的 Codex 与 Claude Code 插件。</dd>
+            </div>
+            <div>
+              <dt>Hook</dt>
+              <dd>在固定的生命周期事件点运行外部命令。</dd>
+            </div>
+            <div>
+              <dt>外部 Agent</dt>
+              <dd>通过 ACP 接入 Codex、omp 等命令行工具。</dd>
+            </div>
+            <div>
+              <dt>电脑操控</dt>
+              <dd>Windows 桌面端可在授权的软件里点击、输入和操作窗口。</dd>
+            </div>
+            <div>
+              <dt>文档处理</dt>
+              <dd>内置 Word、电子表格、演示文档与 PDF 处理。</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="ch dawn" id="dl">
+        <div class="side-col">
+          <span class="time">07:00</span>
+          <h2>天亮了</h2>
+          <p class="say">会话、改动与测试结果完整保留，随时可以继续。</p>
+        </div>
+        <div class="main-col get">
+          <div class="split">
             <a
-              class="row-btn"
-              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nctrn-{{version}}.tgz"
-              >tgz</a
+              class="sp-main"
+              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
+              ><span>下载 Windows 版</span><small>{{version}}</small></a
             >
           </div>
-          <div class="row">
-            <h3>手机</h3>
-            <p class="meta">在桌面端 设置 › 远程 配对</p>
+          <div class="plat">
             <a
-              class="row-btn"
-              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nocturne-{{version}}.apk"
-              >安卓 APK</a
+              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
+              >Windows<span>x64 安装包</span></a
             >
+            <a
+              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_aarch64.dmg"
+              >macOS<span>Apple 芯片</span></a
+            >
+            <a
+              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nctrn-{{version}}.tgz"
+              >终端 nctrn<span>Node.js 24.16+</span></a
+            >
+            <a
+              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nocturne-{{version}}.apk"
+              >安卓<span>APK</span></a
+            >
+          </div>
+          <div class="oss2">
+            <span><b>{{version}}</b></span
+            ><span><b>GPL-3.0</b> 开源</span
+            ><a class="link" href="https://github.com/kanzaki-chiya/Nocturne"
+              >kanzaki-chiya/Nocturne</a
+            ><a class="link" href="changelog/">更新日志</a>
           </div>
         </div>
       </section>
     </main>
-    <footer class="site-footer">
-      <div class="wrap">
-        <span>Nocturne · GPL-3.0</span>
-        <a href="https://github.com/kanzaki-chiya/Nocturne">源代码</a>
-        <a href="https://github.com/kanzaki-chiya/Nocturne/releases">全部版本</a>
-        <a href="en/" hreflang="en" lang="en">English</a>
+
+    <footer class="home-footer">
+      <div class="wrap fgrid">
+        <div class="fbrand"><b>Nocturne</b><span>GPL-3.0</span></div>
+        <nav aria-label="开始">
+          <b>开始</b>
+          <a href="docs/">安装</a>
+          <a href="docs/providers/">连接服务商</a>
+          <a href="docs/first-session/">第一个会话</a>
+          <a href="docs/work-modes/">执行方式</a>
+          <a href="docs/permissions/">权限模式</a>
+        </nav>
+        <nav aria-label="功能">
+          <b>功能</b>
+          <a href="docs/panels/">右侧面板</a>
+          <a href="docs/suites/">组曲</a>
+          <a href="docs/subagents/">子代理</a>
+          <a href="docs/schedule/">定时任务</a>
+          <a href="docs/memory/">记忆</a>
+          <a href="docs/computer-use/">电脑操控</a>
+        </nav>
+        <nav aria-label="扩展">
+          <b>扩展</b>
+          <a href="docs/mcp/">MCP</a>
+          <a href="docs/skills/">技能</a>
+          <a href="docs/plugins/">插件</a>
+          <a href="docs/hooks/">Hook</a>
+          <a href="docs/outside-agents/">外部 Agent</a>
+        </nav>
+        <nav aria-label="更多">
+          <b>更多</b>
+          <a href="docs/tui-cli/">TUI 和命令行</a>
+          <a href="docs/remote/">手机远程</a>
+          <a href="docs/config/">配置参考</a>
+          <a href="docs/faq/">常见问题</a>
+          <a href="changelog/">更新日志</a>
+          <a href="en/" hreflang="en" lang="en">English</a>
+        </nav>
       </div>
     </footer>
+
+    <script>
+      (function () {
+        var ua = navigator.userAgent,
+          pf =
+            (navigator.userAgentData && navigator.userAgentData.platform) ||
+            navigator.platform ||
+            "";
+        var R = "https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/";
+        var pick = /Android/i.test(ua)
+          ? ["下载安卓版", "nocturne-{{version}}.apk"]
+          : /Mac|iPhone|iPad/i.test(pf + ua)
+            ? ["下载 macOS 版", "Nocturne_{{version}}_aarch64.dmg"]
+            : /Linux/i.test(pf)
+              ? ["下载终端版 nctrn", "nctrn-{{version}}.tgz"]
+              : null;
+        if (!pick) return;
+        document.querySelectorAll(".sp-main").forEach(function (a) {
+          a.querySelector("span").textContent = pick[0];
+          a.href = R + pick[1];
+        });
+      })();
+    </script>
   </body>
 </html>

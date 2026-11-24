@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="home-page">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -28,7 +28,7 @@
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="Nocturne desktop in dark mode, with a conversation and the Changes panel"
+      content="Nocturne homepage hero: A steady companion for late-night code."
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Nocturne — A steady companion for late-night code." />
@@ -39,7 +39,7 @@
     <meta name="twitter:image" content="https://nocturne.koxia.cn/assets/images/social-en.webp" />
     <meta
       name="twitter:image:alt"
-      content="Nocturne desktop in dark mode, with a conversation and the Changes panel"
+      content="Nocturne homepage hero: A steady companion for late-night code."
     />
     <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
     <link
@@ -52,7 +52,7 @@
     <link rel="stylesheet" href="../assets/base.css" />
     <link rel="stylesheet" href="../assets/site.css" />
   </head>
-  <body>
+  <body class="home-page">
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="masthead">
       <div class="wrap">
@@ -74,25 +74,25 @@
                 <path d="M499.1 212.3A300 300 0 1 0 792.1 619.5A252 252 0 0 1 499.1 212.3Z" />
               </clipPath>
             </defs>
-            <g clip-path="url(#wordmark-moon-clip)">
-              <rect x="0" y="210" width="1024" height="40.1" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="264.2" width="1024" height="37.9" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="317.4" width="1024" height="35.8" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="369.6" width="1024" height="33.6" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="420.8" width="1024" height="31.4" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="471.1" width="1024" height="29.3" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="520.4" width="1024" height="27.1" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="568.8" width="1024" height="24.9" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="616.2" width="1024" height="22.7" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="662.6" width="1024" height="20.6" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="708" width="1024" height="18.4" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="752.5" width="1024" height="16.2" fill="url(#wordmark-moon-g)" />
-              <rect x="0" y="796" width="1024" height="54" fill="url(#wordmark-moon-g)" />
+            <g clip-path="url(#wordmark-moon-clip)" fill="url(#wordmark-moon-g)">
+              <rect y="210" width="1024" height="40.1" />
+              <rect y="264.2" width="1024" height="37.9" />
+              <rect y="317.4" width="1024" height="35.8" />
+              <rect y="369.6" width="1024" height="33.6" />
+              <rect y="420.8" width="1024" height="31.4" />
+              <rect y="471.1" width="1024" height="29.3" />
+              <rect y="520.4" width="1024" height="27.1" />
+              <rect y="568.8" width="1024" height="24.9" />
+              <rect y="616.2" width="1024" height="22.7" />
+              <rect y="662.6" width="1024" height="20.6" />
+              <rect y="708" width="1024" height="18.4" />
+              <rect y="752.5" width="1024" height="16.2" />
+              <rect y="796" width="1024" height="54" />
             </g>
           </svg>
           Nocturne
         </a>
-        <nav class="site-nav" aria-label="Site">
+        <nav class="site-nav" aria-label="Site navigation">
           <a href="../docs/" hreflang="zh-CN">Docs</a>
           <a href="../changelog/" hreflang="zh-CN">Changelog</a>
           <a href="https://github.com/kanzaki-chiya/Nocturne">GitHub</a>
@@ -100,231 +100,795 @@
         </nav>
       </div>
     </header>
-    <main id="main">
-      <div class="wrap hero">
-        <h1>A steady companion<br />for late-night code.</h1>
-        <p class="lede">
-          An open-source coding agent. Desktop, terminal, and phone share one set of sessions.
-        </p>
-        <div class="actions">
-          <a
-            class="btn"
-            href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
-            >Download for Windows <small>{{version}}</small></a
-          >
-          <a
-            class="link"
-            href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_aarch64.dmg"
-            >macOS</a
-          >
-          <a class="link" href="#download">All downloads</a>
-        </div>
-        <figure class="shot hero-shot">
-          <picture>
-            <source
-              media="(prefers-color-scheme: light)"
-              srcset="../assets/images/desktop-en-light.webp"
-              width="1440"
-              height="900"
-            />
-            <img
-              src="../assets/images/desktop-en-dark.webp"
-              width="1440"
-              height="900"
-              fetchpriority="high"
-              alt="Nocturne desktop: a login timeout fix in the echo project, with the diff for src/login.mjs in the Changes panel"
-            />
-          </picture>
-        </figure>
-      </div>
 
-      <section class="wrap" aria-labelledby="surfaces-title">
-        <h2 id="surfaces-title">One session across three surfaces</h2>
-        <div class="surfaces">
-          <div class="surface">
-            <div class="surface-head">
-              <h3>Terminal</h3>
-              <code>nctrn</code>
-            </div>
-            <figure class="shot">
-              <picture>
-                <source
-                  media="(prefers-color-scheme: light)"
-                  srcset="../assets/images/terminal-en-light.webp"
-                  width="960"
-                  height="600"
-                />
-                <img
-                  src="../assets/images/terminal-en-dark.webp"
-                  width="960"
-                  height="600"
-                  loading="lazy"
-                  alt="The same login timeout session resumed in the nctrn terminal"
-                />
-              </picture>
-            </figure>
-          </div>
-          <div class="surface phone-surface">
-            <div class="surface-head">
-              <h3>Phone</h3>
-            </div>
-            <figure class="shot">
-              <picture>
-                <source
-                  media="(prefers-color-scheme: light)"
-                  srcset="../assets/images/phone-en-light.webp"
-                  width="390"
-                  height="844"
-                />
-                <img
-                  src="../assets/images/phone-en-dark.webp"
-                  width="390"
-                  height="844"
-                  loading="lazy"
-                  alt="The login timeout session and composer in the phone web interface"
-                />
-              </picture>
-            </figure>
-          </div>
-        </div>
-      </section>
-
-      <section class="wrap" aria-labelledby="control-title">
-        <h2 id="control-title">Usage and openness</h2>
-        <div class="cards">
-          <article class="card">
-            <h3>Context usage</h3>
-            <figure>
-              <picture>
-                <source
-                  media="(prefers-color-scheme: light)"
-                  srcset="../assets/images/context-light.webp"
-                  width="720"
-                  height="340"
-                />
-                <img
-                  src="../assets/images/context-dark.webp"
-                  width="720"
-                  height="340"
-                  loading="lazy"
-                  alt="The desktop context usage popover, split into system prompt, tool definitions, and history"
-                />
-              </picture>
-            </figure>
-          </article>
-          <article class="card">
-            <h3>Usage stats</h3>
-            <figure>
-              <picture>
-                <source
-                  media="(prefers-color-scheme: light)"
-                  srcset="../assets/images/usage-light.webp"
-                  width="885"
-                  height="418"
-                />
-                <img
-                  src="../assets/images/usage-dark.webp"
-                  width="885"
-                  height="418"
-                  loading="lazy"
-                  alt="Usage totals and the daily heatmap"
-                />
-              </picture>
-            </figure>
-          </article>
-          <article class="card">
-            <h3>Providers</h3>
-            <div class="pad">
-              <ul class="providers">
-                <li>ChatGPT</li>
-                <li>Grok</li>
-                <li>OpenRouter</li>
-                <li>Anthropic</li>
-                <li>Gemini</li>
-                <li>OpenCode Zen</li>
-                <li>OpenCode Go</li>
-                <li>OpenAI-compatible</li>
-              </ul>
-            </div>
-          </article>
-          <article class="card">
-            <h3>Open source</h3>
-            <div class="pad">
-              <p class="license">GPL-3.0</p>
-              <a class="link" href="https://github.com/kanzaki-chiya/Nocturne"
-                >kanzaki-chiya/Nocturne</a
+    <main id="main" class="night">
+      <section class="ch hero">
+        <div class="side-col">
+          <span class="time">23:00</span>
+          <h1>A steady companion for late-night code.</h1>
+          <p class="lede">
+            An open-source coding agent. Desktop, terminal, and phone share one set of sessions.
+          </p>
+          <div class="actions">
+            <div class="split">
+              <a
+                class="sp-main"
+                href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
+                ><span>Download for Windows</span><small>{{version}}</small></a
               >
+              <details class="sp-more">
+                <summary aria-label="Other platforms">
+                  <svg class="i" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M4 6l4 4 4-4" />
+                  </svg>
+                </summary>
+                <div class="sp-menu">
+                  <a
+                    href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
+                    >Windows<span>x64 installer</span></a
+                  >
+                  <a
+                    href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_aarch64.dmg"
+                    >macOS<span>Apple silicon dmg</span></a
+                  >
+                  <a
+                    href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nctrn-{{version}}.tgz"
+                    >Terminal nctrn<span>tgz</span></a
+                  >
+                  <a
+                    href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nocturne-{{version}}.apk"
+                    >Android<span>APK</span></a
+                  >
+                </div>
+              </details>
             </div>
-          </article>
+            <a class="ghost" href="https://github.com/kanzaki-chiya/Nocturne"
+              >GitHub<svg class="i" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M6 4h6v6M12 4L4 12" /></svg
+            ></a>
+          </div>
         </div>
-        <nav class="also" aria-label="Docs">
-          <a href="../docs/permissions/" hreflang="zh-CN">Permissions</a>
-          <a href="../docs/work-modes/" hreflang="zh-CN">Work modes</a>
-          <a href="../docs/mcp/" hreflang="zh-CN">MCP</a>
-          <a href="../docs/skills/" hreflang="zh-CN">Skills</a>
-          <a href="../docs/subagents/" hreflang="zh-CN">Subagents</a>
-          <a href="../docs/schedule/" hreflang="zh-CN">Scheduled tasks</a>
-          <a href="../docs/outside-agents/" hreflang="zh-CN">Outside agents</a>
-        </nav>
       </section>
 
-      <section class="wrap" id="download" aria-labelledby="download-title">
-        <h2 id="download-title">Download</h2>
-        <div class="downloads">
-          <div class="row">
-            <h3>Windows desktop</h3>
-            <p class="meta">
-              The installer is unsigned; choose "Run anyway" if SmartScreen prompts you.
-            </p>
-            <a
-              class="row-btn"
-              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
-              >x64 installer</a
-            >
-          </div>
-          <div class="row">
-            <h3>macOS desktop</h3>
-            <p class="meta">
-              Apple silicon, macOS 14+. On first launch, choose "Open Anyway" in System Settings ›
-              Privacy &amp; Security.
-            </p>
-            <a
-              class="row-btn"
-              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_aarch64.dmg"
-              >Apple silicon dmg</a
-            >
-          </div>
-          <div class="row">
-            <h3>Terminal nctrn</h3>
-            <div class="meta">
-              <p>Requires Node.js 24.16+</p>
-              <pre>npm install -g ./nctrn-{{version}}.tgz</pre>
+      <section class="story" aria-label="Walkthrough">
+        <div class="stage">
+          <div class="ch">
+            <div class="side-col">
+              <div class="whens">
+                <div class="when x-inout" style="--r: 0% 0%; --r2: 29% 31%">
+                  <span class="time">23:10</span>
+                  <h2>Write code</h2>
+                  <p class="say">
+                    Read files, apply edits, and run tests in one session. Operations that require
+                    approval under your permission rules are presented to you before execution.
+                  </p>
+                </div>
+                <div class="when x-inout" style="--r: 33% 36%; --r2: 62% 64%">
+                  <span class="time">23:40</span>
+                  <h2>Have it draw diagrams</h2>
+                  <p class="say">
+                    Select text in any reply to quote and follow up. Visual explanations render as
+                    pages in the side panel, where you can comment directly on the diagram.
+                  </p>
+                </div>
+                <div class="when x-in" style="--r: 66.5% 69.5%">
+                  <span class="time">23:41</span>
+                  <h2>Continue away from your desk</h2>
+                  <p class="say">
+                    Open the same session remotely from your phone to send messages and approve tool
+                    calls.
+                  </p>
+                </div>
+              </div>
             </div>
+            <div class="floor" aria-hidden="true">
+              <div class="win x-shrink" style="--r: 67% 74%">
+                <div class="tbar">
+                  <svg viewBox="143 143 738 738" aria-hidden="true">
+                    <path
+                      fill="var(--moon)"
+                      d="M499.1 212.3A300 300 0 1 0 792.1 619.5A252 252 0 0 1 499.1 212.3Z"
+                    />
+                  </svg>
+                  Nocturne
+                  <span class="ctl"
+                    ><i></i
+                    ><svg class="i" viewBox="0 0 16 16" style="width: 10px; height: 10px">
+                      <rect x="2" y="2" width="12" height="12" /></svg
+                    ><svg class="i" viewBox="0 0 16 16" style="width: 10px; height: 10px">
+                      <path d="M3 3l10 10M13 3L3 13" /></svg
+                  ></span>
+                </div>
+                <div class="body">
+                  <aside class="side">
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>新会话
+                    </div>
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16">
+                        <circle cx="7" cy="7" r="4.5" />
+                        <path d="M10.5 10.5L14 14" /></svg
+                      >搜索
+                    </div>
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16">
+                        <circle cx="8" cy="8" r="6" />
+                        <path d="M8 5v3.5l2 1.5" /></svg
+                      >定时任务
+                    </div>
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16">
+                        <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" />
+                        <path d="M2.5 6.5h11M6.5 6.5v7" /></svg
+                      >组曲
+                    </div>
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16">
+                        <path d="M4 2.5h5l3 3v8H4z" />
+                        <path d="M9 2.5v3h3" /></svg
+                      >页面
+                    </div>
+                    <div class="h">对话</div>
+                    <div class="on">Session fork tests</div>
+                    <div>Fix login timeout</div>
+                    <div>Release {{version}}</div>
+                    <div class="h">项目</div>
+                    <div>nocturne</div>
+                    <div class="grow"></div>
+                    <div>
+                      <svg class="i" viewBox="0 0 16 16">
+                        <circle cx="8" cy="8" r="2.2" />
+                        <path
+                          d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4"
+                        /></svg
+                      >设置
+                    </div>
+                  </aside>
+
+                  <div class="main">
+                    <div class="chead">
+                      Session fork tests
+                      <span class="ic"
+                        ><svg class="i" viewBox="0 0 16 16">
+                          <path d="M3 4h10M3 8h10M3 12h6" /></svg
+                        ><svg class="i" viewBox="0 0 16 16">
+                          <rect x="2" y="3" width="12" height="10" rx="1.5" />
+                          <path d="M9.5 3v10" /></svg
+                      ></span>
+                    </div>
+                    <div class="conv">
+                      <div class="thread x-thread" style="--r: 30% 34%">
+                        <div class="blk">
+                          <div class="u">Add fork tests for rewind, verify they pass, and push</div>
+                          <div class="row x-in" style="--r: 2% 4%">
+                            <span class="k">›</span><b>read</b
+                            ><code>packages/core/src/session/rewind.ts</code
+                            ><span class="st">完成</span>
+                          </div>
+                          <div class="row x-in" style="--r: 5% 7%">
+                            <span class="k">›</span><b>search</b><code>forkSession</code
+                            ><span class="st">6 处 · 完成</span>
+                          </div>
+                          <div class="row x-in" style="--r: 8% 10%">
+                            <span class="k">⌄</span><b>edit</b
+                            ><code>packages/core/test/rewind.test.ts</code
+                            ><span class="st"
+                              ><span class="n"
+                                ><span class="p">+38</span> <span class="m">−2</span></span
+                              >完成</span
+                            >
+                          </div>
+                          <!-- prettier-ignore -->
+                          <div class="diff x-grow" style="--r: 10% 13%">
+                            <div class="cx">  describe("fork", () =&gt; {</div>
+                            <div class="rm">-   it.todo("inherits prefix");</div>
+                            <div class="ad">+   it("inherits loaded events from the prefix", async () =&gt; {</div>
+                            <div class="ad">+     const fork = await forkSession(log, { at: turn(2) });</div>
+                            <div class="ad">+     expect(fork.events).toEqual(log.events.slice(0, 7));</div>
+                          </div>
+                          <div class="row x-in" style="--r: 14% 16%">
+                            <span class="k">›</span><b>shell</b><code>pnpm vitest run rewind</code
+                            ><span class="st"
+                              ><span class="tag x-fade" style="--r: 16% 18%">审查：放行</span
+                              >完成</span
+                            >
+                          </div>
+                          <div class="out x-in" style="--r: 18% 20%">
+                            Tests <span class="p">12 passed</span> (12)
+                          </div>
+                          <div class="perm x-in" style="--r: 21% 23%">
+                            <div class="t"><b>执行命令</b><span>审查器交给你确认</span></div>
+                            <code>git push origin r1124-fork</code>
+                            <div class="bt">
+                              <span class="x-press" style="--r: 25% 27%">允许一次</span
+                              ><span>本会话允许</span><span>拒绝</span>
+                            </div>
+                            <div class="done-row x-fade" style="--r: 27% 28.5%">
+                              <div class="row" style="width: 100%">
+                                <span class="k">›</span><b>shell</b
+                                ><code>git push origin r1124-fork</code><span class="st">完成</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="txt x-in" style="--r: 28.5% 30%">
+                            A fork inherits events from the source prefix, excluding rewound events.
+                            Pushed to r1124-fork.
+                          </div>
+                        </div>
+
+                        <div class="blk">
+                          <div class="txt a" style="margin-top: 28px; position: relative">
+                            A fork
+                            <span class="sel x-hl" style="--r: 36% 39%; --r2: 43% 44%"
+                              >inherits events from the source prefix</span
+                            >, excluding rewound events. Pushed to r1124-fork.
+                            <span class="qbtn x-fadeout" style="--r: 39% 40%; --r2: 42% 43%"
+                              ><svg class="i" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                                <path d="M6 4L2.5 7.5 6 11M3 7.5h7a3.5 3.5 0 0 1 3.5 3.5v1" /></svg
+                              >回复</span
+                            >
+                          </div>
+                          <div class="u x-in" style="--r: 43% 45%">
+                            <span class="q">inherits events from the source prefix</span
+                            ><span
+                              ><span class="wm"
+                                ><svg
+                                  class="i"
+                                  viewBox="0 0 16 16"
+                                  style="width: 12px; height: 12px"
+                                >
+                                  <rect x="2" y="3" width="12" height="10" rx="1.5" />
+                                  <path d="M9.5 3v10" /></svg
+                                >华彩</span
+                              >
+                              Draw a diagram to explain</span
+                            >
+                          </div>
+                          <div class="card x-in" style="--r: 46% 48%">
+                            <svg class="i" viewBox="0 0 16 16">
+                              <path d="M4 2.5h5l3 3v8H4z" />
+                              <path d="M9 2.5v3h3" /></svg
+                            >Session fork<span class="v">v1 ›</span>
+                          </div>
+                          <div class="chip x-in" style="--r: 55% 57%">
+                            <svg class="i" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                              <path d="M3 3.5h10v7H7l-3 2.5v-2.5H3z" /></svg
+                            >Session fork v1 · 1
+                          </div>
+                          <div class="row x-in" style="--r: 58% 59.5%">
+                            <span class="k">›</span><b>reply_page_comment</b
+                            ><span class="st">完成</span>
+                          </div>
+                          <div class="card x-in" style="--r: 58.5% 60%">
+                            <svg class="i" viewBox="0 0 16 16">
+                              <path d="M4 2.5h5l3 3v8H4z" />
+                              <path d="M9 2.5v3h3" /></svg
+                            >Session fork<span class="v">v2 ›</span>
+                          </div>
+                          <div class="txt x-in" style="--r: 60% 61.5%">
+                            Marked the rewind point at turn 2.
+                          </div>
+                          <div class="u x-in" style="--r: 84% 86%">Add one more test</div>
+                          <div class="row x-in" style="--r: 87% 89%">
+                            <span class="k">›</span><b>edit</b
+                            ><code>packages/core/test/rewind.test.ts</code
+                            ><span class="st"><span class="spin"></span></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="composer">
+                      <span class="ph">输入消息</span>
+                      <div class="bar">
+                        <svg class="i" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>
+                        <span>default ⌄</span>
+                        <span class="r"
+                          ><span class="model">deepseek-v4.1 ⌄</span><span>high ⌄</span
+                          ><span class="send"
+                            ><svg class="i" viewBox="0 0 16 16" style="width: 11px; height: 11px">
+                              <path d="M8 13V3M4 7l4-4 4 4" /></svg></span
+                        ></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="panel x-panel" style="--r: 49% 53%">
+                    <div class="ptabs">
+                      <span class="ptab"
+                        ><svg class="i" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                          <path d="M4 2.5h5l3 3v8H4z" />
+                          <path d="M9 2.5v3h3" /></svg
+                        >Session fork <span class="x">×</span></span
+                      >
+                    </div>
+                    <div class="pver">
+                      ‹
+                      <span class="vv"
+                        ><span class="x-gone" style="--r: 59% 59.5%">1 / 1</span
+                        ><span class="x-fade" style="--r: 59.5% 60%">2 / 2</span></span
+                      >
+                      ›
+                      <span class="cm"
+                        ><svg class="i" viewBox="0 0 16 16">
+                          <path d="M3 3.5h10v7H7l-3 2.5v-2.5H3z" /></svg
+                        ><i class="x-fadeout" style="--r: 55% 56%; --r2: 62% 63%">1</i></span
+                      >
+                    </div>
+                    <div class="page x-fade" style="--r: 52% 54%">
+                      <h4>Session fork</h4>
+                      <div class="sub">fork inherits source prefix</div>
+                      <div class="fig">
+                        <svg viewBox="0 0 400 230">
+                          <path class="ln" d="M60 40V82M60 122V164" />
+                          <path class="br" d="M110 102H170Q190 102 190 122V164" />
+                          <path class="ln" d="M60 204V214" />
+                          <g class="nd">
+                            <rect x="10" y="10" width="110" height="30" rx="7" />
+                            <text x="18" y="29">Session opened</text>
+                          </g>
+                          <g class="nd">
+                            <rect x="10" y="82" width="100" height="40" rx="7" />
+                            <text x="22" y="100">Turn 2</text>
+                            <text class="s" x="22" y="114">7 events</text>
+                          </g>
+                          <g class="nd">
+                            <rect x="10" y="164" width="100" height="40" rx="7" />
+                            <text x="22" y="182">Turn 3</text>
+                            <text class="s" x="22" y="196">Source</text>
+                          </g>
+                          <g class="nd brn">
+                            <rect x="140" y="164" width="110" height="40" rx="7" />
+                            <text x="152" y="182">Turn 3′</text>
+                            <text class="s" x="152" y="196">Forked</text>
+                          </g>
+                          <g class="mk x-fade" style="--r: 59% 60.5%">
+                            <line x1="0" y1="143" x2="330" y2="143" />
+                            <text x="122" y="137">Rewind point</text>
+                          </g>
+                        </svg>
+                        <span class="pin x-in" style="--r: 55% 56%"
+                          >1<span class="ok x-fade" style="--r: 62% 63%">✓</span></span
+                        >
+                        <div class="pop x-fadeout" style="--r: 56% 57%; --r2: 62% 63%">
+                          <span class="ck">✓</span>
+                          <div class="m">
+                            <span class="w">你 <small>v1</small></span
+                            >Mark the rewind point
+                          </div>
+                          <div class="m x-in" style="--r: 60.5% 61.5%">
+                            <span class="w">Nocturne <small>v2</small></span
+                            >Marked the rewind point at turn 2.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="phone x-slide" style="--r: 68% 75%">
+                <div class="screen">
+                  <div class="sbar"><span>23:41</span><span>●●●</span></div>
+                  <div class="phead">
+                    <svg class="i" viewBox="0 0 16 16">
+                      <path d="M2.5 4h11M2.5 8h11M2.5 12h11" /></svg
+                    >Session fork tests<span class="ic">⋯</span>
+                  </div>
+                  <div class="pbody">
+                    <div class="txt">
+                      A fork inherits events from the source prefix, excluding rewound events.
+                      Pushed to r1124-fork.
+                    </div>
+                    <div class="u">
+                      <span class="q">inherits events from the source prefix</span
+                      ><span
+                        ><span class="wm"
+                          ><svg class="i" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                            <rect x="2" y="3" width="12" height="10" rx="1.5" />
+                            <path d="M9.5 3v10" /></svg
+                          >华彩</span
+                        >
+                        Draw a diagram to explain</span
+                      >
+                    </div>
+                    <div class="card">
+                      <svg class="i" viewBox="0 0 16 16">
+                        <path d="M4 2.5h5l3 3v8H4z" />
+                        <path d="M9 2.5v3h3" /></svg
+                      >Session fork<span class="v">v2 ›</span>
+                    </div>
+                    <div class="txt">Marked the rewind point at turn 2.</div>
+                    <div class="u x-in" style="--r: 80% 82%">Add one more test</div>
+                  </div>
+                  <div class="pcomp">
+                    <span class="typed x-typeclear" style="--r: 75% 79%; --r2: 80% 80.5%"
+                      >Add one more test</span
+                    ><span class="send"
+                      ><svg class="i" viewBox="0 0 16 16" style="width: 11px; height: 11px">
+                        <path d="M8 13V3M4 7l4-4 4 4" /></svg
+                    ></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="ch shot">
+        <div class="side-col">
+          <span class="time">00:30</span>
+          <h2>Every change, at a glance</h2>
+          <p class="say">
+            Edits are grouped by file in the Changes panel with line-by-line diffs. Undo a turn's
+            changes or rewind to any message to start over.
+          </p>
+        </div>
+        <div class="bleed">
+          <figure class="frame fit">
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="../assets/images/desktop-en-light.webp"
+                width="2880"
+                height="1800"
+              />
+              <img
+                src="../assets/images/desktop-en-dark.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                alt="Nocturne desktop: fixing a login timeout with the Changes panel showing edits to login.mjs and CHANGELOG.md"
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section class="ch shot">
+        <div class="side-col">
+          <span class="time">01:15</span>
+          <h2>Ask only when needed</h2>
+          <p class="say">
+            Six permission presets control which actions run automatically. The Smart preset runs a
+            reviewer first, allowing low-risk commands and escalating uncertain ones to you.
+          </p>
+        </div>
+        <div class="bleed">
+          <figure class="frame fit">
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="../assets/images/perm-en-light.webp"
+                width="2880"
+                height="1800"
+              />
+              <img
+                src="../assets/images/perm-en-dark.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                alt="Force-pushing the rock-and-roll-all-nite branch while releasing 1.4.0, escalated by the reviewer for confirmation"
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section class="ch shot">
+        <div class="side-col">
+          <span class="time">02:30</span>
+          <h2>Work as a team</h2>
+          <p class="say">
+            Start an ensemble with <code>/ensemble</code>: the maestro decomposes work, assigns
+            tasks, and verifies results while named members implement in parallel on a shared board.
+          </p>
+        </div>
+        <div class="bleed">
+          <figure class="frame fit">
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="../assets/images/ensemble-en-light.webp"
+                width="2880"
+                height="1800"
+              />
+              <img
+                src="../assets/images/ensemble-en-dark.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                alt="Ensemble Migrate settings forms: the maestro collaborating with violin-1, violin-2, and cello-1 on the shared board"
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section class="ch shot">
+        <div class="side-col">
+          <span class="time">04:00</span>
+          <h2>The same in the terminal</h2>
+          <p class="say">
+            Run <code>nctrn</code> for a full-screen terminal interface. Sessions are stored in the
+            same local directory, and any desktop session can be continued with
+            <code>--resume</code>.
+          </p>
+        </div>
+        <div class="bleed">
+          <div class="mock m-term">
+            <div class="thead" aria-hidden="true">
+              <i></i><i></i><i></i><span>nctrn --resume</span>
+            </div>
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="../assets/images/terminal-en-light.webp"
+                width="960"
+                height="600"
+              />
+              <img
+                src="../assets/images/terminal-en-dark.webp"
+                width="960"
+                height="600"
+                loading="lazy"
+                alt="Terminal nctrn resuming the login-timeout session, showing the diff, test output, and task list"
+              />
+            </picture>
+          </div>
+        </div>
+      </section>
+
+      <section class="ch shot">
+        <div class="side-col">
+          <span class="time">05:30</span>
+          <h2>Run on schedule</h2>
+          <p class="say">
+            Scheduled tasks launch fresh background sessions on a set cadence. Each run records its
+            outcome, duration, and denied count, with direct links to the full session.
+          </p>
+        </div>
+        <div class="bleed">
+          <figure class="frame fit">
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="../assets/images/sched-en-light.webp"
+                width="2880"
+                height="1800"
+              />
+              <img
+                src="../assets/images/sched-en-dark.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                alt="Scheduled task Pre-dawn check running daily at 05:30, with history listing outcomes and durations"
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section class="ch more">
+        <div class="side-col">
+          <span class="time">06:30</span>
+          <h2>And more</h2>
+          <p class="say">
+            Ships with 79 built-in provider presets, and connects to any OpenAI-compatible or
+            Anthropic-compatible endpoint.
+          </p>
+        </div>
+        <div class="main-col">
+          <figure class="usage-shot">
+            <picture>
+              <source
+                media="(prefers-color-scheme: light)"
+                srcset="../assets/images/usage-en-light.webp"
+                width="1824"
+                height="809"
+              />
+              <img
+                src="../assets/images/usage-en-dark.webp"
+                width="1824"
+                height="809"
+                loading="lazy"
+                alt="Usage totals and a daily activity heatmap over the past year"
+              />
+            </picture>
+          </figure>
+          <dl class="idx">
+            <div>
+              <dt>Rewind and fork</dt>
+              <dd>
+                Rewind or fork from any message, restoring both conversation history and files.
+              </dd>
+            </div>
+            <div>
+              <dt>Queue and steer</dt>
+              <dd>
+                Send follow-up messages while a turn is running without interrupting current work.
+              </dd>
+            </div>
+            <div>
+              <dt>Goal mode</dt>
+              <dd>
+                Hand off multi-step deliverables with <code>/goal</code>; the model drives through
+                until verified.
+              </dd>
+            </div>
+            <div>
+              <dt>Parallel agents</dt>
+              <dd>
+                Split work across isolated worktree subagents with <code>/fugue</code> and merge
+                changes back.
+              </dd>
+            </div>
+            <div>
+              <dt>Suites</dt>
+              <dd>
+                Organize a conductor thread, working sessions, and shared briefs under one
+                long-running goal.
+              </dd>
+            </div>
+            <div>
+              <dt>Subagents</dt>
+              <dd>
+                Delegate search, research, or multi-file edits to isolated child sessions that
+                return concise results.
+              </dd>
+            </div>
+            <div>
+              <dt>Memory</dt>
+              <dd>Persist preferences, corrections, and project constraints across sessions.</dd>
+            </div>
+            <div>
+              <dt>Skills</dt>
+              <dd>Load task-specific instructions and reference files on demand.</dd>
+            </div>
+            <div>
+              <dt>Context and usage</dt>
+              <dd>
+                Automatic two-stage compaction near context limits, with cross-session token and
+                cost tracking.
+              </dd>
+            </div>
+            <div>
+              <dt>MCP</dt>
+              <dd>Connect to external tool servers, or expose Nocturne itself as an MCP server.</dd>
+            </div>
+            <div>
+              <dt>Plugins</dt>
+              <dd>
+                Supports native plugins and read-only integration with locally installed Codex and
+                Claude Code plugins.
+              </dd>
+            </div>
+            <div>
+              <dt>Hooks</dt>
+              <dd>Run external commands at defined lifecycle hook points.</dd>
+            </div>
+            <div>
+              <dt>Outside agents</dt>
+              <dd>Integrate CLI agents such as Codex and omp over ACP.</dd>
+            </div>
+            <div>
+              <dt>Computer use</dt>
+              <dd>On Windows desktop, click, type, and interact with authorized applications.</dd>
+            </div>
+            <div>
+              <dt>Documents</dt>
+              <dd>Built-in support for Word, spreadsheets, presentations, and PDF files.</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="ch dawn" id="dl">
+        <div class="side-col">
+          <span class="time">07:00</span>
+          <h2>Daybreak</h2>
+          <p class="say">
+            Sessions, file changes, and test results stay intact, ready whenever you return.
+          </p>
+        </div>
+        <div class="main-col get">
+          <div class="split">
             <a
-              class="row-btn"
-              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nctrn-{{version}}.tgz"
-              >tgz</a
+              class="sp-main"
+              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
+              ><span>Download for Windows</span><small>{{version}}</small></a
             >
           </div>
-          <div class="row">
-            <h3>Phone</h3>
-            <p class="meta">Pair under Settings › Remote on desktop</p>
+          <div class="plat">
             <a
-              class="row-btn"
-              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nocturne-{{version}}.apk"
-              >Android APK</a
+              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_x64-setup.exe"
+              >Windows<span>x64 installer</span></a
             >
+            <a
+              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/Nocturne_{{version}}_aarch64.dmg"
+              >macOS<span>Apple silicon</span></a
+            >
+            <a
+              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nctrn-{{version}}.tgz"
+              >Terminal nctrn<span>Node.js 24.16+</span></a
+            >
+            <a
+              href="https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/nocturne-{{version}}.apk"
+              >Android<span>APK</span></a
+            >
+          </div>
+          <div class="oss2">
+            <span><b>{{version}}</b></span
+            ><span><b>GPL-3.0</b> open source</span
+            ><a class="link" href="https://github.com/kanzaki-chiya/Nocturne"
+              >kanzaki-chiya/Nocturne</a
+            ><a class="link" href="../changelog/" hreflang="zh-CN">Changelog</a>
           </div>
         </div>
       </section>
     </main>
-    <footer class="site-footer">
-      <div class="wrap">
-        <span>Nocturne · GPL-3.0</span>
-        <a href="https://github.com/kanzaki-chiya/Nocturne">Source code</a>
-        <a href="https://github.com/kanzaki-chiya/Nocturne/releases">All releases</a>
-        <a href="../" hreflang="zh-CN" lang="zh-CN">中文</a>
+
+    <footer class="home-footer">
+      <div class="wrap fgrid">
+        <div class="fbrand"><b>Nocturne</b><span>GPL-3.0</span></div>
+        <nav aria-label="Get started">
+          <b>Get started</b>
+          <a href="../docs/" hreflang="zh-CN">Install</a>
+          <a href="../docs/providers/" hreflang="zh-CN">Providers</a>
+          <a href="../docs/first-session/" hreflang="zh-CN">First session</a>
+          <a href="../docs/work-modes/" hreflang="zh-CN">Work modes</a>
+          <a href="../docs/permissions/" hreflang="zh-CN">Permissions</a>
+        </nav>
+        <nav aria-label="Features">
+          <b>Features</b>
+          <a href="../docs/panels/" hreflang="zh-CN">Side panel</a>
+          <a href="../docs/suites/" hreflang="zh-CN">Suites</a>
+          <a href="../docs/subagents/" hreflang="zh-CN">Subagents</a>
+          <a href="../docs/schedule/" hreflang="zh-CN">Scheduled tasks</a>
+          <a href="../docs/memory/" hreflang="zh-CN">Memory</a>
+          <a href="../docs/computer-use/" hreflang="zh-CN">Computer use</a>
+        </nav>
+        <nav aria-label="Extend">
+          <b>Extend</b>
+          <a href="../docs/mcp/" hreflang="zh-CN">MCP</a>
+          <a href="../docs/skills/" hreflang="zh-CN">Skills</a>
+          <a href="../docs/plugins/" hreflang="zh-CN">Plugins</a>
+          <a href="../docs/hooks/" hreflang="zh-CN">Hooks</a>
+          <a href="../docs/outside-agents/" hreflang="zh-CN">Outside agents</a>
+        </nav>
+        <nav aria-label="More">
+          <b>More</b>
+          <a href="../docs/tui-cli/" hreflang="zh-CN">TUI and CLI</a>
+          <a href="../docs/remote/" hreflang="zh-CN">Phone remote</a>
+          <a href="../docs/config/" hreflang="zh-CN">Configuration</a>
+          <a href="../docs/faq/" hreflang="zh-CN">FAQ</a>
+          <a href="../changelog/" hreflang="zh-CN">Changelog</a>
+          <a href="../" hreflang="zh-CN" lang="zh-CN">中文</a>
+        </nav>
       </div>
     </footer>
+
+    <script>
+      (function () {
+        var ua = navigator.userAgent,
+          pf =
+            (navigator.userAgentData && navigator.userAgentData.platform) ||
+            navigator.platform ||
+            "";
+        var R = "https://github.com/kanzaki-chiya/Nocturne/releases/download/v{{version}}/";
+        var pick = /Android/i.test(ua)
+          ? ["Download for Android", "nocturne-{{version}}.apk"]
+          : /Mac|iPhone|iPad/i.test(pf + ua)
+            ? ["Download for macOS", "Nocturne_{{version}}_aarch64.dmg"]
+            : /Linux/i.test(pf)
+              ? ["Download terminal nctrn", "nctrn-{{version}}.tgz"]
+              : null;
+        if (!pick) return;
+        document.querySelectorAll(".sp-main").forEach(function (a) {
+          a.querySelector("span").textContent = pick[0];
+          a.href = R + pick[1];
+        });
+      })();
+    </script>
   </body>
 </html>
