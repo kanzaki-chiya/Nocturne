@@ -221,7 +221,7 @@ describe("ADR-0117 TUI 决策模型与安全审查对话框", () => {
     await s.input("\x1b[C");
     expect(s.lastFrame()).toContain("gemini-decision-1");
     await s.click("save");
-    expect(s.lastFrame()).toContain("首次启用决策模型审查");
+    expect(s.lastFrame()).toContain("首次启用 Gemini");
     expect(s.lastFrame()).toContain("Google");
     expect(s.apply).not.toHaveBeenCalled();
 

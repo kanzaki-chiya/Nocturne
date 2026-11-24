@@ -370,7 +370,9 @@ export function ReviewerDialog({
               <Box flexDirection="column" flexGrow={1} overflow="hidden">
                 {disclosure ? (
                   <>
-                    <Text>首次启用决策模型审查</Text>
+                    <Text>
+                      {decisionModel?.source === "gemini" ? "首次启用 Gemini" : "首次启用 Jev"}
+                    </Text>
                     <Text>
                       将发送待确认操作的类别、目标/命令、工作目录、全部用户消息（约 8000
                       字内）、项目说明前 2000 字和 git remote 地址。

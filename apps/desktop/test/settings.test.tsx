@@ -566,7 +566,7 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "决策模型" }));
     expect(screen.getByText("gemini-decision-1")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    await screen.findByText("首次启用决策模型审查");
+    await screen.findByText("首次启用 Gemini");
     expect(screen.getByText(/Google/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => {
