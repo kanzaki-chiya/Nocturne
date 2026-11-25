@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/doc-plugins",
-  "version": "0.65.0",
+  "version": "0.66.0",
   "description": "Nocturne 内置插件源码（Word、电子表格、演示文档、PDF、插件创建器）",
   "license": "GPL-3.0-only",
   "private": true,
