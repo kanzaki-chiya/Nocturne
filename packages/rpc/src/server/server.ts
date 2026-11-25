@@ -2597,6 +2597,59 @@ class Connection implements HubPeer {
         });
         return null;
       },
+      "worktrees.describe": () => this.runtime().describeManagedWorktrees(),
+      "worktrees.setPinned": (p) => {
+        const pinned = p.pinned;
+        if (typeof pinned !== "boolean") {
+          throw new InvalidParamsError("参数 pinned 必须是布尔值");
+        }
+        return this.runtime().setManagedWorktreePinned({
+          id: reqString(p, "id"),
+          pinned,
+        });
+      },
+      "worktrees.delete": (p) => {
+        const rawIds = p.ids;
+        if (!Array.isArray(rawIds) || !rawIds.every((item) => typeof item === "string")) {
+          throw new InvalidParamsError("参数 ids 必须是字符串数组");
+        }
+        const saveSnapshot = optBool(p, "saveSnapshot");
+        return this.runtime().deleteManagedWorktrees({
+          ids: rawIds,
+          ...(saveSnapshot !== undefined ? { saveSnapshot } : {}),
+        });
+      },
+      "worktrees.prune": () => this.runtime().pruneManagedWorktrees(),
+      "worktrees.restoreSnapshot": (p) => {
+        const targetPath = optString(p, "targetPath");
+        const branch = optString(p, "branch");
+        return this.runtime().restoreWorktreeSnapshot({
+          snapshotId: reqString(p, "snapshotId"),
+          ...(targetPath !== undefined ? { targetPath } : {}),
+          ...(branch !== undefined ? { branch } : {}),
+        });
+      },
+      "review.start": (p) => {
+        const sessionId = optString(p, "sessionId");
+        const cwd = optString(p, "cwd");
+        const prompt = optString(p, "prompt");
+        const presentation = optString(p, "presentation");
+        if (
+          presentation !== undefined &&
+          presentation !== "inline" &&
+          presentation !== "separate"
+        ) {
+          throw new InvalidParamsError("参数 presentation 必须是 inline 或 separate");
+        }
+        const model = optString(p, "model");
+        return this.runtime().startReview({
+          ...(sessionId !== undefined ? { sessionId } : {}),
+          ...(cwd !== undefined ? { cwd } : {}),
+          ...(prompt !== undefined ? { prompt } : {}),
+          ...(presentation !== undefined ? { presentation } : {}),
+          ...(model !== undefined ? { model } : {}),
+        });
+      },
       "subagent.list": (p) => {
         const parentSessionId = reqString(p, "parentSessionId");
         this.requireRemoteParentSession(parentSessionId);

@@ -430,6 +430,12 @@ export interface RpcRuntime {
   readSubagentDiff: Runtime["readSubagentDiff"];
   listSubagentWorktrees: Runtime["listSubagentWorktrees"];
   deleteSubagentWorktree: Runtime["deleteSubagentWorktree"];
+  describeManagedWorktrees: Runtime["describeManagedWorktrees"];
+  setManagedWorktreePinned: Runtime["setManagedWorktreePinned"];
+  deleteManagedWorktrees: Runtime["deleteManagedWorktrees"];
+  pruneManagedWorktrees: Runtime["pruneManagedWorktrees"];
+  restoreWorktreeSnapshot: Runtime["restoreWorktreeSnapshot"];
+  startReview: Runtime["startReview"];
   /**
    * 只读发现父会话的直接内置子会话（含已结束；ADR-0060 第 4 轮，rpc.md 4.1）。
    * 不要求打开父会话。参数既可传 id，也可传与进程内 `Runtime.listSubagents` 相同的对象。
@@ -1258,6 +1264,28 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     async deleteSubagentWorktree(input) {
       await call("subagent.deleteWorktree", input);
     },
+    describeManagedWorktrees: () => call("worktrees.describe", {}),
+    setManagedWorktreePinned: (input) => call("worktrees.setPinned", input),
+    deleteManagedWorktrees: (input) =>
+      call("worktrees.delete", {
+        ids: input.ids,
+        ...(input.saveSnapshot !== undefined ? { saveSnapshot: input.saveSnapshot } : {}),
+      }),
+    pruneManagedWorktrees: () => call("worktrees.prune", {}),
+    restoreWorktreeSnapshot: (input) =>
+      call("worktrees.restoreSnapshot", {
+        snapshotId: input.snapshotId,
+        ...(input.targetPath !== undefined ? { targetPath: input.targetPath } : {}),
+        ...(input.branch !== undefined ? { branch: input.branch } : {}),
+      }),
+    startReview: (input) =>
+      call("review.start", {
+        ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+        ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+        ...(input.prompt !== undefined ? { prompt: input.prompt } : {}),
+        ...(input.presentation !== undefined ? { presentation: input.presentation } : {}),
+        ...(input.model !== undefined ? { model: input.model } : {}),
+      }),
     async cancelSubagent(input) {
       await call("subagent.cancel", input);
     },

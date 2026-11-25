@@ -849,6 +849,36 @@ export interface RpcMethods {
     params: { parentSessionId: string; childSessionId: string };
     result: null;
   };
+  "worktrees.describe": {
+    params: Record<string, never>;
+    result: Awaited<ReturnType<Runtime["describeManagedWorktrees"]>>;
+  };
+  "worktrees.setPinned": {
+    params: { id: string; pinned: boolean };
+    result: Awaited<ReturnType<Runtime["setManagedWorktreePinned"]>>;
+  };
+  "worktrees.delete": {
+    params: { ids: string[]; saveSnapshot?: boolean };
+    result: Awaited<ReturnType<Runtime["deleteManagedWorktrees"]>>;
+  };
+  "worktrees.prune": {
+    params: Record<string, never>;
+    result: Awaited<ReturnType<Runtime["pruneManagedWorktrees"]>>;
+  };
+  "worktrees.restoreSnapshot": {
+    params: { snapshotId: string; targetPath?: string; branch?: string };
+    result: Awaited<ReturnType<Runtime["restoreWorktreeSnapshot"]>>;
+  };
+  "review.start": {
+    params: {
+      sessionId?: string;
+      cwd?: string;
+      prompt?: string;
+      presentation?: "inline" | "separate";
+      model?: string;
+    };
+    result: Awaited<ReturnType<Runtime["startReview"]>>;
+  };
   /**
    * 子会话只读观察（rpc.md 4.1，ADR-0060 第 4 轮）：不要求打开父会话，也不返回
    * RpcSession；仅本机开放，不进远程白名单。
@@ -1275,6 +1305,12 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "subagent.diff": true,
   "subagent.worktrees": true,
   "subagent.deleteWorktree": true,
+  "worktrees.describe": true,
+  "worktrees.setPinned": true,
+  "worktrees.delete": true,
+  "worktrees.prune": true,
+  "worktrees.restoreSnapshot": true,
+  "review.start": true,
   "subagent.list": true,
   "subagent.readAttachment": true,
   "subagent.subscribe": true,
