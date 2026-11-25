@@ -441,6 +441,17 @@ interface SubagentObservation {
 
 工作树隔离的保留项（[ADR-0075](../decisions/ADR-0075-worktree-isolation.md) §6）：`subagent.worktrees({ parentSessionId })` 返回该父会话登记的副本与分支（含已收束的 `changes`，排除活动 Ensemble 中未移除成员的在用工作树）；`subagent.deleteWorktree({ parentSessionId, childSessionId })` 删除副本与 `nocturne/` 分支，子代理或对应 Ensemble 隔离成员仍在活动时报 `invalid_command`；`subagent.diff({ parentSessionId, childSessionId, file })` 返回该文件 `base..head` 的差异文本，文件必须在结果清单内。
 
+跨项目的托管工作树管理与代码审查发起方法：
+
+| 方法 | 参数 → 结果 |
+|---|---|
+| `worktrees.describe` | `{}` → `ManagedWorktreesDescription`（聚合全部本机 Nocturne 托管的会话与子代理工作树、兼容旧子代理记录，含默认/生效子代理根目录、使用/并回/独有提交/未提交状态、自动删除候选标记与可用恢复快照） |
+| `worktrees.setPinned` | `{ id, pinned }` → `{ id, pinned }`；置顶或取消置顶，置顶项不计入自动清理保留数 |
+| `worktrees.delete` | `{ ids, saveSnapshot? }` → `WorktreeCleanupResult`（`deleted` / `skipped` / `failed`）；删除前复查使用中状态与托管归属，禁止清理主检出与非托管副本，有独有提交或本地改动时默认先保存并校验恢复快照（失败则跳过并保留原件） |
+| `worktrees.prune` | `{}` → `WorktreeCleanupResult`；按当前 `worktree.autoDelete` 与 `worktree.keepCount` 清理超出保留数的最久未用未置顶非使用中工作树（删除前必存可验证恢复快照） |
+| `worktrees.restoreSnapshot` | `{ snapshotId, targetPath?, branch? }` → `WorktreeRestoreResult`；校验快照完整性后还原工作树目录、独有提交、未提交补丁与未跟踪文件并重新登记 |
+| `review.start` | `{ sessionId?, cwd?, prompt?, presentation?, model? }` → `StartReviewResult`；按 `git.reviewView`（或显式 `presentation`）决定在当前会话内联审查还是创建独立「代码审查」会话 |
+
 查询可复用 `listSessions({ includeSubagents: true })` 的只读日志头扫描建立候选索引，但不能把 `locked` 当作运行状态，也不能只靠该列表的容错跳过逻辑校验指定 child。运行态来自 Runtime 共享的 launcher 登记簿；缓存失效可重扫日志，不能把缓存作为持久事实源。
 
 #### RPC 映射与通知

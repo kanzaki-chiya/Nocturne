@@ -98,6 +98,8 @@ Nocturne 的所有用户级数据默认存放在 `~/.nocturne`（可通过环境
 | `turn.loopGuard` | `warnAt`、`stopAt` 或 `false` | 重复工具调用保护阈值（默认 `warnAt` 为 `3`、`stopAt` 为 `6`，设 `false` 关闭） |
 | `mcp.servers` | `Record<string, McpServerEntry>` | 手写配置的 MCP 服务器 |
 | `mcp.toolSearch` | `auto`、`always`、`never` | MCP 工具按需搜索模式（默认 `auto`，工具定义估算超过 10,000 tokens 时启用） |
+| `git` | `branchPrefix`、`forcePush`、`mergeMethod`、`draftPr`、`reviewView`、`instructions` | Git 与 PR 偏好：自动分支前缀默认 `nocturne/`，`--force-with-lease` 强制推送默认关闭，合并方法默认 `merge`（可选 `squash`），草稿 PR 默认开启，审查呈现默认 `inline`（可选 `separate`），支持提交说明 / PR 标题 / PR 描述指引 |
+| `worktree` | `sessionRoot`、`subagentRoot`、`fetchBeforeCreate`、`autoDelete`、`keepCount`、`askBeforeDelete` | 工作树根目录与清理偏好：新会话/子代理根目录留空沿用默认，创建前获取上游更新默认关闭，自动删除旧工作树默认开启、默认保留 `15` 个（置顶与使用中不计入）且删除前保存可恢复快照，手动删除前询问默认开启 |
 | `hooks` | `Partial<Record<HookPoint, HookEntry[]>>` | 按事件点配置的外部 Hook 命令（项目级须信任后才生效，见 [Hook](hooks.md)） |
 | `skills` | `sources`（`agents`、`claude`）、`extraDirs` | 技能兼容目录开关与附加扫描目录（仅用户级生效） |
 | `externalAgents` | `ExternalAgentConfig[]` | 手写配置的外部 ACP Agent（仅用户级生效） |
