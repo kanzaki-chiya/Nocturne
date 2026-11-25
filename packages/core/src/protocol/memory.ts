@@ -46,6 +46,8 @@ export interface OtherProjectMemory {
   key: string;
   path: string;
   count: number;
+  /** 条目摘要（ADR-0122 §2）：总览已扫描各项目目录，只有打开条目时才另行读取正文 */
+  entries: MemoryEntryMeta[];
 }
 
 export interface MemoryDescription {

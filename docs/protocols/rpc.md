@@ -349,6 +349,8 @@ ADR-0060 第 4 轮的只读子会话方法与通知见第 4.1 节。它们不复
 | `memory.deleteMemory` | `{ scope, key?, workspaceRoot?, name }` → `null`；实际删除后推 `runtime.providersChanged` |
 | `memory.clearMemory` | `{ scope, key?, workspaceRoot? }` → `null`；清空后推 `runtime.providersChanged` |
 
+`otherProjects` 为 ADR-0122 的按项目浏览数据源：每项含 `{ key, path, count, entries }`，`entries` 是该项目全部条目的摘要（`MemoryEntryMeta[]`：name / description / type / updatedAt），总览已扫描各项目目录，不再随数量截断。读、删、清空 `scope: "project"` 的其他项目记忆时传 `key`（项目键）与条目 `name` 定位，不需要 `workspaceRoot`；同名条目按 `scope + key + name` 区分，不带 `key` 时按 `workspaceRoot`（缺省取连接的 `clientWorkspace`）解析当前项目范围。
+
 开关 `memory.global` / `memory.project` 走 `runtime.describeSettings` / `runtime.updateSettings`。
 
 ### 3.16 `suites.*`（ADR-0097）

@@ -444,6 +444,7 @@ export async function describeMemoryStore(
           key: dirEntry.name,
           path: wsJson.path,
           count: entries.length,
+          entries,
         });
       } catch {
         // workspace.json 损坏时跳过

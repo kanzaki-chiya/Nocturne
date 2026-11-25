@@ -228,6 +228,13 @@ describe("memory 存储与范围模块", () => {
       key: projResolved.key,
       count: 1,
     });
+    // 其他项目条目以摘要形式随总览返回（ADR-0122 §2），列表、详情页不再需要额外枚举请求
+    expect(descOther.otherProjects[0]?.entries).toHaveLength(1);
+    expect(descOther.otherProjects[0]?.entries[0]).toMatchObject({
+      name: "build-cmd",
+      description: "Run pnpm build",
+      type: "project",
+    });
 
     await clearMemoryDir(platform, projResolved.dir, "project");
     const descAfterClear = await describeMemoryStore(platform, home, {
