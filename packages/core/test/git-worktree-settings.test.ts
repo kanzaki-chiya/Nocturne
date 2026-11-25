@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -26,8 +27,12 @@ import {
 } from "../src/protocol/git.js";
 import { createWorktree } from "../src/agent/worktree.js";
 import {
+  deleteManagedWorktrees,
+  listWorktreeRecoverySnapshots,
   registerManagedWorktree,
   restoreWorktreeRecoverySnapshot,
+  setManagedWorktreePinned,
+  type ManagedWorktreeInspector,
 } from "../src/platform/managed-worktrees.js";
 
 const FAKE_MODEL = { provider: "fake", model: "fake-1" } as const;
@@ -667,6 +672,530 @@ describe("工作树根目录、创建前 fetch、托管注册聚合、保留清�
       expect(rA.failed.length + rB.failed.length).toBe(0);
 
       await s4.close();
+    },
+  );
+
+  it(
+    "恢复快照区分暂存区与工作区：同一文件先暂存 A 再写 B，以及暂存后改回 HEAD、二进制、AD、rm --cached 与 add -N 均分别精准恢复",
+    { timeout: 60_000 },
+    async () => {
+      const base = tempDir();
+      const home = path.join(base, "home");
+      const sessionsDir = path.join(base, "sessions");
+      const repo = initRepo(path.join(base, "proj"));
+      mkdirSync(home, { recursive: true });
+      mkdirSync(sessionsDir, { recursive: true });
+
+      writeFileSync(path.join(repo, "dual.txt"), "head-O\n");
+      writeFileSync(path.join(repo, "revert-in-wt.txt"), "head-same\n");
+      writeFileSync(path.join(repo, "bin.dat"), Buffer.from([0, 1, 2, 3]));
+      writeFileSync(path.join(repo, "rm-cached.txt"), "tracked-keep-wt\n");
+      git(repo, "add", ".");
+      git(repo, "commit", "-qm", "seed files");
+
+      const platform = createPlatform();
+      const cfg = await loadConfig(platform, { nocturneHome: home, env: () => undefined });
+      const rt = await createRuntime({
+        cwd: repo,
+        sessionsDir,
+        config: cfg,
+        providers: [new FakeProvider({})],
+        subagent: { enabled: false },
+      });
+
+      const s1 = await rt.createSession({
+        cwd: repo,
+        model: FAKE_MODEL,
+        branch: { name: "nocturne/staged-vs-worktree", create: true },
+      });
+      const wtPath = s1.state().config.worktree?.current ?? "";
+      await s1.close();
+
+      // 1) 同一文件先暂存 A，工作区再写 B（MM）
+      writeFileSync(path.join(wtPath, "dual.txt"), "staged-version-A\n");
+      git(wtPath, "add", "dual.txt");
+      writeFileSync(path.join(wtPath, "dual.txt"), "worktree-version-B\n");
+
+      // 2) 暂存 A 后把工作区改回与 HEAD 完全相同的内容（git diff HEAD 为空但暂存区独有 A）
+      writeFileSync(path.join(wtPath, "revert-in-wt.txt"), "only-in-staged-index\n");
+      git(wtPath, "add", "revert-in-wt.txt");
+      writeFileSync(path.join(wtPath, "revert-in-wt.txt"), "head-same\n");
+
+      // 3) 二进制文件先暂存 binA，工作区再写 binB
+      writeFileSync(path.join(wtPath, "bin.dat"), Buffer.from([0, 11, 22, 33]));
+      git(wtPath, "add", "bin.dat");
+      writeFileSync(path.join(wtPath, "bin.dat"), Buffer.from([0, 99, 88, 77]));
+
+      // 4) 新文件暂存 A 后在工作区删除（AD）
+      writeFileSync(path.join(wtPath, "index-only.txt"), "staged-new-A\n");
+      git(wtPath, "add", "index-only.txt");
+      rmSync(path.join(wtPath, "index-only.txt"), { force: true });
+
+      // 5) git rm --cached（索引删除、工作区保留并修改）
+      git(wtPath, "rm", "--cached", "-q", "rm-cached.txt");
+      writeFileSync(path.join(wtPath, "rm-cached.txt"), "kept-and-edited-in-wt\n");
+
+      // 6) intent-to-add（git add -N）
+      writeFileSync(path.join(wtPath, "intent.txt"), "intent-payload\n");
+      git(wtPath, "add", "-N", "intent.txt");
+
+      const statusBefore = execFileSync("git", ["status", "--porcelain=v1", "-z"], {
+        cwd: wtPath,
+        encoding: "utf8",
+      });
+
+      const desc = await rt.describeManagedWorktrees();
+      const target = desc.worktrees.find((w) => w.branch === "nocturne/staged-vs-worktree");
+      if (target === undefined) throw new Error("expected managed worktree");
+
+      const del = await rt.deleteManagedWorktrees({ ids: [target.id], saveSnapshot: true });
+      expect(del.deleted).toHaveLength(1);
+      expect(existsSync(wtPath)).toBe(false);
+      const snap = del.deleted[0]?.snapshot;
+      if (snap === undefined) throw new Error("expected snapshot");
+      expect(snap.hasStagedPatch).toBe(true);
+      expect(snap.hasWorkingPatch).toBe(true);
+      expect(snap.stateFingerprint).toBeTruthy();
+
+      const restored = await restoreWorktreeRecoverySnapshot(sessionsDir, { snapshotId: snap.id });
+      expect(restored.appliedPatch).toBe(true);
+      expect(restored.appliedStagedPatch).toBe(true);
+      expect(restored.appliedWorkingPatch).toBe(true);
+
+      // 分别核对索引版本（git show :<file>）和工作区版本（readFileSync）
+      expect(git(restored.worktreePath, "show", ":dual.txt")).toBe("staged-version-A");
+      expect(readFileSync(path.join(restored.worktreePath, "dual.txt"), "utf8")).toBe(
+        "worktree-version-B\n",
+      );
+
+      expect(git(restored.worktreePath, "show", ":revert-in-wt.txt")).toBe("only-in-staged-index");
+      expect(readFileSync(path.join(restored.worktreePath, "revert-in-wt.txt"), "utf8")).toBe(
+        "head-same\n",
+      );
+
+      const restoredIdxBin = execFileSync("git", ["show", ":bin.dat"], {
+        cwd: restored.worktreePath,
+      });
+      expect([...restoredIdxBin]).toEqual([0, 11, 22, 33]);
+      expect([...readFileSync(path.join(restored.worktreePath, "bin.dat"))]).toEqual([
+        0, 99, 88, 77,
+      ]);
+
+      expect(git(restored.worktreePath, "show", ":index-only.txt")).toBe("staged-new-A");
+      expect(existsSync(path.join(restored.worktreePath, "index-only.txt"))).toBe(false);
+
+      expect(() => git(restored.worktreePath, "show", ":rm-cached.txt")).toThrow();
+      expect(readFileSync(path.join(restored.worktreePath, "rm-cached.txt"), "utf8")).toBe(
+        "kept-and-edited-in-wt\n",
+      );
+
+      expect(readFileSync(path.join(restored.worktreePath, "intent.txt"), "utf8")).toBe(
+        "intent-payload\n",
+      );
+
+      const statusAfter = execFileSync("git", ["status", "--porcelain=v1", "-z"], {
+        cwd: restored.worktreePath,
+        encoding: "utf8",
+      });
+      expect(statusAfter).toBe(statusBefore);
+    },
+  );
+
+  it(
+    "包含被忽略文件或目录时绝不复制到快照，自动与手动清理均跳过并保留工作树，移走后可正常清理",
+    { timeout: 60_000 },
+    async () => {
+      const base = tempDir();
+      const home = path.join(base, "home");
+      const sessionsDir = path.join(base, "sessions");
+      const repo = initRepo(path.join(base, "proj"));
+      mkdirSync(home, { recursive: true });
+      mkdirSync(sessionsDir, { recursive: true });
+
+      writeFileSync(path.join(repo, ".gitignore"), "local-secret.txt\nuser-ignored-dir/\n");
+      git(repo, "add", ".gitignore");
+      git(repo, "commit", "-qm", "add gitignore");
+
+      const platform = createPlatform();
+      const cfg = await loadConfig(platform, { nocturneHome: home, env: () => undefined });
+      await cfg.updateSettings({ "worktree.autoDelete": true, "worktree.keepCount": 1 });
+      const rt = await createRuntime({
+        cwd: repo,
+        sessionsDir,
+        config: cfg,
+        providers: [new FakeProvider({})],
+        subagent: { enabled: false },
+      });
+
+      // wtIgnored：仅有 ignored 文件（git status --porcelain 为空，但包含敏感用户数据）
+      const sIgnored = await rt.createSession({
+        cwd: repo,
+        model: FAKE_MODEL,
+        branch: { name: "nocturne/has-ignored", create: true },
+      });
+      const wtIgnored = sIgnored.state().config.worktree?.current ?? "";
+      await sIgnored.close();
+
+      writeFileSync(path.join(wtIgnored, "local-secret.txt"), "SENSITIVE_USER_SECRET_VALUE\n");
+      mkdirSync(path.join(wtIgnored, "user-ignored-dir"), { recursive: true });
+      writeFileSync(
+        path.join(wtIgnored, "user-ignored-dir", "notes.json"),
+        '{"private":"must-not-copy-or-delete"}\n',
+      );
+
+      // 建一个较新的干净工作树，并明确提高其 lastUsedAt 使 wtIgnored 处于自动清理候选位（keepCount=1）
+      const sNewer = await rt.createSession({
+        cwd: repo,
+        model: FAKE_MODEL,
+        branch: { name: "nocturne/newer-clean", create: true },
+      });
+      const wtNewer = sNewer.state().config.worktree?.current ?? "";
+      await sNewer.close();
+      await registerManagedWorktree(sessionsDir, {
+        kind: "session",
+        repository: repo,
+        worktreePath: wtNewer,
+        branch: "nocturne/newer-clean",
+        ownsBranch: true,
+        sessionId: sNewer.id,
+        lastUsedAt: Date.now() + 60_000,
+      });
+
+      const desc = await rt.describeManagedWorktrees();
+      const ignoredEntry = desc.worktrees.find((w) => w.branch === "nocturne/has-ignored");
+      if (ignoredEntry === undefined) throw new Error("expected ignored worktree");
+      expect(ignoredEntry.autoDeleteCandidate).toBe(true);
+
+      // 1) 自动清理必须跳过并保留原工作树与被忽略文件
+      const autoRes = await rt.pruneManagedWorktrees();
+      expect(autoRes.deleted).toHaveLength(0);
+      expect(autoRes.skipped).toHaveLength(1);
+      expect(autoRes.skipped[0]?.status).toBe("skipped_snapshot_failed");
+      expect(autoRes.skipped[0]?.error).toMatch(/\.gitignore|忽略/);
+      expect(existsSync(wtIgnored)).toBe(true);
+      expect(readFileSync(path.join(wtIgnored, "local-secret.txt"), "utf8")).toBe(
+        "SENSITIVE_USER_SECRET_VALUE\n",
+      );
+      expect(
+        readFileSync(path.join(wtIgnored, "user-ignored-dir", "notes.json"), "utf8"),
+      ).toContain("must-not-copy-or-delete");
+
+      // 2) 手动清理（即使不显式要求 saveSnapshot 且工作树无 tracked 改动）也必须跳过并保留原工作树
+      const manualRes = await rt.deleteManagedWorktrees({ ids: [ignoredEntry.id] });
+      expect(manualRes.deleted).toHaveLength(0);
+      expect(manualRes.skipped).toHaveLength(1);
+      expect(manualRes.skipped[0]?.status).toBe("skipped_snapshot_failed");
+      expect(manualRes.skipped[0]?.error).toMatch(/local-secret\.txt|user-ignored-dir/);
+      expect(existsSync(wtIgnored)).toBe(true);
+
+      // 3) 核对快照目录中绝对没有偷偷复制任何被忽略或敏感文件
+      const snapshotsDir = path.join(sessionsDir, "worktrees", "snapshots");
+      if (existsSync(snapshotsDir)) {
+        const walkFiles = (dir: string): string[] => {
+          const out: string[] = [];
+          for (const item of readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, item.name);
+            if (item.isDirectory()) out.push(...walkFiles(full));
+            else out.push(full);
+          }
+          return out;
+        };
+        for (const f of walkFiles(snapshotsDir)) {
+          expect(f).not.toMatch(/local-secret|user-ignored-dir/);
+          expect(readFileSync(f, "utf8")).not.toContain("SENSITIVE_USER_SECRET_VALUE");
+        }
+      }
+      expect(await listWorktreeRecoverySnapshots(sessionsDir)).toHaveLength(0);
+
+      // 4) 用户移走被忽略文件后，手动清理可正常删除
+      rmSync(path.join(wtIgnored, "local-secret.txt"), { force: true });
+      rmSync(path.join(wtIgnored, "user-ignored-dir"), { recursive: true, force: true });
+      const retryRes = await rt.deleteManagedWorktrees({ ids: [ignoredEntry.id] });
+      expect(retryRes.deleted).toHaveLength(1);
+      expect(existsSync(wtIgnored)).toBe(false);
+    },
+  );
+
+  it(
+    "子模块内部未保存改动/未跟踪文件/独立提交，以及合并冲突、进行中操作、嵌套仓库与 assume-unchanged 均保守跳过并保留工作树",
+    { timeout: 90_000 },
+    async () => {
+      const base = tempDir();
+      const home = path.join(base, "home");
+      const sessionsDir = path.join(base, "sessions");
+      mkdirSync(home, { recursive: true });
+      mkdirSync(sessionsDir, { recursive: true });
+
+      // 搭建带真实本地子模块的临时仓库
+      const subOrigin = initRepo(path.join(base, "sub-origin"));
+      writeFileSync(path.join(subOrigin, "lib.txt"), "v1\n");
+      git(subOrigin, "add", "lib.txt");
+      git(subOrigin, "commit", "-qm", "sub v1");
+
+      const repo = initRepo(path.join(base, "proj-with-sub"));
+      git(
+        repo,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        subOrigin,
+        "deps/sub",
+      );
+      git(repo, "commit", "-qm", "add submodule");
+
+      const platform = createPlatform();
+      const cfg = await loadConfig(platform, { nocturneHome: home, env: () => undefined });
+      await cfg.updateSettings({ "worktree.autoDelete": true, "worktree.keepCount": 1 });
+      const rt = await createRuntime({
+        cwd: repo,
+        sessionsDir,
+        config: cfg,
+        providers: [new FakeProvider({})],
+        subagent: { enabled: false },
+      });
+
+      const sSub = await rt.createSession({
+        cwd: repo,
+        model: FAKE_MODEL,
+        branch: { name: "nocturne/sub-dirty", create: true },
+      });
+      const wtSub = sSub.state().config.worktree?.current ?? "";
+      await sSub.close();
+
+      git(wtSub, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q");
+      const subDir = path.join(wtSub, "deps", "sub");
+      git(subDir, "config", "user.email", "sub@example.invalid");
+      git(subDir, "config", "user.name", "SubTest");
+      git(subDir, "config", "core.autocrlf", "false");
+
+      // 再建一个较新的干净工作树，明确提高其 lastUsedAt 使 wtSub 处于自动清理候选位（keepCount=1）
+      const sKeep = await rt.createSession({
+        cwd: repo,
+        model: FAKE_MODEL,
+        branch: { name: "nocturne/keep-newer", create: true },
+      });
+      const wtKeep = sKeep.state().config.worktree?.current ?? "";
+      await sKeep.close();
+      await registerManagedWorktree(sessionsDir, {
+        kind: "session",
+        repository: repo,
+        worktreePath: wtKeep,
+        branch: "nocturne/keep-newer",
+        ownsBranch: true,
+        sessionId: sKeep.id,
+        lastUsedAt: Date.now() + 60_000,
+      });
+
+      const desc = await rt.describeManagedWorktrees();
+      const subEntry = desc.worktrees.find((w) => w.branch === "nocturne/sub-dirty");
+      if (subEntry === undefined) throw new Error("expected submodule worktree");
+
+      // (a) 子模块内部未保存修改：自动与手动均跳过并保留工作树
+      writeFileSync(path.join(subDir, "lib.txt"), "unsaved-in-submodule\n");
+      const subDirtyAuto = await rt.pruneManagedWorktrees();
+      expect(subDirtyAuto.deleted).toHaveLength(0);
+      expect(subDirtyAuto.skipped[0]?.status).toBe("skipped_snapshot_failed");
+      expect(subDirtyAuto.skipped[0]?.error).toMatch(/子模块.*deps\/sub/);
+      expect(readFileSync(path.join(subDir, "lib.txt"), "utf8")).toBe("unsaved-in-submodule\n");
+
+      const subDirtyManual = await rt.deleteManagedWorktrees({ ids: [subEntry.id] });
+      expect(subDirtyManual.deleted).toHaveLength(0);
+      expect(subDirtyManual.skipped[0]?.status).toBe("skipped_snapshot_failed");
+      expect(existsSync(wtSub)).toBe(true);
+
+      // (b) 还原已修改文件，但在子模块内部加入未跟踪文件：仍必须保留
+      git(subDir, "checkout", "--", "lib.txt");
+      writeFileSync(path.join(subDir, "sub-untracked.txt"), "local-sub-untracked\n");
+      const subUntrackedRes = await rt.deleteManagedWorktrees({ ids: [subEntry.id] });
+      expect(subUntrackedRes.deleted).toHaveLength(0);
+      expect(subUntrackedRes.skipped[0]?.status).toBe("skipped_snapshot_failed");
+      expect(readFileSync(path.join(subDir, "sub-untracked.txt"), "utf8")).toBe(
+        "local-sub-untracked\n",
+      );
+
+      // (b2) 子模块内部加入被忽略文件：仍必须保留
+      rmSync(path.join(subDir, "sub-untracked.txt"), { force: true });
+      writeFileSync(path.join(subDir, ".gitignore"), "sub-ignored.dat\n");
+      git(subDir, "add", ".gitignore");
+      git(subDir, "commit", "-qm", "sub gitignore");
+      writeFileSync(path.join(subDir, "sub-ignored.dat"), "sub-secret\n");
+      const subIgnoredRes = await rt.deleteManagedWorktrees({ ids: [subEntry.id] });
+      expect(subIgnoredRes.deleted).toHaveLength(0);
+      expect(subIgnoredRes.skipped[0]?.status).toBe("skipped_snapshot_failed");
+      expect(readFileSync(path.join(subDir, "sub-ignored.dat"), "utf8")).toBe("sub-secret\n");
+      rmSync(path.join(subDir, "sub-ignored.dat"), { force: true });
+      git(subDir, "reset", "--hard", "HEAD~1");
+
+      // (c) 在子模块内部制造独立本地提交（HEAD 偏离父 gitlink）：仍必须保留
+      writeFileSync(path.join(subDir, "lib.txt"), "sub-local-commit\n");
+      git(subDir, "add", "lib.txt");
+      git(subDir, "commit", "-qm", "local sub commit");
+      const subAheadRes = await rt.deleteManagedWorktrees({ ids: [subEntry.id] });
+      expect(subAheadRes.deleted).toHaveLength(0);
+      expect(subAheadRes.skipped[0]?.status).toBe("skipped_snapshot_failed");
+      expect(subAheadRes.skipped[0]?.error).toMatch(/子模块.*deps\/sub/);
+      expect(existsSync(wtSub)).toBe(true);
+
+      // (d) 恢复子模块到父 HEAD 干净状态后，再测试其它未能完整捕获的 Git 状态
+      git(subDir, "reset", "--hard", "HEAD~1");
+
+      // (d1) 未跟踪嵌套 Git 仓库
+      const nestedRepo = initRepo(path.join(wtSub, "nested-untracked-repo"));
+      const nestedRes = await rt.deleteManagedWorktrees({ ids: [subEntry.id] });
+      expect(nestedRes.deleted).toHaveLength(0);
+      expect(nestedRes.skipped[0]?.status).toBe("skipped_snapshot_failed");
+      expect(nestedRes.skipped[0]?.error).toMatch(/嵌套.*Git 仓库|未跟踪目录/);
+      expect(existsSync(nestedRepo)).toBe(true);
+      rmSync(nestedRepo, { recursive: true, force: true });
+
+      // (d2) assume-unchanged 标记
+      git(wtSub, "update-index", "--assume-unchanged", "README.md");
+      writeFileSync(path.join(wtSub, "README.md"), "hidden-edit\n");
+      const assumeRes = await rt.deleteManagedWorktrees({ ids: [subEntry.id] });
+      expect(assumeRes.deleted).toHaveLength(0);
+      expect(assumeRes.skipped[0]?.status).toBe("skipped_snapshot_failed");
+      expect(assumeRes.skipped[0]?.error).toMatch(/assume-unchanged|skip-worktree/);
+      expect(readFileSync(path.join(wtSub, "README.md"), "utf8")).toBe("hidden-edit\n");
+      git(wtSub, "update-index", "--no-assume-unchanged", "README.md");
+      git(wtSub, "checkout", "--", "README.md");
+
+      // (d3) 真实合并冲突（未解决的 unmerged index + MERGE_HEAD）
+      writeFileSync(path.join(wtSub, "README.md"), "branch-side\n");
+      git(wtSub, "add", "README.md");
+      git(wtSub, "commit", "-qm", "branch edit");
+      writeFileSync(path.join(repo, "README.md"), "main-side\n");
+      git(repo, "add", "README.md");
+      git(repo, "commit", "-qm", "main edit");
+      expect(() => git(wtSub, "merge", "main")).toThrow();
+      const conflictRes = await rt.deleteManagedWorktrees({ ids: [subEntry.id] });
+      expect(conflictRes.deleted).toHaveLength(0);
+      expect(conflictRes.skipped[0]?.status).toBe("skipped_snapshot_failed");
+      expect(conflictRes.skipped[0]?.error).toMatch(/未完成的 Git 操作|合并冲突/);
+      expect(existsSync(wtSub)).toBe(true);
+      git(wtSub, "merge", "--abort");
+    },
+  );
+
+  it(
+    "删除前最终复核：快照后发生新本地修改、并发置顶或变为使用中时，中止删除、清理过期快照并保留原工作树",
+    { timeout: 60_000 },
+    async () => {
+      const base = tempDir();
+      const sessionsDir = path.join(base, "sessions");
+      const repo = initRepo(path.join(base, "proj-recheck"));
+      mkdirSync(sessionsDir, { recursive: true });
+
+      const wtPath = path.join(base, "wt-race");
+      git(repo, "worktree", "add", "-q", "-b", "nocturne/race", wtPath, "main");
+      const entry = await registerManagedWorktree(sessionsDir, {
+        kind: "session",
+        repository: repo,
+        worktreePath: wtPath,
+        branch: "nocturne/race",
+        ownsBranch: true,
+        sessionId: "sess-race",
+      });
+      writeFileSync(path.join(wtPath, "README.md"), "snapshot-v1\n");
+
+      let activeFlag = false;
+      const inspector: ManagedWorktreeInspector = {
+        isActive: () => activeFlag,
+        sessionInfo: () => ({ title: "Race Session", exists: true }),
+        worktreeConfig: () => ({ subagentRoot: "", autoDelete: true, keepCount: 1 }),
+      };
+
+      // 1) 快照建完后、删除前瞬间工作区写入新改动 -> 指纹不匹配，取消删除并清理过期快照
+      let createdSnapDir: string | undefined;
+      const mutRes = await deleteManagedWorktrees(sessionsDir, inspector, {
+        ids: [entry.id],
+        reason: "auto",
+        saveSnapshot: true,
+        beforeFinalRemoveCheck: ({ snapshot }) => {
+          createdSnapDir = snapshot?.snapshotDir;
+          writeFileSync(path.join(wtPath, "README.md"), "newer-edit-after-snapshot\n");
+        },
+      });
+      expect(mutRes.deleted).toHaveLength(0);
+      expect(mutRes.skipped).toHaveLength(1);
+      expect(mutRes.skipped[0]?.status).toBe("skipped_snapshot_failed");
+      expect(mutRes.skipped[0]?.error).toMatch(/状态.*发生变化|不一致/);
+      expect(existsSync(wtPath)).toBe(true);
+      expect(readFileSync(path.join(wtPath, "README.md"), "utf8")).toBe(
+        "newer-edit-after-snapshot\n",
+      );
+      if (createdSnapDir !== undefined) {
+        expect(existsSync(createdSnapDir)).toBe(false);
+      }
+
+      // 2) 快照建完后、删除前瞬间变为使用中 -> 保护复核拦截，取消删除并清理本次快照
+      let activeSnapDir: string | undefined;
+      const actRes = await deleteManagedWorktrees(sessionsDir, inspector, {
+        ids: [entry.id],
+        reason: "manual",
+        saveSnapshot: true,
+        beforeFinalRemoveCheck: ({ snapshot }) => {
+          activeSnapDir = snapshot?.snapshotDir;
+          activeFlag = true;
+        },
+      });
+      expect(actRes.deleted).toHaveLength(0);
+      expect(actRes.skipped).toHaveLength(1);
+      expect(actRes.skipped[0]?.status).toBe("skipped_protected");
+      expect(actRes.skipped[0]?.error).toMatch(/使用中/);
+      expect(existsSync(wtPath)).toBe(true);
+      if (activeSnapDir !== undefined) {
+        expect(existsSync(activeSnapDir)).toBe(false);
+      }
+      activeFlag = false;
+
+      // 3) 快照建完后、自动删除前瞬间条目被置顶（模拟跨进程写入注册表置顶）-> 保护复核拦截
+      let pinSnapDir: string | undefined;
+      const pinRes = await deleteManagedWorktrees(sessionsDir, inspector, {
+        ids: [entry.id],
+        reason: "auto",
+        saveSnapshot: true,
+        beforeFinalRemoveCheck: async ({ snapshot }) => {
+          pinSnapDir = snapshot?.snapshotDir;
+          // 模拟外部已置顶（绕过同进程 id 锁直接改注册表文件）
+          const regPath = path.join(sessionsDir, "worktrees", "managed.json");
+          const raw = JSON.parse(readFileSync(regPath, "utf8")) as {
+            version: 1;
+            entries: { id: string; pinned: boolean }[];
+          };
+          for (const rec of raw.entries) {
+            if (rec.id === entry.id) rec.pinned = true;
+          }
+          writeFileSync(regPath, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+        },
+      });
+      expect(pinRes.deleted).toHaveLength(0);
+      expect(pinRes.skipped).toHaveLength(1);
+      expect(pinRes.skipped[0]?.status).toBe("skipped_protected");
+      expect(pinRes.skipped[0]?.error).toMatch(/置顶/);
+      expect(existsSync(wtPath)).toBe(true);
+      if (pinSnapDir !== undefined) {
+        expect(existsSync(pinSnapDir)).toBe(false);
+      }
+
+      // 取消置顶后，正常自动删除并可完整恢复最新内容
+      await setManagedWorktreePinned(sessionsDir, entry.id, false);
+      const okRes = await deleteManagedWorktrees(sessionsDir, inspector, {
+        ids: [entry.id],
+        reason: "auto",
+        saveSnapshot: true,
+      });
+      expect(okRes.deleted).toHaveLength(1);
+      expect(existsSync(wtPath)).toBe(false);
+      const okSnapId = okRes.deleted[0]?.snapshot?.id;
+      if (okSnapId === undefined) throw new Error("expected recovery snapshot id");
+      const restored = await restoreWorktreeRecoverySnapshot(sessionsDir, {
+        snapshotId: okSnapId,
+      });
+      expect(readFileSync(path.join(restored.worktreePath, "README.md"), "utf8")).toBe(
+        "newer-edit-after-snapshot\n",
+      );
     },
   );
 });

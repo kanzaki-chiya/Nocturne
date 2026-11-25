@@ -68,9 +68,14 @@ export interface PlatformWorktreeRecoverySnapshot {
   dirty: boolean;
   hasBundle: boolean;
   bundlePath?: string | undefined;
+  hasStagedPatch?: boolean | undefined;
+  stagedPatchPath?: string | undefined;
+  stagedPatchSha256?: string | undefined;
   hasWorkingPatch: boolean;
   workingPatchPath?: string | undefined;
   workingPatchSha256?: string | undefined;
+  intentToAddPaths?: string[] | undefined;
+  stateFingerprint?: string | undefined;
   untrackedFiles: { path: string; sha256: string; size: number }[];
   untrackedSymlinks: { path: string; target: string }[];
   snapshotDir: string;
@@ -128,6 +133,8 @@ export interface PlatformWorktreeRestoreResult {
   branch: string;
   headSha: string;
   appliedPatch: boolean;
+  appliedStagedPatch?: boolean | undefined;
+  appliedWorkingPatch?: boolean | undefined;
   restoredUntrackedCount: number;
 }
 
@@ -195,7 +202,12 @@ export function managedSubagentWorktreeId(childSessionId: string): string {
   return `subagent:${childSessionId}`;
 }
 
-async function gitExec(cwd: string, args: readonly string[], timeout = 30_000): Promise<string> {
+async function gitExec(
+  cwd: string,
+  args: readonly string[],
+  timeout = 30_000,
+  extraEnv?: NodeJS.ProcessEnv,
+): Promise<string> {
   try {
     const { stdout } = await runFile("git", [...args], {
       cwd,
@@ -207,6 +219,7 @@ async function gitExec(cwd: string, args: readonly string[], timeout = 30_000): 
         ...process.env,
         GIT_TERMINAL_PROMPT: "0",
         GIT_ASKPASS: "",
+        ...extraEnv,
       },
     });
     return stdout;
@@ -226,6 +239,7 @@ async function gitExecBuffer(
   cwd: string,
   args: readonly string[],
   timeout = 30_000,
+  extraEnv?: NodeJS.ProcessEnv,
 ): Promise<Buffer> {
   try {
     const { stdout } = await runFile("git", [...args], {
@@ -238,6 +252,7 @@ async function gitExecBuffer(
         ...process.env,
         GIT_TERMINAL_PROMPT: "0",
         GIT_ASKPASS: "",
+        ...extraEnv,
       },
     });
     return stdout;
@@ -558,6 +573,7 @@ async function resolveCompareRef(repository: string): Promise<string> {
 
 interface LiveGitStatus {
   branch: string;
+  detached: boolean;
   headSha: string;
   baseSha?: string | undefined;
   aheadCount: number;
@@ -570,12 +586,17 @@ async function inspectWorktreeLiveGit(
   fallbackBranch: string,
   legacy?: LegacySubagentRecord,
 ): Promise<LiveGitStatus> {
-  const headSha = (await gitExec(worktreePath, ["rev-parse", "--verify", "HEAD"])).trim();
+  const headSha = (await gitExec(worktreePath, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
   const abbrev = (
     await gitExec(worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => "")
   ).trim();
-  const branch = abbrev && abbrev !== "HEAD" ? abbrev : fallbackBranch;
-  const statusPorcelain = await gitExec(worktreePath, ["status", "--porcelain"]);
+  const detached = abbrev === "" || abbrev === "HEAD";
+  const branch = !detached ? abbrev : fallbackBranch;
+  const statusPorcelain = await gitExec(worktreePath, [
+    "status",
+    "--porcelain=v1",
+    "--ignore-submodules=none",
+  ]);
   const dirty = statusPorcelain.trim().length > 0;
 
   const compareSha = await resolveCompareRef(repository);
@@ -622,11 +643,464 @@ async function inspectWorktreeLiveGit(
       aheadCount = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
     }
   }
-  return { branch, headSha, baseSha, aheadCount, dirty };
+  return { branch, detached, headSha, baseSha, aheadCount, dirty };
 }
 
-function sha256Buffer(data: Buffer): string {
+function sha256Buffer(data: Buffer | string): string {
   return createHash("sha256").update(data).digest("hex");
+}
+
+function formatSamplePaths(paths: readonly string[], max = 3): string {
+  const shown = paths.slice(0, max);
+  return paths.length > max ? `${shown.join("、")} 等 ${paths.length} 项` : shown.join("、");
+}
+
+function assertSafeRelativePath(rel: string, kind: string): void {
+  if (
+    rel === "" ||
+    path.isAbsolute(rel) ||
+    path.win32.isAbsolute(rel) ||
+    rel.split(/[\\/]/).includes("..")
+  ) {
+    throw new Error(`不安全的${kind}路径：${rel}`);
+  }
+}
+
+interface ParsedPorcelainStatus {
+  ignoredPaths: string[];
+  conflictPaths: string[];
+  untrackedPaths: string[];
+  intentToAddPaths: string[];
+}
+
+function parseStatusPorcelainZ(raw: string): ParsedPorcelainStatus {
+  const ignoredPaths: string[] = [];
+  const conflictPaths: string[] = [];
+  const untrackedPaths: string[] = [];
+  const intentToAddPaths: string[] = [];
+  const tokens = raw.split("\0");
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (!token) continue;
+    if (token.length < 4 || token[2] !== " ") {
+      throw new Error(`无法解析的工作树 Git 状态条目：${token}`);
+    }
+    const x = token.charAt(0);
+    const y = token.charAt(1);
+    const filePath = token.slice(3);
+    if (x === "R" || x === "C" || y === "R" || y === "C") {
+      // --porcelain=v1 -z 重命名/复制后紧跟源路径
+      i += 1;
+    }
+    if (x === "!" && y === "!") {
+      ignoredPaths.push(filePath);
+    } else if (x === "?" && y === "?") {
+      untrackedPaths.push(filePath);
+    } else if (x === "U" || y === "U" || (x === "A" && y === "A") || (x === "D" && y === "D")) {
+      conflictPaths.push(filePath);
+    } else if (x === " " && y === "A") {
+      intentToAddPaths.push(filePath);
+    }
+  }
+  return { ignoredPaths, conflictPaths, untrackedPaths, intentToAddPaths };
+}
+
+async function detectInProgressGitOps(worktreePath: string): Promise<string[]> {
+  const rawGitDir = (await gitExec(worktreePath, ["rev-parse", "--git-dir"])).trim();
+  const gitDir = path.resolve(worktreePath, rawGitDir);
+  const checks: readonly [string, string][] = [
+    ["MERGE_HEAD", "merge"],
+    ["REBASE_HEAD", "rebase"],
+    ["rebase-merge", "rebase"],
+    ["rebase-apply", "rebase/am"],
+    ["CHERRY_PICK_HEAD", "cherry-pick"],
+    ["REVERT_HEAD", "revert"],
+    ["BISECT_LOG", "bisect"],
+    ["BISECT_START", "bisect"],
+    ["sequencer", "sequencer"],
+  ];
+  const active = new Set<string>();
+  for (const [marker, label] of checks) {
+    if (existsSync(path.join(gitDir, marker))) {
+      active.add(label);
+    }
+  }
+  return [...active];
+}
+
+function parseStageEntries(raw: string): {
+  gitlinks: Map<string, string>;
+  unmergedPaths: string[];
+} {
+  const gitlinks = new Map<string, string>();
+  const unmergedPaths: string[] = [];
+  for (const entry of raw.split("\0")) {
+    if (!entry) continue;
+    const tab = entry.indexOf("\t");
+    if (tab < 0) continue;
+    const meta = entry.slice(0, tab).split(" ");
+    const filePath = entry.slice(tab + 1);
+    const mode = meta[0];
+    const sha = meta[1];
+    const stage = meta[2];
+    if (stage !== "0") unmergedPaths.push(filePath);
+    if (mode === "160000" && sha) gitlinks.set(filePath, sha);
+  }
+  return { gitlinks, unmergedPaths };
+}
+
+function parseTreeGitlinks(raw: string): Map<string, string> {
+  const gitlinks = new Map<string, string>();
+  for (const entry of raw.split("\0")) {
+    if (!entry) continue;
+    const tab = entry.indexOf("\t");
+    if (tab < 0) continue;
+    const meta = entry.slice(0, tab).split(" ");
+    const filePath = entry.slice(tab + 1);
+    if (meta[0] === "160000" && meta[2]) {
+      gitlinks.set(filePath, meta[2]);
+    }
+  }
+  return gitlinks;
+}
+
+function detectSpecialIndexFlagPaths(lsFilesVOut: string): string[] {
+  const flagged: string[] = [];
+  for (const entry of lsFilesVOut.split("\0")) {
+    if (entry.length < 3 || entry[1] !== " ") continue;
+    const tag = entry.charAt(0);
+    const filePath = entry.slice(2);
+    // S = skip-worktree；小写字母 = assume-unchanged，会导致 git diff 隐藏本地修改
+    if (tag === "S" || (tag >= "a" && tag <= "z")) {
+      flagged.push(filePath);
+    }
+  }
+  return flagged;
+}
+
+function normalizeStageWithoutIntentToAdd(
+  rawStage: string,
+  intentToAddSet: ReadonlySet<string>,
+): string {
+  const kept: string[] = [];
+  for (const entry of rawStage.split("\0")) {
+    if (!entry) continue;
+    const tab = entry.indexOf("\t");
+    if (tab < 0) continue;
+    const filePath = entry.slice(tab + 1);
+    if (intentToAddSet.has(filePath)) continue;
+    kept.push(entry);
+  }
+  return kept.join("\0");
+}
+
+async function inspectSubmodulesSafety(worktreePath: string, prefix = ""): Promise<string[]> {
+  const [stageRaw, treeRaw] = await Promise.all([
+    gitExec(worktreePath, ["ls-files", "--stage", "-z"]),
+    gitExec(worktreePath, ["ls-tree", "-r", "-z", "HEAD"]),
+  ]);
+  const indexGitlinks = parseStageEntries(stageRaw).gitlinks;
+  const headGitlinks = parseTreeGitlinks(treeRaw);
+  const allPaths = [...new Set([...indexGitlinks.keys(), ...headGitlinks.keys()])].sort();
+  const summaries: string[] = [];
+
+  for (const subPath of allPaths) {
+    assertSafeRelativePath(subPath, "子模块");
+    const displayPath = prefix ? `${prefix}/${subPath}` : subPath;
+    const headSha = headGitlinks.get(subPath);
+    const indexSha = indexGitlinks.get(subPath);
+    if (headSha !== indexSha) {
+      throw new Error(
+        `子模块 ${displayPath} 的暂存索引与父工作树 HEAD 不一致，恢复快照无法捕获子模块变更，请先提交或还原后再清理`,
+      );
+    }
+
+    const subDir = path.resolve(worktreePath, subPath);
+    const subStat = await lstat(subDir).catch(() => undefined);
+    if (subStat === undefined) {
+      summaries.push(`${displayPath}:absent`);
+      continue;
+    }
+    if (!subStat.isDirectory()) {
+      throw new Error(
+        `子模块路径 ${displayPath} 不是目录，无法确认其本地状态，请先手动检查后再清理`,
+      );
+    }
+    const dirEntries = await readdir(subDir);
+    if (dirEntries.length === 0) {
+      summaries.push(`${displayPath}:uninitialized`);
+      continue;
+    }
+
+    // 目录非空：必须是有效的子模块 Git 仓库且完全干净、无额外本地提交/分支/stash/进行中操作
+    let subTop: string;
+    try {
+      const inside = (await gitExec(subDir, ["rev-parse", "--is-inside-work-tree"])).trim();
+      if (inside !== "true") {
+        throw new Error("not inside work tree");
+      }
+      subTop = await canonicalPath(
+        (await gitExec(subDir, ["rev-parse", "--show-toplevel"])).trim(),
+      );
+    } catch {
+      throw new Error(
+        `子模块目录 ${displayPath} 非空但不是有效 Git 工作区，可能包含未保存的本地文件，请先检查或移走后再清理`,
+      );
+    }
+    const expectedSubReal = await canonicalPath(subDir);
+    if (pathKey(subTop) !== pathKey(expectedSubReal)) {
+      throw new Error(
+        `子模块目录 ${displayPath} 含未初始化的本地文件，恢复快照不会捕获，请先移走或处理后再清理`,
+      );
+    }
+
+    const subOps = await detectInProgressGitOps(subDir);
+    if (subOps.length > 0) {
+      throw new Error(
+        `子模块 ${displayPath} 存在未完成的 Git 操作（${subOps.join("、")}），请先完成或中止后再清理`,
+      );
+    }
+
+    const [subUnmerged, subLsV, subStatusRaw] = await Promise.all([
+      gitExec(subDir, ["ls-files", "--unmerged", "-z"]),
+      gitExec(subDir, ["ls-files", "-v", "-z"]),
+      gitExec(subDir, [
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--ignored=matching",
+        "--ignore-submodules=none",
+      ]),
+    ]);
+    if (subUnmerged.length > 0) {
+      throw new Error(`子模块 ${displayPath} 存在未解决的合并冲突，请先处理后再清理`);
+    }
+    const subFlagged = detectSpecialIndexFlagPaths(subLsV);
+    if (subFlagged.length > 0) {
+      throw new Error(
+        `子模块 ${displayPath} 包含 skip-worktree 或 assume-unchanged 标记的文件，请先取消标记后再清理`,
+      );
+    }
+    if (subStatusRaw.length > 0) {
+      throw new Error(
+        `子模块 ${displayPath} 存在未保存的本地改动、未跟踪文件或被忽略文件，恢复快照不会捕获子模块内部工作，请先提交/推送或移走后再清理`,
+      );
+    }
+
+    let subHead: string;
+    try {
+      subHead = (await gitExec(subDir, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
+    } catch {
+      throw new Error(`子模块 ${displayPath} 的 HEAD 无有效提交，无法安全清理`);
+    }
+    if (headSha === undefined || subHead !== headSha) {
+      throw new Error(
+        `子模块 ${displayPath} 指向的提交与父工作树 HEAD 不一致，恢复快照不包含子模块独立提交，请先推送或还原后再清理`,
+      );
+    }
+
+    const [extraBranchCommits, subStashes] = await Promise.all([
+      gitExec(subDir, ["rev-list", "--branches", "--not", "HEAD"]),
+      gitExec(subDir, ["stash", "list"]),
+    ]);
+    if (extraBranchCommits.trim().length > 0 || subStashes.trim().length > 0) {
+      throw new Error(
+        `子模块 ${displayPath} 存在未同步的本地分支提交或 stash，恢复快照不会捕获子模块独立历史，请先处理后再清理`,
+      );
+    }
+
+    summaries.push(`${displayPath}:clean:${subHead}`);
+    const nested = await inspectSubmodulesSafety(subDir, displayPath);
+    summaries.push(...nested);
+  }
+
+  return summaries;
+}
+
+interface CapturableWorktreeState {
+  headSha: string;
+  branch: string;
+  detached: boolean;
+  indexStageRaw: string;
+  stagedPatch: Buffer;
+  workingPatch: Buffer;
+  intentToAddPaths: string[];
+  untrackedFiles: { path: string; sha256: string; size: number }[];
+  untrackedSymlinks: { path: string; target: string }[];
+  fingerprint: string;
+}
+
+/**
+ * 清理/快照前对工作树执行全面安全性与可捕获性检查，并生成确定性状态指纹：
+ * - 拒绝 unborn/损坏 HEAD、进行中的 Git 操作、未解决冲突、skip-worktree/assume-unchanged；
+ * - 拒绝包含被 .gitignore 忽略文件或目录的工作树（快照绝不偷偷复制敏感/被忽略文件）；
+ * - 拒绝嵌套 Git 仓库、非常规未跟踪条目、以及存在本地改动/未跟踪/被忽略/独立提交或进行中操作的子模块；
+ * - 分别捕获暂存区补丁（HEAD -> index）与工作区补丁（index -> worktree），不丢暂存区独有数据。
+ */
+async function inspectWorktreeCapturableState(
+  worktreePath: string,
+  fallbackBranch: string,
+): Promise<CapturableWorktreeState> {
+  let headSha: string;
+  try {
+    headSha = (await gitExec(worktreePath, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
+  } catch {
+    throw new Error(
+      "工作树 HEAD 无有效提交（可能是空分支或仓库状态异常），无法安全保存恢复快照，请先提交或手动处理后再清理",
+    );
+  }
+  const abbrev = (
+    await gitExec(worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => "")
+  ).trim();
+  const detached = abbrev === "" || abbrev === "HEAD";
+  const branch = !detached ? abbrev : fallbackBranch;
+
+  const activeOps = await detectInProgressGitOps(worktreePath);
+  if (activeOps.length > 0) {
+    throw new Error(
+      `工作树存在未完成的 Git 操作（${activeOps.join("、")}），无法生成完整恢复快照，请先完成或中止该操作后再清理`,
+    );
+  }
+
+  const [unmergedRaw, lsFilesVRaw, statusRaw, indexStageRaw] = await Promise.all([
+    gitExec(worktreePath, ["ls-files", "--unmerged", "-z"]),
+    gitExec(worktreePath, ["ls-files", "-v", "-z"]),
+    gitExec(worktreePath, [
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "--untracked-files=all",
+      "--ignored=matching",
+      "--ignore-submodules=none",
+    ]),
+    gitExec(worktreePath, ["ls-files", "--stage", "-z"]),
+  ]);
+
+  const parsedStatus = parseStatusPorcelainZ(statusRaw);
+  const stageParsed = parseStageEntries(indexStageRaw);
+  const allConflicts = [...new Set([...parsedStatus.conflictPaths, ...stageParsed.unmergedPaths])];
+  if (unmergedRaw.length > 0 || allConflicts.length > 0) {
+    throw new Error(
+      `工作树存在未解决的合并冲突（${formatSamplePaths(allConflicts.length > 0 ? allConflicts : ["索引冲突"])}），无法完整保存冲突状态，请先解决冲突后再清理`,
+    );
+  }
+
+  const flaggedPaths = detectSpecialIndexFlagPaths(lsFilesVRaw);
+  if (flaggedPaths.length > 0) {
+    throw new Error(
+      `工作树包含 skip-worktree 或 assume-unchanged 标记的文件（${formatSamplePaths(flaggedPaths)}），Git 无法保证差异捕获完整，请先取消标记后再清理`,
+    );
+  }
+
+  // 绝不偷偷复制被忽略文件/目录：一旦检测到即保守拒绝自动与手动清理并保留工作树
+  if (parsedStatus.ignoredPaths.length > 0) {
+    throw new Error(
+      `工作树包含被 .gitignore 忽略的本地文件或目录（${formatSamplePaths(parsedStatus.ignoredPaths)}），恢复快照不会复制被忽略文件，已跳过删除并保留工作树；请先备份、移走或清理后再重试`,
+    );
+  }
+
+  // 递归核验所有子模块内部无未保存改动、未跟踪/被忽略文件、独立提交或未完成操作
+  const submoduleSummaries = await inspectSubmodulesSafety(worktreePath);
+
+  // 检查未跟踪条目（包含嵌套 Git 仓库检测，只接受常规文件与符号链接）
+  const lsOthersRaw = await gitExec(worktreePath, [
+    "ls-files",
+    "--others",
+    "--exclude-standard",
+    "-z",
+  ]);
+  const untrackedCandidates = [
+    ...new Set([...parsedStatus.untrackedPaths, ...lsOthersRaw.split("\0").filter(Boolean)]),
+  ].sort();
+  const nestedOrDirUntracked = untrackedCandidates.filter(
+    (rel) => rel.endsWith("/") || rel.endsWith("\\"),
+  );
+  if (nestedOrDirUntracked.length > 0) {
+    throw new Error(
+      `工作树包含嵌套的 Git 仓库或未跟踪目录（${formatSamplePaths(nestedOrDirUntracked)}），恢复快照无法安全捕获其内部数据，请先移走或处理后再清理`,
+    );
+  }
+
+  const untrackedFiles: { path: string; sha256: string; size: number }[] = [];
+  const untrackedSymlinks: { path: string; target: string }[] = [];
+  for (const rel of untrackedCandidates) {
+    assertSafeRelativePath(rel, "未跟踪文件");
+    const src = path.resolve(worktreePath, rel);
+    const srcStat = await lstat(src);
+    if (srcStat.isSymbolicLink()) {
+      const target = await readlink(src);
+      untrackedSymlinks.push({ path: rel, target });
+      continue;
+    }
+    if (srcStat.isDirectory()) {
+      throw new Error(
+        `工作树包含嵌套的 Git 仓库或未跟踪目录（${rel}），恢复快照无法安全捕获其内部数据，请先移走或处理后再清理`,
+      );
+    }
+    if (!srcStat.isFile()) {
+      throw new Error(`无法为非常规未跟踪条目创建恢复快照：${rel}`);
+    }
+    const srcBuf = await readFile(src);
+    untrackedFiles.push({ path: rel, sha256: sha256Buffer(srcBuf), size: srcBuf.length });
+  }
+
+  // 分离捕获暂存区补丁（HEAD -> index）与工作区补丁（index -> worktree）
+  const [stagedNameStatus, workingNameStatus] = await Promise.all([
+    gitExec(worktreePath, ["diff", "--cached", "--name-status", "--no-renames", "HEAD"]),
+    gitExec(worktreePath, ["diff", "--name-status", "--no-renames"]),
+  ]);
+  const stagedPatch =
+    stagedNameStatus.trim().length > 0
+      ? await gitExecBuffer(worktreePath, [
+          "diff",
+          "--cached",
+          "--binary",
+          "--full-index",
+          "--no-renames",
+          "HEAD",
+        ])
+      : Buffer.alloc(0);
+  if (stagedNameStatus.trim().length > 0 && stagedPatch.length === 0) {
+    throw new Error("检测到暂存区改动但无法生成完整 staged.patch，已跳过删除并保留工作树");
+  }
+  const workingPatch =
+    workingNameStatus.trim().length > 0
+      ? await gitExecBuffer(worktreePath, ["diff", "--binary", "--full-index", "--no-renames"])
+      : Buffer.alloc(0);
+  if (workingNameStatus.trim().length > 0 && workingPatch.length === 0) {
+    throw new Error("检测到工作区改动但无法生成完整 working.patch，已跳过删除并保留工作树");
+  }
+
+  const intentToAddPaths = [...new Set(parsedStatus.intentToAddPaths)].sort();
+  const fingerprint = sha256Buffer(
+    JSON.stringify({
+      headSha,
+      branch,
+      detached,
+      statusSha: sha256Buffer(statusRaw),
+      indexStageSha: sha256Buffer(indexStageRaw),
+      stagedPatchSha: sha256Buffer(stagedPatch),
+      workingPatchSha: sha256Buffer(workingPatch),
+      intentToAddPaths,
+      untrackedFiles,
+      untrackedSymlinks,
+      submoduleSummaries,
+    }),
+  );
+
+  return {
+    headSha,
+    branch,
+    detached,
+    indexStageRaw,
+    stagedPatch,
+    workingPatch,
+    intentToAddPaths,
+    untrackedFiles,
+    untrackedSymlinks,
+    fingerprint,
+  };
 }
 
 function buildRestoreSteps(snapshot: {
@@ -636,9 +1110,13 @@ function buildRestoreSteps(snapshot: {
   headSha: string;
   hasBundle: boolean;
   bundlePath?: string | undefined;
+  hasStagedPatch?: boolean | undefined;
+  stagedPatchPath?: string | undefined;
   hasWorkingPatch: boolean;
   workingPatchPath?: string | undefined;
+  intentToAddPaths?: readonly string[] | undefined;
   untrackedFiles: readonly { path: string }[];
+  untrackedSymlinks?: readonly { path: string; target: string }[] | undefined;
   snapshotDir: string;
 }): string[] {
   const steps: string[] = [];
@@ -648,10 +1126,21 @@ function buildRestoreSteps(snapshot: {
   steps.push(
     `git -C "${snapshot.repository}" worktree add -b "${snapshot.branch}" "${snapshot.originalPath}" ${snapshot.headSha}`,
   );
-  if (snapshot.hasWorkingPatch && snapshot.workingPatchPath) {
-    steps.push(`git -C "${snapshot.originalPath}" apply --binary "${snapshot.workingPatchPath}"`);
+  if (snapshot.hasStagedPatch && snapshot.stagedPatchPath) {
+    steps.push(
+      `git -C "${snapshot.originalPath}" apply --index --binary --whitespace=nowarn "${snapshot.stagedPatchPath}"`,
+    );
   }
-  if (snapshot.untrackedFiles.length > 0) {
+  if (snapshot.hasWorkingPatch && snapshot.workingPatchPath) {
+    steps.push(
+      `git -C "${snapshot.originalPath}" apply --binary --whitespace=nowarn "${snapshot.workingPatchPath}"`,
+    );
+  }
+  if (snapshot.intentToAddPaths && snapshot.intentToAddPaths.length > 0) {
+    const quoted = snapshot.intentToAddPaths.map((p) => `"${p}"`).join(" ");
+    steps.push(`git -C "${snapshot.originalPath}" add -N -- ${quoted}`);
+  }
+  if (snapshot.untrackedFiles.length > 0 || (snapshot.untrackedSymlinks?.length ?? 0) > 0) {
     steps.push(
       `Copy untracked files from "${path.join(snapshot.snapshotDir, "untracked")}" into "${snapshot.originalPath}"`,
     );
@@ -662,8 +1151,9 @@ function buildRestoreSteps(snapshot: {
 /**
  * 删除前保存并机械校验可恢复快照：
  * - 独有提交通过 git bundle 保存并用 `git bundle verify` 核验可完整取回；
- * - 未提交已跟踪改动通过 `git diff --binary HEAD` 保存并校验 SHA-256；
- * - 未跟踪文件逐个复制并双向校验大小与 SHA-256（符号链接记录目标）；
+ * - 暂存区改动通过 `staged.patch`（HEAD -> index）保存，工作区改动通过 `working.patch`（index -> worktree）保存；
+ * - 用临时 GIT_INDEX_FILE 机械验证两份补丁在 HEAD 上顺序可应用且暂存索引逐条目匹配；
+ * - 未跟踪文件逐个复制并双向校验大小与 SHA-256（符号链接记录目标，绝不复制被忽略文件）；
  * - 任一步失败即清理临时目录并抛错，调用方必须跳过删除并保留原工作树。
  */
 async function createVerifiedRecoverySnapshot(input: {
@@ -671,9 +1161,10 @@ async function createVerifiedRecoverySnapshot(input: {
   reason: "auto" | "manual";
   entry: ManagedWorktreeRegistryEntry;
   live: LiveGitStatus;
+  captured: CapturableWorktreeState;
   sourceTitle?: string | undefined;
 }): Promise<PlatformWorktreeRecoverySnapshot> {
-  const { sessionsDir, reason, entry, live } = input;
+  const { sessionsDir, reason, entry, live, captured } = input;
   const root = snapshotsRoot(sessionsDir);
   await mkdir(root, { recursive: true });
 
@@ -695,14 +1186,14 @@ async function createVerifiedRecoverySnapshot(input: {
     let needBundle = live.aheadCount > 0;
     if (!needBundle) {
       try {
-        await gitExec(entry.repository, ["merge-base", "--is-ancestor", live.headSha, "HEAD"]);
+        await gitExec(entry.repository, ["merge-base", "--is-ancestor", captured.headSha, "HEAD"]);
       } catch {
         needBundle = true;
       }
     }
     if (needBundle) {
       const bundleArgs =
-        live.baseSha && live.baseSha !== live.headSha
+        live.baseSha && live.baseSha !== captured.headSha
           ? ["bundle", "create", bundleTmp, `${live.baseSha}..HEAD`]
           : ["bundle", "create", bundleTmp, "HEAD"];
       try {
@@ -720,24 +1211,35 @@ async function createVerifiedRecoverySnapshot(input: {
       bundlePathFinal = path.join(finalDir, "commits.bundle");
     }
 
-    // 捕获所有已跟踪的未提交改动（含暂存区与工作区、含二进制改动）
+    // 1. 写入并校验暂存区补丁 staged.patch（HEAD -> index）
+    let hasStagedPatch = false;
+    let stagedPatchPathFinal: string | undefined;
+    let stagedPatchSha256: string | undefined;
+    const stagedTmp = path.join(tmpDir, "staged.patch");
+    if (captured.stagedPatch.length > 0) {
+      await writeFile(stagedTmp, captured.stagedPatch);
+      const written = await readFile(stagedTmp);
+      const expectedHash = sha256Buffer(captured.stagedPatch);
+      const actualHash = sha256Buffer(written);
+      if (actualHash !== expectedHash || written.length !== captured.stagedPatch.length) {
+        throw new Error("恢复快照 staged.patch 写入校验不一致");
+      }
+      hasStagedPatch = true;
+      stagedPatchPathFinal = path.join(finalDir, "staged.patch");
+      stagedPatchSha256 = expectedHash;
+    }
+
+    // 2. 写入并校验工作区补丁 working.patch（index -> worktree）
     let hasWorkingPatch = false;
     let workingPatchPathFinal: string | undefined;
     let workingPatchSha256: string | undefined;
-    const trackedDirtyNames = (
-      await gitExec(entry.worktreePath, ["diff", "--name-only", "HEAD"])
-    ).trim();
-    if (trackedDirtyNames.length > 0) {
-      const patchBuf = await gitExecBuffer(entry.worktreePath, ["diff", "--binary", "HEAD"]);
-      if (patchBuf.length === 0) {
-        throw new Error("恢复快照 working.patch 校验失败：检测到已跟踪改动但补丁为空");
-      }
-      const patchTmp = path.join(tmpDir, "working.patch");
-      await writeFile(patchTmp, patchBuf);
-      const written = await readFile(patchTmp);
-      const expectedHash = sha256Buffer(patchBuf);
+    const workingTmp = path.join(tmpDir, "working.patch");
+    if (captured.workingPatch.length > 0) {
+      await writeFile(workingTmp, captured.workingPatch);
+      const written = await readFile(workingTmp);
+      const expectedHash = sha256Buffer(captured.workingPatch);
       const actualHash = sha256Buffer(written);
-      if (actualHash !== expectedHash || written.length !== patchBuf.length) {
+      if (actualHash !== expectedHash || written.length !== captured.workingPatch.length) {
         throw new Error("恢复快照 working.patch 写入校验不一致");
       }
       hasWorkingPatch = true;
@@ -745,43 +1247,68 @@ async function createVerifiedRecoverySnapshot(input: {
       workingPatchSha256 = expectedHash;
     }
 
-    // 捕获所有未跟踪且未被忽略的文件，逐个做大小与 SHA-256 校验
-    const untrackedRaw = await gitExec(entry.worktreePath, [
-      "ls-files",
-      "--others",
-      "--exclude-standard",
-      "-z",
-    ]);
-    const untrackedList = untrackedRaw.split("\0").filter(Boolean);
+    // 3. 机械验证：用独立临时 GIT_INDEX_FILE 证明 staged.patch 还原出完全一致的索引，且 working.patch 可顺序叠加
+    if (hasStagedPatch || hasWorkingPatch) {
+      const verifyIndex = path.join(tmpDir, ".verify-index");
+      const verifyEnv: NodeJS.ProcessEnv = { GIT_INDEX_FILE: verifyIndex };
+      try {
+        await gitExec(entry.worktreePath, ["read-tree", captured.headSha], 30_000, verifyEnv);
+        if (hasStagedPatch) {
+          await gitExec(
+            entry.worktreePath,
+            ["apply", "--cached", "--binary", "--whitespace=nowarn", stagedTmp],
+            30_000,
+            verifyEnv,
+          );
+        }
+        const verifiedStageRaw = await gitExec(
+          entry.worktreePath,
+          ["ls-files", "--stage", "-z"],
+          30_000,
+          verifyEnv,
+        );
+        const itaSet = new Set(captured.intentToAddPaths);
+        if (
+          normalizeStageWithoutIntentToAdd(verifiedStageRaw, itaSet) !==
+          normalizeStageWithoutIntentToAdd(captured.indexStageRaw, itaSet)
+        ) {
+          throw new Error("恢复快照暂存区索引机械核验不一致，无法保证完整恢复");
+        }
+        if (hasWorkingPatch) {
+          await gitExec(
+            entry.worktreePath,
+            ["apply", "--cached", "--binary", "--whitespace=nowarn", workingTmp],
+            30_000,
+            verifyEnv,
+          );
+        }
+      } finally {
+        await rm(verifyIndex, { force: true }).catch(() => undefined);
+      }
+    }
+
+    // 4. 复制已核验的未跟踪文件（绝不含被忽略文件），双向校验大小与 SHA-256
     const untrackedFiles: { path: string; sha256: string; size: number }[] = [];
-    const untrackedSymlinks: { path: string; target: string }[] = [];
+    const untrackedSymlinks = [...captured.untrackedSymlinks];
     const untrackedTmpRoot = path.join(tmpDir, "untracked");
 
-    for (const rel of untrackedList) {
-      if (path.isAbsolute(rel) || path.win32.isAbsolute(rel) || rel.split(/[\\/]/).includes("..")) {
-        throw new Error(`不安全的未跟踪文件路径：${rel}`);
-      }
-      const src = path.resolve(entry.worktreePath, rel);
-      const srcStat = await lstat(src);
-      if (srcStat.isSymbolicLink()) {
-        const target = await readlink(src);
-        untrackedSymlinks.push({ path: rel, target });
-        continue;
-      }
-      if (!srcStat.isFile()) {
-        throw new Error(`无法为非常规未跟踪条目创建恢复快照：${rel}`);
-      }
-      const dst = path.resolve(untrackedTmpRoot, rel);
+    for (const fileMeta of captured.untrackedFiles) {
+      assertSafeRelativePath(fileMeta.path, "未跟踪文件");
+      const src = path.resolve(entry.worktreePath, fileMeta.path);
+      const dst = path.resolve(untrackedTmpRoot, fileMeta.path);
       await mkdir(path.dirname(dst), { recursive: true });
       const srcBuf = await readFile(src);
+      const srcHash = sha256Buffer(srcBuf);
+      if (srcHash !== fileMeta.sha256 || srcBuf.length !== fileMeta.size) {
+        throw new Error(`未跟踪文件在快照期间发生变化：${fileMeta.path}`);
+      }
       await copyFile(src, dst);
       const dstBuf = await readFile(dst);
-      const srcHash = sha256Buffer(srcBuf);
       const dstHash = sha256Buffer(dstBuf);
-      if (srcHash !== dstHash || srcBuf.length !== dstBuf.length) {
-        throw new Error(`未跟踪文件快照校验失败：${rel}`);
+      if (dstHash !== srcHash || dstBuf.length !== srcBuf.length) {
+        throw new Error(`未跟踪文件快照校验失败：${fileMeta.path}`);
       }
-      untrackedFiles.push({ path: rel, sha256: srcHash, size: srcBuf.length });
+      untrackedFiles.push({ path: fileMeta.path, sha256: srcHash, size: srcBuf.length });
     }
 
     const projectName = path.basename(entry.repository);
@@ -794,9 +1321,9 @@ async function createVerifiedRecoverySnapshot(input: {
       repository: entry.repository,
       projectName,
       originalPath: entry.worktreePath,
-      branch: live.branch,
+      branch: captured.branch,
       ownsBranch: entry.ownsBranch,
-      headSha: live.headSha,
+      headSha: captured.headSha,
       ...(live.baseSha ? { baseSha: live.baseSha } : {}),
       sessionId: entry.sessionId,
       ...(entry.childSessionId !== undefined ? { childSessionId: entry.childSessionId } : {}),
@@ -805,22 +1332,33 @@ async function createVerifiedRecoverySnapshot(input: {
       dirty: live.dirty,
       hasBundle,
       ...(bundlePathFinal !== undefined ? { bundlePath: bundlePathFinal } : {}),
+      hasStagedPatch,
+      ...(stagedPatchPathFinal !== undefined ? { stagedPatchPath: stagedPatchPathFinal } : {}),
+      ...(stagedPatchSha256 !== undefined ? { stagedPatchSha256 } : {}),
       hasWorkingPatch,
       ...(workingPatchPathFinal !== undefined ? { workingPatchPath: workingPatchPathFinal } : {}),
       ...(workingPatchSha256 !== undefined ? { workingPatchSha256 } : {}),
+      ...(captured.intentToAddPaths.length > 0
+        ? { intentToAddPaths: captured.intentToAddPaths }
+        : {}),
+      stateFingerprint: captured.fingerprint,
       untrackedFiles,
       untrackedSymlinks,
       snapshotDir: finalDir,
       restoreSteps: buildRestoreSteps({
         repository: entry.repository,
         originalPath: entry.worktreePath,
-        branch: live.branch,
-        headSha: live.headSha,
+        branch: captured.branch,
+        headSha: captured.headSha,
         hasBundle,
         bundlePath: bundlePathFinal,
+        hasStagedPatch,
+        stagedPatchPath: stagedPatchPathFinal,
         hasWorkingPatch,
         workingPatchPath: workingPatchPathFinal,
+        intentToAddPaths: captured.intentToAddPaths,
         untrackedFiles,
+        untrackedSymlinks,
         snapshotDir: finalDir,
       }),
     };
@@ -831,7 +1369,11 @@ async function createVerifiedRecoverySnapshot(input: {
     const verifyManifest = JSON.parse(
       await readFile(manifestTmp, "utf8"),
     ) as PlatformWorktreeRecoverySnapshot;
-    if (verifyManifest.id !== snapshotId || verifyManifest.headSha !== live.headSha) {
+    if (
+      verifyManifest.id !== snapshotId ||
+      verifyManifest.headSha !== captured.headSha ||
+      verifyManifest.stateFingerprint !== captured.fingerprint
+    ) {
       throw new Error("恢复快照 manifest 核验失败");
     }
 
@@ -1039,8 +1581,10 @@ export async function describeManagedWorktrees(
  * 1. 按 id 加并发锁；
  * 2. 复查归属（拒绝非托管副本与主检出）；
  * 3. 复查实时状态（使用中跳过；自动删除时置顶跳过）；
- * 4. 删除前保存并核验恢复快照（自动删除恒保存，手动删除在有独有提交/本地改动或显式要求时保存）；
- *    快照不能完整保存时跳过删除并保留原件。
+ * 4. 无论自动还是手动，执行全量安全与可捕获性检查（拒绝被忽略文件/目录、脏子模块或未捕获 Git 状态）；
+ * 5. 删除前保存并核验恢复快照（自动删除恒保存，手动删除在有独有提交/本地改动或显式要求时保存）；
+ *    快照不能完整保存时跳过删除并保留原件；
+ * 6. 真正删除前重新核对保护条件、归属与工作树状态指纹，与快照不一致时中止删除并保留原工作树。
  */
 export async function deleteManagedWorktrees(
   sessionsDir: string,
@@ -1049,6 +1593,14 @@ export async function deleteManagedWorktrees(
     ids: readonly string[];
     reason: "auto" | "manual";
     saveSnapshot?: boolean | undefined;
+    /** 仅用于确定性竞争测试：在最终删除前复核之前触发回调 */
+    beforeFinalRemoveCheck?:
+      | ((ctx: {
+          id: string;
+          worktreePath: string;
+          snapshot?: PlatformWorktreeRecoverySnapshot | undefined;
+        }) => Promise<void> | void)
+      | undefined;
   },
 ): Promise<PlatformWorktreeCleanupResult> {
   const result: PlatformWorktreeCleanupResult = { deleted: [], skipped: [], failed: [] };
@@ -1134,19 +1686,29 @@ export async function deleteManagedWorktrees(
           };
         }
 
-        const legacy = entry.childSessionId ? legacyByChildId.get(entry.childSessionId) : undefined;
-        let live: LiveGitStatus;
+        // 无条件执行安全与可捕获性检查（覆盖自动与手动清理，绝不误删被忽略文件、脏子模块或未支持 Git 状态）
+        const fallbackBranch = wtListed.branch ?? entry.branch;
+        let captured: CapturableWorktreeState;
         try {
-          live = await inspectWorktreeLiveGit(
-            mainRepoReal,
-            wtReal,
-            wtListed.branch ?? entry.branch,
-            legacy,
-          );
+          captured = await inspectWorktreeCapturableState(wtReal, fallbackBranch);
         } catch (cause) {
           return {
             id,
-            branch: entry.branch,
+            branch: fallbackBranch,
+            path: wtReal,
+            status: "skipped_snapshot_failed",
+            error: `无法安全保存工作树本地状态，已跳过删除并保留原工作树：${cause instanceof Error ? cause.message : String(cause)}`,
+          };
+        }
+
+        const legacy = entry.childSessionId ? legacyByChildId.get(entry.childSessionId) : undefined;
+        let live: LiveGitStatus;
+        try {
+          live = await inspectWorktreeLiveGit(mainRepoReal, wtReal, fallbackBranch, legacy);
+        } catch (cause) {
+          return {
+            id,
+            branch: captured.branch,
             path: wtReal,
             status: "failed",
             error: cause instanceof Error ? cause.message : String(cause),
@@ -1168,6 +1730,7 @@ export async function deleteManagedWorktrees(
               reason: input.reason,
               entry: { ...entry, repository: mainRepoReal, worktreePath: wtReal },
               live,
+              captured,
               sourceTitle: session.title,
             });
           } catch (cause) {
@@ -1181,6 +1744,114 @@ export async function deleteManagedWorktrees(
           }
         }
 
+        const discardPendingSnapshot = async () => {
+          if (snapshot !== undefined) {
+            await rm(snapshot.snapshotDir, { recursive: true, force: true }).catch(() => undefined);
+          }
+        };
+
+        // 允许确定性测试在快照后、最终复核前注入并发变更或状态切换
+        if (input.beforeFinalRemoveCheck !== undefined) {
+          await input.beforeFinalRemoveCheck({ id, worktreePath: wtReal, snapshot });
+        }
+
+        // 删除前最终复核：重新核对托管归属、保护条件与工作树状态指纹，确认与快照完全一致
+        const recheckManaged = await mergedManagedEntries(sessionsDir);
+        const latestEntry = recheckManaged.entries.find((item) => item.id === id);
+        if (latestEntry === undefined) {
+          await discardPendingSnapshot();
+          return {
+            id,
+            branch: live.branch,
+            path: wtReal,
+            status: "not_found",
+            error: "删除前复核发现工作树已不在托管清单中",
+          };
+        }
+        const recheckWtReal = await canonicalPath(latestEntry.worktreePath);
+        if (
+          pathKey(recheckWtReal) !== pathKey(wtReal) ||
+          pathKey(mainRepoReal) === pathKey(recheckWtReal)
+        ) {
+          await discardPendingSnapshot();
+          return {
+            id,
+            branch: live.branch,
+            path: wtReal,
+            status: "failed",
+            error: "删除前复核发现工作树归属路径已变化，已取消删除",
+          };
+        }
+        const recheckWtMap = await parseRepoWorktreeList(mainRepoReal).catch(() => null);
+        const recheckListed = recheckWtMap?.get(pathKey(wtReal));
+        if (recheckListed === undefined || !existsSync(wtReal)) {
+          await discardPendingSnapshot();
+          await unregisterManagedWorktree(sessionsDir, id);
+          return {
+            id,
+            branch: live.branch,
+            path: wtReal,
+            status: "not_found",
+            error: "删除前复核发现工作树目录已不存在",
+          };
+        }
+
+        const recheckActive = await inspector.isActive({
+          id: latestEntry.id,
+          kind: latestEntry.kind,
+          worktreePath: wtReal,
+          sessionId: latestEntry.sessionId,
+          childSessionId: latestEntry.childSessionId,
+        });
+        if (recheckActive) {
+          await discardPendingSnapshot();
+          return {
+            id,
+            branch: live.branch,
+            path: wtReal,
+            status: "skipped_protected",
+            error: "删除前复核发现工作树已进入使用中状态，已取消删除并保留原工作树",
+          };
+        }
+        if (input.reason === "auto" && latestEntry.pinned) {
+          await discardPendingSnapshot();
+          return {
+            id,
+            branch: live.branch,
+            path: wtReal,
+            status: "skipped_protected",
+            error: "删除前复核发现工作树已被置顶，已取消自动删除并保留原工作树",
+          };
+        }
+
+        let recheckedState: CapturableWorktreeState;
+        try {
+          recheckedState = await inspectWorktreeCapturableState(
+            wtReal,
+            recheckListed.branch ?? latestEntry.branch,
+          );
+        } catch (cause) {
+          await discardPendingSnapshot();
+          return {
+            id,
+            branch: live.branch,
+            path: wtReal,
+            status: "skipped_snapshot_failed",
+            error: `删除前复核发现无法安全捕获的本地状态，已取消删除并保留原工作树：${cause instanceof Error ? cause.message : String(cause)}`,
+          };
+        }
+        if (recheckedState.fingerprint !== captured.fingerprint) {
+          await discardPendingSnapshot();
+          return {
+            id,
+            branch: live.branch,
+            path: wtReal,
+            status: "skipped_snapshot_failed",
+            error:
+              "删除前复核发现工作树状态在快照后发生变化，为避免丢失最新本地改动已取消删除并保留原工作树，请重试",
+          };
+        }
+
         try {
           try {
             await gitExec(mainRepoReal, ["worktree", "remove", "--force", wtReal]);
@@ -1189,19 +1860,25 @@ export async function deleteManagedWorktrees(
             await gitExec(mainRepoReal, ["worktree", "prune"]);
           }
           let removedBranch = false;
-          if (entry.ownsBranch && live.branch) {
-            try {
-              await gitExec(mainRepoReal, ["branch", "-D", live.branch]);
-              removedBranch = true;
-            } catch (cause) {
-              const refOut = await gitExec(mainRepoReal, [
-                "for-each-ref",
-                "--format=%(refname)",
-                `refs/heads/${live.branch}`,
-              ]).catch(() => {
-                throw cause;
-              });
-              if (refOut.trim() !== "") throw cause;
+          if (latestEntry.ownsBranch && live.branch && !captured.detached) {
+            const branchRef = `refs/heads/${live.branch}`;
+            const currentBranchSha = (
+              await gitExec(mainRepoReal, ["rev-parse", "--verify", branchRef]).catch(() => "")
+            ).trim();
+            if (currentBranchSha === captured.headSha) {
+              try {
+                await gitExec(mainRepoReal, ["branch", "-D", live.branch]);
+                removedBranch = true;
+              } catch (cause) {
+                const refOut = await gitExec(mainRepoReal, [
+                  "for-each-ref",
+                  "--format=%(refname)",
+                  branchRef,
+                ]).catch(() => {
+                  throw cause;
+                });
+                if (refOut.trim() !== "") throw cause;
+              }
             }
           }
           if (legacy?.metadataPath) {
@@ -1341,7 +2018,15 @@ export async function restoreWorktreeRecoverySnapshot(
   }
   await gitExec(mainRepoReal, ["rev-parse", "--verify", `${manifest.headSha}^{commit}`]);
 
-  // 2. 校验 patch 与 untracked 文件完整性
+  // 2. 校验 staged.patch、working.patch 与 untracked 文件完整性
+  let stagedPatchBuf: Buffer | undefined;
+  if (manifest.hasStagedPatch === true) {
+    const stagedFile = path.join(snapDir, "staged.patch");
+    stagedPatchBuf = await readFile(stagedFile);
+    if (manifest.stagedPatchSha256 && sha256Buffer(stagedPatchBuf) !== manifest.stagedPatchSha256) {
+      throw new Error("恢复快照暂存区补丁校验失败，文件已损坏");
+    }
+  }
   let patchBuf: Buffer | undefined;
   if (manifest.hasWorkingPatch) {
     const patchFile = path.join(snapDir, "working.patch");
@@ -1351,11 +2036,18 @@ export async function restoreWorktreeRecoverySnapshot(
     }
   }
   for (const file of manifest.untrackedFiles) {
+    assertSafeRelativePath(file.path, "未跟踪文件");
     const stored = path.join(snapDir, "untracked", file.path);
     const data = await readFile(stored);
     if (sha256Buffer(data) !== file.sha256) {
       throw new Error(`恢复快照未跟踪文件校验失败：${file.path}`);
     }
+  }
+  for (const link of manifest.untrackedSymlinks) {
+    assertSafeRelativePath(link.path, "未跟踪符号链接");
+  }
+  for (const ita of manifest.intentToAddPaths ?? []) {
+    assertSafeRelativePath(ita, "intent-to-add 文件");
   }
 
   // 3. 创建还原工作树
@@ -1381,13 +2073,32 @@ export async function restoreWorktreeRecoverySnapshot(
   ]);
 
   const realTarget = await canonicalPath(targetPath);
-  let appliedPatch = false;
+  let appliedStagedPatch = false;
+  let appliedWorkingPatch = false;
   try {
-    // 4. 应用未提交已跟踪改动
+    // 4a. 先应用暂存区补丁到索引与工作区（HEAD -> index）
+    if (manifest.hasStagedPatch === true && stagedPatchBuf !== undefined) {
+      const stagedFile = path.join(snapDir, "staged.patch");
+      await gitExec(realTarget, [
+        "apply",
+        "--index",
+        "--binary",
+        "--whitespace=nowarn",
+        stagedFile,
+      ]);
+      appliedStagedPatch = true;
+    }
+
+    // 4b. 再仅对工作区应用未暂存补丁（index -> worktree），保持索引版本不变
     if (manifest.hasWorkingPatch && patchBuf !== undefined) {
       const patchFile = path.join(snapDir, "working.patch");
-      await gitExec(realTarget, ["apply", "--binary", patchFile]);
-      appliedPatch = true;
+      await gitExec(realTarget, ["apply", "--binary", "--whitespace=nowarn", patchFile]);
+      appliedWorkingPatch = true;
+    }
+
+    // 4c. 还原 intent-to-add 标记（git add -N）
+    if (manifest.intentToAddPaths !== undefined && manifest.intentToAddPaths.length > 0) {
+      await gitExec(realTarget, ["add", "-N", "--", ...manifest.intentToAddPaths]);
     }
 
     // 5. 还原未跟踪文件与符号链接
@@ -1419,7 +2130,9 @@ export async function restoreWorktreeRecoverySnapshot(
       worktreePath: realTarget,
       branch: restoredBranch,
       headSha: manifest.headSha,
-      appliedPatch,
+      appliedPatch: appliedStagedPatch || appliedWorkingPatch,
+      appliedStagedPatch,
+      appliedWorkingPatch,
       restoredUntrackedCount: manifest.untrackedFiles.length + manifest.untrackedSymlinks.length,
     };
   } catch (cause) {

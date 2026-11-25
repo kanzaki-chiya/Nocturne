@@ -146,9 +146,14 @@ export interface WorktreeRecoverySnapshot {
   dirty: boolean;
   hasBundle: boolean;
   bundlePath?: string | undefined;
+  hasStagedPatch?: boolean | undefined;
+  stagedPatchPath?: string | undefined;
+  stagedPatchSha256?: string | undefined;
   hasWorkingPatch: boolean;
   workingPatchPath?: string | undefined;
   workingPatchSha256?: string | undefined;
+  intentToAddPaths?: string[] | undefined;
+  stateFingerprint?: string | undefined;
   untrackedFiles: { path: string; sha256: string; size: number }[];
   untrackedSymlinks: { path: string; target: string }[];
   snapshotDir: string;
@@ -185,6 +190,8 @@ export interface WorktreeRestoreResult {
   branch: string;
   headSha: string;
   appliedPatch: boolean;
+  appliedStagedPatch?: boolean | undefined;
+  appliedWorkingPatch?: boolean | undefined;
   restoredUntrackedCount: number;
 }
 
