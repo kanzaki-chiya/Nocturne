@@ -158,6 +158,29 @@ describe("runtime.* 方法映射", () => {
     await h.served;
   });
 
+  it("runtime.createSession 忽略外部传入的 sessionMcp（仅限进程内宿主注入）", async () => {
+    const h = await connect({ scripts: [textScript("rpc-ok")] });
+    const opened = await h.client.call("runtime.createSession", {
+      model: MODEL,
+      // 模拟外部 RPC 客户端试图注入非法的宿主 MCP（若被透传会因 strictHostMcp 失败）
+      sessionMcp: {
+        strict: true,
+        servers: [
+          {
+            name: "injected_via_rpc",
+            origin: "host",
+            type: "stdio",
+            command: "__nonexistent_binary__",
+          },
+        ],
+      },
+    } as never);
+    expect(opened.sessionId).toBeTruthy();
+    await h.client.call("session.close", { sessionId: opened.sessionId });
+    h.client.close();
+    await h.served;
+  });
+
   it("searchSessions 校验 query，并由同一连接的新查询中止旧查询", async () => {
     const h = await connect();
     await expect(h.client.call("runtime.searchSessions", {} as never)).rejects.toMatchObject({

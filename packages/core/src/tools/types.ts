@@ -441,7 +441,7 @@ export interface PluginMcpCacheKey {
 /** 合并配置层后交给装配点的单服务器配置 */
 export interface McpServerConfig extends McpServerEntry {
   name: string;
-  origin: "app" | "user" | "project" | "plugin";
+  origin: "app" | "user" | "project" | "plugin" | "host";
   /** 定义该条目的配置文件所在目录；相对 cwd 按 workspaceRoot 解析 */
   dir?: string | undefined;
   /** 仅插件 MCP 服务器设置：所属插件 id（ADR-0101） */
@@ -504,6 +504,10 @@ export interface McpOpenScope {
   credentials?:
     | { get(id: string, options?: { fresh?: boolean | undefined }): Promise<string | undefined> }
     | undefined;
+  /** 仅对应 origin === "host" 服务器的会话级内存凭据（ADR-0120 §3）；与用户凭据库隔离 */
+  hostCredentials?: { get(id: string): Promise<string | undefined> } | undefined;
+  /** 为 true 时，宿主服务器同名冲突（不区分大小写）立即报错而非静默跳过 */
+  strictHostMcp?: boolean | undefined;
   /** 发出 mcp.server 临时事件 */
   emitServer(payload: McpServerPayload): void;
   /** 发出 runtime.warning 临时事件 */
@@ -525,6 +529,8 @@ export interface McpToolDiff {
 export interface McpSession {
   /** 等待初始启动结束；中止只停止等待，不取消后台连接。 */
   startup(signal?: AbortSignal): Promise<void>;
+  /** 仅等待 origin === "host" 服务器的初始启动结束（ADR-0120 §3）。 */
+  startupHost?(signal?: AbortSignal): Promise<void>;
   /**
    * 边界准备（可选）：Runtime 在每个主 Turn 开始，以及用户插话写入后、下一次
    * 模型请求前，于 `applyPendingTools()` 之前调用。用于对失败且已过冷却的

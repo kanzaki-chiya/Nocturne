@@ -157,6 +157,48 @@ interface Server {
   callerMetadata?: boolean | undefined;
   /** 运行时来源提供的条目：reconcile 时保留，不因用户配置重载被移除 */
   fromRuntime?: boolean | undefined;
+  /** 会话级宿主注入条目（ADR-0120 §3）：reconcile 时保留，凭据仅来自 hostCredentials */
+  fromHost?: boolean | undefined;
+}
+
+const HOST_SECRET_KEY_RE =
+  /(?:auth|token|secret|password|passwd|pwd|key|cookie|cred|bearer|private|signature|hmac|jwt)/i;
+const HOST_AUTH_VALUE_RE = /^(?:Bearer|Basic|Token)\s+(\S+)$/i;
+const NON_SECRET_HTTP_HEADERS = new Set([
+  "accept",
+  "accept-encoding",
+  "accept-language",
+  "cache-control",
+  "connection",
+  "content-type",
+  "host",
+  "user-agent",
+]);
+const NON_SECRET_ID_HEADER_RE = /^x-[a-z0-9-]*-id$/i;
+
+function recordHostSecret(st: Server, key: string, secret: string): void {
+  if (secret.length === 0) return;
+  const authMatch = HOST_AUTH_VALUE_RE.exec(secret);
+  if (authMatch !== null) {
+    st.secrets.push(secret);
+    const bare = authMatch[1];
+    if (bare !== undefined && bare.length >= 3) st.secrets.push(bare);
+    return;
+  }
+  if (HOST_SECRET_KEY_RE.test(key)) {
+    if (secret.length >= 3) st.secrets.push(secret);
+    return;
+  }
+  if (st.cfg.type === "http") {
+    const lower = key.toLowerCase();
+    if (
+      !NON_SECRET_HTTP_HEADERS.has(lower) &&
+      !NON_SECRET_ID_HEADER_RE.test(lower) &&
+      secret.length >= 4
+    ) {
+      st.secrets.push(secret);
+    }
+  }
 }
 
 /** 受信运行时来源在工具定义 _meta 里声明「不改动工作区文件」的键 */
@@ -177,13 +219,18 @@ async function expandEnv(
   for (const [key, value] of Object.entries(env)) {
     if (typeof value !== "string") {
       const id = `mcp/${st.cfg.name}/${st.cfg.type === "http" ? key.toLowerCase() : key}`;
-      const secret = await scope.credentials?.get(id, { fresh: true });
+      // 宿主注入服务器只读会话级内存凭据，严禁回退用户凭据库（ADR-0120 §3）
+      const secret =
+        st.cfg.origin === "host"
+          ? await scope.hostCredentials?.get(id)
+          : await scope.credentials?.get(id, { fresh: true });
       if (secret === undefined) {
         st.code = "mcp_secret_missing";
         st.error = `MCP 服务器 ${st.cfg.name} 缺少凭据 ${key}`;
         throw new Error(`MCP 服务器 ${st.cfg.name} 缺少凭据 ${key}`);
       }
-      st.secrets.push(secret);
+      if (st.cfg.origin === "host") recordHostSecret(st, key, secret);
+      else st.secrets.push(secret);
       out[key] = secret;
       continue;
     }
@@ -651,7 +698,9 @@ async function connectServer(scope: McpOpenScope, st: Server, run: number): Prom
   st.fingerprint = fingerprint(st.cfg, values);
   st.httpStatus = undefined;
   st.code = undefined;
-  if (st.cfg.type === "http") st.secrets.push(...Object.values(values ?? {}));
+  if (st.cfg.type === "http" && st.cfg.origin !== "host") {
+    st.secrets.push(...Object.values(values ?? {}));
+  }
   let proc: PipeProcess | undefined;
   let transport: StdioPipeTransport | StreamableHTTPClientTransport;
   if (st.cfg.type === "http") {
@@ -1200,6 +1249,11 @@ export function mapContent(res: CallToolResult | Record<string, unknown>): {
   const output: Record<string, unknown> = { content: meta };
   if ("structuredContent" in res && res.structuredContent !== undefined) {
     output.structured = res.structuredContent;
+    // 仅返回 structuredContent 且 content 无文本块时（如带 outputSchema 的宿主 MCP），
+    // 序列化为文本供模型消费；后续仍走 safeText 脱敏与执行器统一裁剪。
+    if (texts.length === 0 && res.structuredContent !== null) {
+      texts.push(JSON.stringify(res.structuredContent));
+    }
   }
   return {
     text: texts.join("\n"),
@@ -1610,12 +1664,39 @@ export function createMcpConnector(options?: {
           connection.status().map((server) => server.name.toLowerCase()),
         ),
       ]);
+      const hostConfigs = effectiveScope.servers.filter(
+        (cfg) => cfg.enabled !== false && cfg.origin === "host",
+      );
+      const hostNames = new Set(hostConfigs.map((cfg) => cfg.name.toLowerCase()));
+      if (effectiveScope.strictHostMcp === true && hostConfigs.length > 0) {
+        const seenHost = new Set<string>();
+        const nonHostNames = new Set(
+          effectiveScope.servers
+            .filter((cfg) => cfg.enabled !== false && cfg.origin !== "host")
+            .map((cfg) => cfg.name.toLowerCase()),
+        );
+        const failConflict = async (message: string): Promise<never> => {
+          await Promise.all(runtimeClosers.map((fn) => fn().catch(() => undefined)));
+          throw new Error(message);
+        };
+        for (const cfg of hostConfigs) {
+          const key = cfg.name.toLowerCase();
+          if (seenHost.has(key)) {
+            await failConflict(`宿主 MCP 服务器名称重复：${cfg.name}`);
+          }
+          seenHost.add(key);
+          if (runtimeNames.has(key) || nonHostNames.has(key)) {
+            await failConflict(`宿主 MCP 服务器名称与当前会话已有 MCP 配置冲突：${cfg.name}`);
+          }
+        }
+      }
       const removed: string[] = [];
       const servers: Server[] = effectiveScope.servers
         .filter((cfg) => cfg.enabled !== false)
         .filter((cfg) => {
           // 运行时来源已提供同名条目时跳过用户配置，避免普通配置覆盖受信来源
           if (
+            cfg.origin !== "host" &&
             runtimeNames.has(cfg.name.toLowerCase()) &&
             !runtimeServers.some((s) => s.cfg === cfg)
           ) {
@@ -1639,6 +1720,7 @@ export function createMcpConnector(options?: {
             run: 0,
             callerMetadata: rt?.callerMetadata,
             fromRuntime: rt !== undefined,
+            fromHost: cfg.origin === "host",
           };
         });
       // 插件 MCP 服务器先查工具缓存（ADR-0100 修订第 4 节）：命中直接进入 standby 并注册工具，不启动进程
@@ -1677,94 +1759,103 @@ export function createMcpConnector(options?: {
         }),
       );
       // 并行启动；单服务器失败只影响自身（降级为无该服务器工具）
-      const initialStartup = Promise.all(
-        servers.map(async (st) => {
-          if (st.state === "standby") return;
-          effectiveScope.emitServer({ name: st.cfg.name, state: "starting" });
+      const startPromises = servers.map(async (st) => {
+        if (st.state === "standby") return;
+        effectiveScope.emitServer({ name: st.cfg.name, state: "starting" });
+        effectiveScope.diagnostics?.record("mcp.event", {
+          server: st.cfg.name,
+          state: "starting",
+        });
+        try {
+          const run = ++st.run;
+          await connectServer(effectiveScope, st, run);
+          if (!isCurrentAttempt(st, run)) return;
+          await persistPluginCache(effectiveScope, st);
+          if (!isCurrentAttempt(st, run)) return;
+          st.state = "ready";
+          st.error = undefined;
+          st.announced = false;
+          effectiveScope.emitServer({
+            name: st.cfg.name,
+            state: "ready",
+            toolCount: st.staged?.size ?? 0,
+          });
           effectiveScope.diagnostics?.record("mcp.event", {
             server: st.cfg.name,
-            state: "starting",
+            state: "ready",
+            toolCount: st.staged?.size ?? 0,
           });
-          try {
-            const run = ++st.run;
-            await connectServer(effectiveScope, st, run);
-            if (!isCurrentAttempt(st, run)) return;
-            await persistPluginCache(effectiveScope, st);
-            if (!isCurrentAttempt(st, run)) return;
-            st.state = "ready";
-            st.error = undefined;
-            st.announced = false;
-            effectiveScope.emitServer({
-              name: st.cfg.name,
-              state: "ready",
-              toolCount: st.staged?.size ?? 0,
-            });
-            effectiveScope.diagnostics?.record("mcp.event", {
-              server: st.cfg.name,
-              state: "ready",
-              toolCount: st.staged?.size ?? 0,
-            });
-          } catch (e) {
-            if (st.closed && st.controller?.signal.aborted) return;
-            st.state = "failed";
-            st.error =
-              st.code === "mcp_secret_missing"
-                ? safeText(st, toolError(e))
-                : st.cfg.type === "http"
-                  ? safeText(st, httpFailureReason(e, st.httpStatus))
-                  : "连接失败，请检查服务器配置、连接和凭据";
-            if (st.cfg.type === "http") {
-              st.restarts += 1;
-              st.retryAt = Date.now() + HTTP_RETRY_COOLDOWN_MS;
-            }
-            effectiveScope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
-            effectiveScope.diagnostics?.record("mcp.event", {
-              server: st.cfg.name,
-              state: "failed",
-              error: safeText(st, diagnosticError(e)),
-              httpStatus: httpStatusOf(e, st),
-            });
-            if (st.announced !== true) {
-              st.announced = true;
-              effectiveScope.warn(
-                st.code === "mcp_secret_missing" ? "mcp_secret_missing" : "mcp_server_failed",
-                `MCP 服务器 ${st.cfg.name} 启动失败：${st.error}`,
-              );
-            }
+        } catch (e) {
+          if (st.closed && st.controller?.signal.aborted) return;
+          st.state = "failed";
+          st.error =
+            st.code === "mcp_secret_missing"
+              ? safeText(st, toolError(e))
+              : st.cfg.type === "http"
+                ? safeText(st, httpFailureReason(e, st.httpStatus))
+                : "连接失败，请检查服务器配置、连接和凭据";
+          if (st.cfg.type === "http") {
+            st.restarts += 1;
+            st.retryAt = Date.now() + HTTP_RETRY_COOLDOWN_MS;
           }
-        }),
+          effectiveScope.emitServer({ name: st.cfg.name, state: "failed", error: st.error });
+          effectiveScope.diagnostics?.record("mcp.event", {
+            server: st.cfg.name,
+            state: "failed",
+            error: safeText(st, diagnosticError(e)),
+            httpStatus: httpStatusOf(e, st),
+          });
+          if (st.announced !== true) {
+            st.announced = true;
+            effectiveScope.warn(
+              st.code === "mcp_secret_missing" ? "mcp_secret_missing" : "mcp_server_failed",
+              `MCP 服务器 ${st.cfg.name} 启动失败：${st.error}`,
+            );
+          }
+        }
+      });
+      const initialStartup = Promise.all(startPromises);
+      const hostStartup = Promise.all(
+        startPromises.filter((_, index) => servers[index]?.fromHost === true),
       );
+
+      const waitWithAbort = async (work: Promise<unknown>, signal?: AbortSignal): Promise<void> => {
+        if (signal?.aborted) return;
+        let aborted: (() => void) | undefined;
+        const cancel = new Promise<void>((resolve) => {
+          aborted = () => {
+            resolve();
+          };
+          signal?.addEventListener("abort", aborted, { once: true });
+        });
+        try {
+          await Promise.race([work, cancel]);
+        } finally {
+          if (aborted) signal?.removeEventListener("abort", aborted);
+        }
+      };
 
       return Promise.resolve<McpSession>({
         async startup(signal?: AbortSignal) {
-          if (signal?.aborted) return;
-          let aborted: (() => void) | undefined;
-          const cancel = new Promise<void>((resolve) => {
-            aborted = () => {
-              resolve();
-            };
-            signal?.addEventListener("abort", aborted, { once: true });
-          });
-          try {
-            await Promise.race([
-              Promise.all([
-                initialStartup,
-                ...runtimeConnections.map((connection) => connection.startup(signal)),
-              ]),
-              cancel,
-            ]);
-          } finally {
-            if (aborted) signal?.removeEventListener("abort", aborted);
-          }
+          await waitWithAbort(
+            Promise.all([
+              initialStartup,
+              ...runtimeConnections.map((connection) => connection.startup(signal)),
+            ]),
+            signal,
+          );
+        },
+        async startupHost(signal?: AbortSignal) {
+          await waitWithAbort(hostStartup, signal);
         },
         async reconcile(configs: readonly McpServerConfig[]) {
           await initialStartup;
           const wanted = new Map(
             configs.filter((cfg) => cfg.enabled !== false).map((cfg) => [cfg.name, cfg]),
           );
-          // 运行时来源条目不受用户配置重载影响：只移除非运行时且不在新配置中的条目
+          // 运行时与宿主注入条目不受用户配置重载影响：只移除非运行时/非宿主且不在新配置中的条目
           for (const st of [...servers]) {
-            if (st.fromRuntime === true) continue;
+            if (st.fromRuntime === true || st.fromHost === true) continue;
             if (wanted.has(st.cfg.name)) continue;
             removed.push(...st.tools.keys());
             await stopServer(st);
@@ -1772,10 +1863,13 @@ export function createMcpConnector(options?: {
             effectiveScope.emitServer({ name: st.cfg.name, state: "stopped" });
           }
           for (const cfg of wanted.values()) {
-            if (runtimeNames.has(cfg.name.toLowerCase())) {
+            const lowerName = cfg.name.toLowerCase();
+            if (runtimeNames.has(lowerName) || hostNames.has(lowerName)) {
               effectiveScope.warn(
                 "mcp_server_failed",
-                `MCP 服务器 ${cfg.name} 与内置运行时来源重名，已跳过该配置条目`,
+                runtimeNames.has(lowerName)
+                  ? `MCP 服务器 ${cfg.name} 与内置运行时来源重名，已跳过该配置条目`
+                  : `MCP 服务器 ${cfg.name} 与宿主注入服务器重名，已跳过该配置条目`,
               );
               continue;
             }

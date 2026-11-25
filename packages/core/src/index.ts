@@ -587,6 +587,21 @@ export interface RuntimePermissionsOptions {
   autoApproveAsk?: boolean | undefined;
 }
 
+/**
+ * 仅本会话有效的宿主注入 MCP 服务器（ADR-0120 §3）。
+ * 不写入用户/项目 MCP 配置，不授予项目额外信任；凭据由 `credentials` 仅内存提供且按会话隔离。
+ */
+export interface SessionMcpInjection {
+  servers: readonly McpServerConfig[];
+  /** 仅对应本对象中宿主服务器的内存凭据查找器（键为 `mcp/<name>/<key>`） */
+  credentials?: { get(id: string): Promise<string | undefined> } | undefined;
+  /**
+   * 为 true 时：同名冲突（不区分大小写）立即报错；建会话时等待宿主服务器初始启动完成，
+   * 任一宿主服务器启动失败即报错并释放已分配资源。
+   */
+  strict?: boolean | undefined;
+}
+
 export interface CreateSessionOptions {
   /** "provider/model" 或 ModelRef */
   model: string | ModelRef;
@@ -622,6 +637,8 @@ export interface CreateSessionOptions {
   client?: SessionClient | undefined;
   /** 新会话目标分支（ADR-0085）：定位已有工作树或在 `<repo>-wt/<branch>` 创建工作树并切入 */
   branch?: { name: string; create?: boolean | undefined } | undefined;
+  /** 仅本会话有效的宿主注入 MCP 服务器（ADR-0120 §3；进程内使用，RPC 不暴露） */
+  sessionMcp?: SessionMcpInjection | undefined;
 }
 
 import {
@@ -1904,6 +1921,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     resume?: { modelOverride?: string | ModelRef | undefined },
     unattended = false,
     residentChild?: ResidentChildAssemblyOptions,
+    sessionMcp?: SessionMcpInjection,
   ): Promise<RuntimeSession> {
     // 打开途中取得的 Runtime 级登记与外部资源（MCP 连接）按序登记撤销步骤；
     // 打开失败在此逆序撤销，close 复用同一份。会话锁由调用方 session.close() 释放。
@@ -1919,6 +1937,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         runTeardown,
         unattended,
         residentChild,
+        sessionMcp,
       );
     } catch (e) {
       await runTeardown().catch(() => undefined);
@@ -1933,6 +1952,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     runTeardown: () => Promise<void>,
     unattendedOption: boolean,
     residentChild?: ResidentChildAssemblyOptions,
+    sessionMcp?: SessionMcpInjection,
   ): Promise<RuntimeSession> {
     const meta = session.state().meta;
     const isSuiteCoordinator = meta.suite?.role === "coordinator";
@@ -2779,7 +2799,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         platform.fs.mkdir(s.pluginDataDir).catch(() => undefined),
       ),
     );
-    const mcpServerConfigs: McpServerConfig[] = [
+    const configuredMcpServerConfigs: McpServerConfig[] = [
       ...(options.mcpServers ?? []),
       ...(resolved?.mcpServers ?? []).map((s) => ({
         ...s.entry,
@@ -2795,6 +2815,37 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ...(s.cache !== undefined ? { pluginCache: s.cache } : {}),
       })),
     ].filter((s) => s.enabled !== false);
+    const hostMcpServers: McpServerConfig[] = (sessionMcp?.servers ?? [])
+      .filter((s) => s.enabled !== false)
+      .map((s) => ({ ...s, origin: "host" as const }));
+    const strictHostMcp = sessionMcp?.strict === true && hostMcpServers.length > 0;
+    if (strictHostMcp) {
+      if (options.mcp === undefined) {
+        throw new RuntimeCommandError(
+          "invalid_command",
+          "MCP 连接器不可用，无法接入宿主 MCP 服务器",
+        );
+      }
+      const existingNames = new Set(configuredMcpServerConfigs.map((s) => s.name.toLowerCase()));
+      const seenHostNames = new Set<string>();
+      for (const hostServer of hostMcpServers) {
+        const key = hostServer.name.toLowerCase();
+        if (seenHostNames.has(key)) {
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `宿主 MCP 服务器名称重复：${hostServer.name}`,
+          );
+        }
+        seenHostNames.add(key);
+        if (existingNames.has(key)) {
+          throw new RuntimeCommandError(
+            "invalid_command",
+            `宿主 MCP 服务器名称与当前会话已有 MCP 配置冲突：${hostServer.name}`,
+          );
+        }
+      }
+    }
+    const mcpServerConfigs: McpServerConfig[] = [...configuredMcpServerConfigs, ...hostMcpServers];
     let mcpSession: McpSession | undefined;
     const recordMcpAvailability = async (signal: AbortSignal): Promise<void> => {
       if (signal.aborted || meta.parent !== undefined || mcpSession === undefined) return;
@@ -2908,6 +2959,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             platform,
             pluginMcpCacheDir: paths.join(nocturneHome, "plugins", "cache", "mcp-tools"),
             credentials: config?.credentials,
+            ...(sessionMcp?.credentials !== undefined
+              ? { hostCredentials: sessionMcp.credentials }
+              : {}),
+            ...(strictHostMcp ? { strictHostMcp: true } : {}),
             emitServer: (p) => session.emitEphemeral("mcp.server", p),
             warn: (code, message) => session.emitEphemeral("runtime.warning", { code, message }),
             diagnostics,
@@ -2925,11 +2980,49 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               });
             }
           });
+          if (strictHostMcp) {
+            if (opened.startupHost !== undefined) {
+              await opened.startupHost();
+            } else {
+              await opened.startup();
+            }
+            const statusByName = new Map(
+              opened.status().map((item) => [item.name.toLowerCase(), item]),
+            );
+            const failed = hostMcpServers.flatMap((hostServer) => {
+              const st = statusByName.get(hostServer.name.toLowerCase());
+              if (st?.state === "ready") return [];
+              const reason = st?.error ?? (st ? `状态为 ${st.state}` : "未启动");
+              return [`${hostServer.name}: ${reason}`];
+            });
+            if (failed.length > 0) {
+              throw new RuntimeCommandError(
+                "invalid_command",
+                `宿主 MCP 服务器启动失败：${failed.join("；")}`,
+              );
+            }
+            const diff = opened.applyPendingTools();
+            for (const name of diff.remove) {
+              activeMcpTools.delete(name);
+              warnedMcpConflicts.delete(name);
+            }
+            for (const tool of diff.add) {
+              activeMcpTools.set(tool.name, tool);
+            }
+          }
           for (const tool of mcpSession.tools()) {
             activeMcpTools.set(tool.name, tool);
           }
           syncMcpToolsRegistry();
         } catch (e) {
+          if (strictHostMcp) {
+            throw e instanceof RuntimeCommandError
+              ? e
+              : new RuntimeCommandError(
+                  "invalid_command",
+                  e instanceof Error ? e.message : String(e),
+                );
+          }
           warnings.push(`MCP 装配失败：${e instanceof Error ? e.message : String(e)}`);
         }
       }
@@ -8282,7 +8375,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             }).catch(() => undefined);
           }
         }
-        const wrapped = await wrapSession(session, undefined, opts.interactive === false);
+        const wrapped = await wrapSession(
+          session,
+          undefined,
+          opts.interactive === false,
+          undefined,
+          opts.sessionMcp,
+        );
         if (preparedWorktree?.createdWorktreeRoot !== undefined) {
           await maybePruneManagedWorktrees();
         }

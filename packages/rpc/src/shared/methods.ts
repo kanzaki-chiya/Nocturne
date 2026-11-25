@@ -568,11 +568,15 @@ export interface RpcMethods {
   };
   "runtime.usageStats": { params: { days?: number }; result: UsageStats };
   /**
-   * 不含 `interactive`、`schedule` 与 `client`：前者是进程内会话选项，`schedule` 只由调度器写入
-   * （ADR-0064），`client` 只由服务端在 `origin: "agent"` 连接上填入（ADR-0074 §5）。
+   * 不含 `interactive`、`schedule`、`client`、`parent` 与 `sessionMcp`：前者是进程内会话选项，
+   * `schedule` 只由调度器写入（ADR-0064），`client` 只由服务端在 `origin: "agent"` 连接上填入
+   * （ADR-0074 §5），`sessionMcp` 仅由进程内宿主适配器（如 `nctrn acp`，ADR-0120 §3）注入。
    */
   "runtime.createSession": {
-    params: Omit<CreateSessionOptions, "interactive" | "schedule" | "client" | "parent">;
+    params: Omit<
+      CreateSessionOptions,
+      "interactive" | "schedule" | "client" | "parent" | "sessionMcp"
+    >;
     result: SessionOpened;
   };
   "runtime.resumeSession": {
