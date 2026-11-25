@@ -1,7 +1,7 @@
 /** 后台子代理在 TUI 中的显示（ADR-0073 §6）：状态栏计数、结果行、待发条目、/subagents */
 import { createElement } from "react";
-import { render } from "ink-testing-library";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render } from "ink-testing-library";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Runtime } from "@nocturne/core";
 import {
@@ -40,6 +40,11 @@ const resultEntry: UserEntry = {
 } as unknown as UserEntry;
 
 describe("TUI 后台子代理", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
   it.each([{ model: "p/m", effort: "high" }, { effort: "high" }])(
     "工具行显示临时选择 %j",
     (selection) => {
@@ -141,6 +146,8 @@ describe("TUI 后台子代理", () => {
   });
 
   it("/subagents 列出运行中的后台子代理，确认后取消", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-30T10:00:05Z"));
     expect(await runSlash("/subagents", {} as never)).toEqual({
       kind: "overlay",
       name: "subagents",
@@ -153,7 +160,7 @@ describe("TUI 后台子代理", () => {
       background: true,
       state: "running",
       taskSummary: "查找调用方",
-      startedAt: new Date(Date.now() - 5000).toISOString(),
+      startedAt: "2026-10-30T10:00:00Z",
     } as SubagentSummary;
     const cancelSubagent = vi.fn(() => Promise.resolve());
     const runtime = createRuntimeStub({
