@@ -1,6 +1,65 @@
+/* 项目路径与条目名等宽显示时关掉连字（\\、-> 等不应连成字形） */
+.memory-page .mono,
+.memory-page code {
+  font-variant-ligatures: none;
+}
+
 .memory-detail-title {
   font-family: var(--mono);
   font-weight: var(--fw-medium);
+}
+
+/* 项目子页、详情页面包屑里的项目路径：等宽、超长按 320px 截断（定稿原型） */
+.memory-page .phead h1 .crumb .mono {
+  font-family: var(--mono);
+  font-weight: var(--fw-medium);
+}
+.memory-page .phead h1 .crumb {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 项目子页页头的条数，与总览行的「N 条」同一写法 */
+.memory-page .phead h1 .phead-count {
+  flex: none;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-1);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0;
+  color: var(--a-muted);
+  margin-left: var(--space-1);
+}
+
+/* 删除确认里的目标项目：folder/earth 图标 + 路径 */
+.memory-page .del-proj {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--a-secondary);
+  font-size: var(--fs-2);
+  min-width: 0;
+}
+.memory-page .del-proj .icon {
+  color: var(--a-muted);
+  flex: none;
+}
+.memory-page .del-proj code {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+.memory-page .dlg .dh3 b .mono {
+  font-family: var(--mono);
+  color: inherit;
+}
+
+/* 其他项目行右侧：条数 + 独立的「清空」按钮 */
+.memory-other-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .memory-content {

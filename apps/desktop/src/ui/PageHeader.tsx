@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 
 export interface PageHeaderProps {
   title: ReactNode;
-  /** 子页面包屑父级：父名按钮 › 当前页标题 */
-  crumb?: { parent: string; onBack: () => void } | undefined;
+  /** 子页面包屑父级：父名按钮 › 当前页标题；parent 可为 ReactNode（如等宽项目路径） */
+  crumb?: { parent: ReactNode; onBack: () => void } | undefined;
   /** 标题后面的行内附加内容（如技能页的 token 进度、只读徽标） */
   extra?: ReactNode;
   /** 页级操作，靠右 */

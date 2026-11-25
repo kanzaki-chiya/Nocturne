@@ -15,6 +15,8 @@ export interface SettingsListRowProps {
   onContextMenu?: ((event: MouseEvent<HTMLDivElement>) => void) | undefined;
   title?: string | undefined;
   className?: string | undefined;
+  /** 行容器上的 data-* 属性（如 `data-mem-key`），供焦点恢复等按身份定位 */
+  rowData?: Record<`data-${string}`, string> | undefined;
 }
 
 const INTERACTIVE_SELECTOR = "button, a, input, select, textarea, [role='switch'], .slist-toggle";
@@ -34,6 +36,7 @@ export function SettingsListRow({
   onContextMenu,
   title,
   className,
+  rowData,
 }: SettingsListRowProps) {
   const show = (node: ReactNode) =>
     node !== undefined && node !== null && node !== false && node !== "";
@@ -57,7 +60,13 @@ export function SettingsListRow({
     </>
   );
   return (
-    <div className={classes} title={title} onClick={handleRowClick} onContextMenu={onContextMenu}>
+    <div
+      className={classes}
+      title={title}
+      onClick={handleRowClick}
+      onContextMenu={onContextMenu}
+      {...rowData}
+    >
       <button
         type="button"
         className={hasLeading ? "slist-main has-leading" : "slist-main"}
