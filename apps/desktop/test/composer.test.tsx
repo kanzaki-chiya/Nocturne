@@ -485,7 +485,7 @@ describe("Composer 文本与历史", () => {
 });
 
 describe("Composer 斜杠命令", () => {
-  it("/ 弹层按「命令」组列出 /compact、/mcp 与执行方式，Tab 补全不发送", async () => {
+  it("/ 弹层按「命令」组列出 /compact、/mcp、/review 与执行方式，Tab 补全不发送", async () => {
     const onSubmit = vi.fn();
     render(<Composer {...props({ onSubmit })} />);
     const field = input("/");
@@ -495,6 +495,7 @@ describe("Composer 斜杠命令", () => {
     expect(items.map((item) => item.textContent)).toEqual([
       expect.stringContaining("/compact"),
       expect.stringContaining("/mcp"),
+      expect.stringContaining("/review"),
       expect.stringContaining("/grill-me"),
       expect.stringContaining("/goal"),
       expect.stringContaining("/plan"),
