@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -10,6 +13,7 @@ import {
 import type { RpcSession } from "@nocturne/rpc/client";
 
 import { Conversation } from "../src/Conversation";
+import { TurnRail } from "../src/TurnRail";
 import { createAttachmentImageSource } from "../src/attachment-images";
 import {
   computeTurnTickLayout,
@@ -395,5 +399,132 @@ describe("Conversation 轮次导航组件与快捷键", () => {
       expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: "center" });
     });
     expect(screen.getByRole("button", { name: "回到最新消息" })).toBeTruthy();
+  });
+
+  it("turnNavHidden=true 时关闭轮次列表、隐藏刻度并屏蔽 Alt+↑/↓，恢复后保持收起且不改阅读位置", () => {
+    const view = makeView([
+      makeUser(1, "第一轮提问"),
+      makeAssistant(2, "回复 1"),
+      makeUser(3, "第二轮提问"),
+      makeAssistant(4, "回复 2"),
+      makeUser(5, "第三轮提问"),
+      makeAssistant(6, "回复 3"),
+    ]);
+
+    const { container, rerender } = render(
+      <div className="mainpane">
+        <Conversation
+          session={stubSession("s-hide-nav")}
+          view={view}
+          openUrl={vi.fn()}
+          cwd="Z:\\nocturne"
+          subscribeEvents={noopSubscribe}
+          images={createAttachmentImageSource()}
+          busy={false}
+          enableTurnNav
+        />
+      </div>,
+    );
+
+    const stream = screen.getByRole("region", { name: "会话消息" });
+    fireEvent.wheel(stream, { deltaY: -120 });
+    stream.scrollTop = 180;
+
+    const nav = screen.getByRole("navigation", { name: "轮次" });
+    fireEvent.mouseEnter(nav);
+    expect(container.querySelector(".turn-list-wrap > .turn-list")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "第一轮提问" })).toBeTruthy();
+
+    // 覆盖页打开：关闭列表并隐藏刻度，保持 .conversation 与滚动位置挂载
+    rerender(
+      <div className="mainpane" inert>
+        <Conversation
+          session={stubSession("s-hide-nav")}
+          view={view}
+          openUrl={vi.fn()}
+          cwd="Z:\\nocturne"
+          subscribeEvents={noopSubscribe}
+          images={createAttachmentImageSource()}
+          busy={false}
+          enableTurnNav
+          turnNavHidden
+        />
+      </div>,
+    );
+
+    expect(screen.queryByRole("navigation", { name: "轮次" })).toBeNull();
+    expect(container.querySelector(".turn-ticks")).toBeNull();
+    expect(container.querySelector(".turn-list")).toBeNull();
+    expect(container.querySelector(".conversation.has-turn-rail")).not.toBeNull();
+    expect(screen.getByRole("region", { name: "会话消息" })).toBe(stream);
+    expect(stream.scrollTop).toBe(180);
+
+    // 覆盖页打开期间 Alt+↑ 不接管
+    const blockedUp = new KeyboardEvent("keydown", {
+      key: "ArrowUp",
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      window.dispatchEvent(blockedUp);
+    });
+    expect(blockedUp.defaultPrevented).toBe(false);
+
+    // 覆盖页关闭：恢复刻度，但轮次列表保持关闭直到再次悬停或聚焦
+    rerender(
+      <div className="mainpane">
+        <Conversation
+          session={stubSession("s-hide-nav")}
+          view={view}
+          openUrl={vi.fn()}
+          cwd="Z:\\nocturne"
+          subscribeEvents={noopSubscribe}
+          images={createAttachmentImageSource()}
+          busy={false}
+          enableTurnNav
+          turnNavHidden={false}
+        />
+      </div>,
+    );
+
+    expect(screen.getByRole("navigation", { name: "轮次" })).toBeTruthy();
+    expect(container.querySelector(".turn-ticks")).not.toBeNull();
+    expect(container.querySelector(".turn-list")).toBeNull();
+    expect(stream.scrollTop).toBe(180);
+
+    // 聚焦刻度可再次展开，按 Esc 收起
+    const ticks = container.querySelector(".turn-ticks");
+    if (!(ticks instanceof HTMLElement)) throw new Error("expected .turn-ticks");
+    fireEvent.focus(ticks);
+    expect(screen.getByRole("button", { name: "第二轮提问" })).toBeTruthy();
+    fireEvent.keyDown(ticks, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "第二轮提问" })).toBeNull();
+  });
+
+  it("TurnRail 悬停桥接位于非滚动外层容器 .turn-list-wrap::after，.turn-list 自身无 ::after 横向溢出", () => {
+    const turns = [
+      { seq: 1, entryIndex: 0, label: "第一轮" },
+      { seq: 3, entryIndex: 2, label: "第二轮" },
+      { seq: 5, entryIndex: 4, label: "第三轮" },
+    ];
+    const onJump = vi.fn();
+    const { container } = render(
+      <TurnRail turns={turns} currentIndex={1} containerHeight={700} onJump={onJump} />,
+    );
+    const nav = screen.getByRole("navigation", { name: "轮次" });
+    fireEvent.mouseEnter(nav);
+    const wrap = container.querySelector(".turn-list-wrap");
+    const list = wrap?.querySelector(".turn-list");
+    expect(wrap).not.toBeNull();
+    expect(list).not.toBeNull();
+
+    const css = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../src/conversation.css"),
+      "utf8",
+    );
+    expect(css).not.toMatch(/\.turn-list::after\b/);
+    expect(css).toMatch(/\.turn-list-wrap::after\s*\{[^}]*right:\s*-12px;\s*width:\s*12px;/s);
+    expect(css).toMatch(/\[inert\]\s+\.turn-rail\s*\{\s*display:\s*none;\s*\}/s);
   });
 });

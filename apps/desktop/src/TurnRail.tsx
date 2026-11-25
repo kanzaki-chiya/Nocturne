@@ -20,10 +20,18 @@ export interface TurnRailProps {
   turns: readonly TurnRailItem[];
   currentIndex: number;
   containerHeight: number;
+  /** 设置或同类覆盖页遮挡主区时为 true：关闭轮次列表并隐藏刻度 */
+  hidden?: boolean | undefined;
   onJump: (seq: number, index: number) => void;
 }
 
-export function TurnRail({ turns, currentIndex, containerHeight, onJump }: TurnRailProps) {
+export function TurnRail({
+  turns,
+  currentIndex,
+  containerHeight,
+  hidden = false,
+  onJump,
+}: TurnRailProps) {
   const [open, setOpen] = useState(false);
   const closeTimerRef = useRef<number | undefined>(undefined);
   const listRef = useRef<HTMLDivElement>(null);
@@ -37,9 +45,10 @@ export function TurnRail({ turns, currentIndex, containerHeight, onJump }: TurnR
   }, []);
 
   const openNow = useCallback(() => {
+    if (hidden) return;
     cancelClose();
     setOpen(true);
-  }, [cancelClose]);
+  }, [hidden, cancelClose]);
 
   const closeNow = useCallback(() => {
     cancelClose();
@@ -60,22 +69,28 @@ export function TurnRail({ turns, currentIndex, containerHeight, onJump }: TurnR
     };
   }, [cancelClose]);
 
+  useLayoutEffect(() => {
+    if (!hidden) return;
+    cancelClose();
+    setOpen(false);
+  }, [hidden, cancelClose]);
+
   // 展开列表时滚到当前轮
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open || hidden) return;
     const list = listRef.current;
     const row = activeRowRef.current;
     if (list === null || row === null) return;
     const targetTop = row.offsetTop - list.clientHeight / 2 + row.offsetHeight / 2;
     list.scrollTop = Math.max(0, targetTop);
-  }, [open]);
+  }, [open, hidden]);
 
   const layout = useMemo(
     () => computeTurnTickLayout(turns.length, containerHeight),
     [turns.length, containerHeight],
   );
 
-  if (turns.length < MIN_TURNS_FOR_RAIL) return null;
+  if (hidden || turns.length < MIN_TURNS_FOR_RAIL) return null;
 
   const onBlur = (event: ReactFocusEvent<HTMLElement>) => {
     if (event.currentTarget.contains(event.relatedTarget)) return;
@@ -112,24 +127,26 @@ export function TurnRail({ turns, currentIndex, containerHeight, onJump }: TurnR
         </div>
       </div>
       {open ? (
-        <div className="turn-list" ref={listRef}>
-          {turns.map((turn, index) => {
-            const active = index === currentIndex;
-            return (
-              <button
-                key={turn.seq}
-                type="button"
-                className={`turn-row${active ? " on" : ""}`}
-                aria-current={active ? "true" : undefined}
-                ref={active ? activeRowRef : undefined}
-                onClick={() => {
-                  onJump(turn.seq, index);
-                }}
-              >
-                {turn.label}
-              </button>
-            );
-          })}
+        <div className="turn-list-wrap">
+          <div className="turn-list" ref={listRef}>
+            {turns.map((turn, index) => {
+              const active = index === currentIndex;
+              return (
+                <button
+                  key={turn.seq}
+                  type="button"
+                  className={`turn-row${active ? " on" : ""}`}
+                  aria-current={active ? "true" : undefined}
+                  ref={active ? activeRowRef : undefined}
+                  onClick={() => {
+                    onJump(turn.seq, index);
+                  }}
+                >
+                  {turn.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       ) : null}
     </nav>

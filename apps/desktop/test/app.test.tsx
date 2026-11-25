@@ -2977,3 +2977,118 @@ it("全局按键仅在非开发模式且焦点不在终端时拦截 Ctrl+R，F5 
   Object.defineProperty(ctrlRXterm, "target", { value: xtermInput });
   expect(shouldBlockGlobalRefresh(ctrlRXterm, false)).toBe(false);
 });
+
+it("打开设置与同类覆盖页时关闭轮次列表并隐藏刻度，返回后保持阅读位置与收起状态", async () => {
+  const host = replayHost(undefined, undefined, undefined, undefined, (sessionId) => {
+    if (sessionId !== "gamma") return [];
+    const base = Date.parse("2026-10-04T00:00:00Z");
+    return [
+      {
+        sessionId,
+        turnId: "t1",
+        time: new Date(base + 1000).toISOString(),
+        type: "message.user",
+        payload: { messageId: "u1", content: [{ type: "text", text: "第一轮问题" }] },
+      },
+      {
+        sessionId,
+        turnId: "t1",
+        time: new Date(base + 2000).toISOString(),
+        type: "message.assistant",
+        payload: { messageId: "m1", content: [{ type: "text", text: "第一轮回答" }] },
+      },
+      {
+        sessionId,
+        turnId: "t2",
+        time: new Date(base + 3000).toISOString(),
+        type: "message.user",
+        payload: { messageId: "u2", content: [{ type: "text", text: "第二轮问题" }] },
+      },
+      {
+        sessionId,
+        turnId: "t2",
+        time: new Date(base + 4000).toISOString(),
+        type: "message.assistant",
+        payload: { messageId: "m2", content: [{ type: "text", text: "第二轮回答" }] },
+      },
+      {
+        sessionId,
+        turnId: "t3",
+        time: new Date(base + 5000).toISOString(),
+        type: "message.user",
+        payload: { messageId: "u3", content: [{ type: "text", text: "第三轮问题" }] },
+      },
+      {
+        sessionId,
+        turnId: "t3",
+        time: new Date(base + 6000).toISOString(),
+        type: "message.assistant",
+        payload: { messageId: "m3", content: [{ type: "text", text: "第三轮回答" }] },
+      },
+    ];
+  });
+  const { container } = render(<App host={host} />);
+  fireEvent.click(await screen.findByRole("button", { name: /^gamma (?:会话|正文)/ }));
+  const stream = await screen.findByRole("region", { name: "会话消息" });
+  await within(stream).findByText("第三轮回答");
+  fireEvent.wheel(stream, { deltaY: -100 });
+  stream.scrollTop = 140;
+
+  // 展开轮次列表
+  const nav = await screen.findByRole("navigation", { name: "轮次" });
+  fireEvent.mouseEnter(nav);
+  expect(screen.getByRole("button", { name: "第一轮问题" })).toBeTruthy();
+
+  // 1) 打开设置页：关闭轮次列表并隐藏刻度，阅读位置与会话保留挂载
+  fireEvent.click(screen.getByRole("button", { name: "设置" }));
+  await screen.findByRole("navigation", { name: "设置" });
+  expect(screen.queryByRole("navigation", { name: "轮次" })).toBeNull();
+  expect(container.querySelector(".turn-ticks")).toBeNull();
+  expect(container.querySelector(".turn-list")).toBeNull();
+  expect(stream.isConnected).toBe(true);
+  expect(stream.scrollTop).toBe(140);
+
+  // 设置页内按 Alt+↑ 不跳动后台会话
+  const altUp = new KeyboardEvent("keydown", {
+    key: "ArrowUp",
+    altKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  act(() => {
+    window.dispatchEvent(altUp);
+  });
+  expect(altUp.defaultPrevented).toBe(false);
+
+  // 返回会话：刻度恢复、列表保持收起、原滚动位置保留
+  fireEvent.click(screen.getByRole("button", { name: /返回/ }));
+  await waitFor(() => {
+    expect(screen.queryByRole("navigation", { name: "设置" })).toBeNull();
+  });
+  expect(screen.getByRole("navigation", { name: "轮次" })).toBeTruthy();
+  expect(container.querySelector(".turn-ticks")).not.toBeNull();
+  expect(container.querySelector(".turn-list")).toBeNull();
+  expect(stream.scrollTop).toBe(140);
+
+  // 2) 打开定时任务、组曲、页面库等同类覆盖页：同样关闭列表并隐藏刻度
+  for (const label of [/^定时任务/, /^组曲/, /^页面/]) {
+    const reopenedNav = screen.getByRole("navigation", { name: "轮次" });
+    fireEvent.mouseEnter(reopenedNav);
+    expect(screen.getByRole("button", { name: "第一轮问题" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    await waitFor(() => {
+      expect(screen.queryByRole("navigation", { name: "轮次" })).toBeNull();
+    });
+    expect(container.querySelector(".turn-ticks")).toBeNull();
+    expect(container.querySelector(".turn-list")).toBeNull();
+    expect(stream.scrollTop).toBe(140);
+
+    fireEvent.click(screen.getByRole("button", { name: /^gamma / }));
+    await waitFor(() => {
+      expect(screen.getByRole("navigation", { name: "轮次" })).toBeTruthy();
+    });
+    expect(container.querySelector(".turn-list")).toBeNull();
+    expect(stream.scrollTop).toBe(140);
+  }
+});

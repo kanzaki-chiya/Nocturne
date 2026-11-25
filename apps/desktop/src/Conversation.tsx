@@ -357,6 +357,8 @@ export interface ConversationProps {
   enableFind?: boolean | undefined;
   /** 启用轮次导航轨与 Alt+↑/↓ 按轮跳转（仅桌面端主窗口开启） */
   enableTurnNav?: boolean | undefined;
+  /** 设置或同类覆盖页遮挡主区时为 true：关闭轮次列表并隐藏刻度，同时保留阅读位置 */
+  turnNavHidden?: boolean | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -5459,6 +5461,7 @@ function ConversationContent({
   virtualize = false,
   enableFind = false,
   enableTurnNav = false,
+  turnNavHidden = false,
 }: ContentProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -6281,7 +6284,7 @@ function ConversationContent({
   );
 
   useEffect(() => {
-    if (!enableTurnNav) return;
+    if (!enableTurnNav || turnNavHidden) return;
     const onKey = (event: KeyboardEvent) => {
       if (
         !event.altKey ||
@@ -6313,7 +6316,7 @@ function ConversationContent({
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [enableTurnNav, jumpToTurn]);
+  }, [enableTurnNav, turnNavHidden, jumpToTurn]);
 
   const showTurnRail = enableTurnNav && turns.length >= MIN_TURNS_FOR_RAIL && !railNarrow;
 
@@ -6414,6 +6417,7 @@ function ConversationContent({
           turns={turns}
           currentIndex={currentTurnIndex}
           containerHeight={railHeight}
+          hidden={turnNavHidden}
           onJump={jumpToTurn}
         />
       ) : null}

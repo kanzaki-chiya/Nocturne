@@ -1937,6 +1937,7 @@ export function App({ host }: { host: DesktopHost }) {
         : { sessionId, kind },
     );
   }, []);
+  const overlayOpen = page !== null || schedulesOpen || suitesOpen || pagesOpen;
   const sidePanel = useSidePanel({
     prefs,
     host,
@@ -1951,7 +1952,7 @@ export function App({ host }: { host: DesktopHost }) {
     openIds: new Set(conversations.opened.keys()),
     loadDiff: (entry, seq, path) => conversations.turnChangeDiff(entry, seq, path),
     editors,
-    settingsOpen: page !== null || schedulesOpen || suitesOpen || pagesOpen,
+    settingsOpen: overlayOpen,
     plainKey: effectiveWorkspace === null ? null : projectKey(effectiveWorkspace),
     client: panelClient,
     ensureClient: () => pool.ensure(),
@@ -2856,10 +2857,8 @@ export function App({ host }: { host: DesktopHost }) {
           </SettingsDeck>
           <div
             className="mainpane"
-            inert={page !== null || schedulesOpen || suitesOpen || pagesOpen}
-            aria-hidden={
-              page !== null || schedulesOpen || suitesOpen || pagesOpen ? true : undefined
-            }
+            inert={overlayOpen}
+            aria-hidden={overlayOpen ? true : undefined}
           >
             {active !== undefined && selectedOpenError === undefined ? (
               <PaneErrorBoundary key={active.session.id}>
@@ -2878,6 +2877,7 @@ export function App({ host }: { host: DesktopHost }) {
                   home={home}
                   selected={selected}
                   running={conversationStatus(active) !== "idle"}
+                  turnNavHidden={overlayOpen}
                   searchTarget={
                     searchTarget?.sessionId === active.session.id ? searchTarget : undefined
                   }
@@ -3371,6 +3371,7 @@ interface SessionPaneProps {
   onRemoveQuote?: ((index: number) => void) | undefined;
   quoteFocusNonce?: number | undefined;
   onShellKindChange?: ((sessionId: string, kind: string | undefined) => void) | undefined;
+  turnNavHidden?: boolean | undefined;
 }
 
 function scheduleSourceFor(
@@ -3454,6 +3455,7 @@ function SessionPane({
   quoteFocusNonce,
   onShellKindChange,
   ruleEligibleCalls,
+  turnNavHidden = false,
 }: SessionPaneProps) {
   const runtime = client.runtime;
   const controls = useSessionControls(
@@ -3544,6 +3546,7 @@ function SessionPane({
         searchTarget={searchTarget}
         enableFind
         enableTurnNav
+        turnNavHidden={turnNavHidden}
         onResubmit={onResubmit}
         pickImages={pickImages}
         onQuote={onQuote}

@@ -2219,11 +2219,28 @@ button.fcard:hover {
   z-index: 1;
 }
 
-.turn-list {
+[inert] .turn-rail {
+  display: none;
+}
+
+.turn-list-wrap {
   position: absolute;
   right: 28px;
   top: 50%;
   transform: translateY(-50%);
+}
+
+.turn-list-wrap::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -12px;
+  width: 12px;
+}
+
+.turn-list {
+  position: relative;
   width: var(--w-list);
   max-height: 360px;
   overflow: auto;
@@ -2234,15 +2251,6 @@ button.fcard:hover {
   border: 1px solid var(--a-border);
   border-radius: var(--radius-3);
   box-shadow: var(--shadow-popover);
-}
-
-.turn-list::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: -12px;
-  width: 12px;
 }
 
 .turn-row {
