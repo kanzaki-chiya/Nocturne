@@ -17,6 +17,8 @@ export type SettingsSection =
   | "general"
   | "models"
   | "providers"
+  | "git"
+  | "worktrees"
   | "mcp"
   | "plugins"
   | "hooks"
@@ -121,6 +123,16 @@ const SETTINGS_NAV_GROUPS: readonly {
         key: "models",
         label: "模型",
         icon: <Icon name="box_3" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "git",
+        label: "Git",
+        icon: <Icon name="git_commit" size={ICON_MD} className="glyph" />,
+      },
+      {
+        key: "worktrees",
+        label: "工作树",
+        icon: <Icon name="git_branch" size={ICON_MD} className="glyph" />,
       },
     ],
   },

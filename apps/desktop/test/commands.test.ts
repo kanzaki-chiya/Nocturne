@@ -4,7 +4,7 @@ import { COMMANDS, completeSlash, parseSlash } from "../src/commands";
 
 describe("slash 命令目录", () => {
   it("只保留界面上没有对应操作的命令", () => {
-    expect(COMMANDS.map((command) => command.name)).toEqual(["/compact", "/mcp"]);
+    expect(COMMANDS.map((command) => command.name)).toEqual(["/compact", "/mcp", "/review"]);
   });
 });
 
@@ -19,6 +19,12 @@ describe("parseSlash", () => {
   it("可用命令返回 command", () => {
     expect(parseSlash("/compact")).toEqual({ kind: "command", name: "/compact", raw: "/compact" });
     expect(parseSlash("  /mcp  ")).toMatchObject({ kind: "command", name: "/mcp" });
+    expect(parseSlash("/review")).toEqual({ kind: "command", name: "/review", raw: "/review" });
+    expect(parseSlash("/review packages/core")).toEqual({
+      kind: "command",
+      name: "/review",
+      raw: "/review packages/core",
+    });
   });
 
   it("可用命令带参数按用法提示处理，不静默忽略输入", () => {
@@ -187,6 +193,7 @@ describe("completeSlash", () => {
     expect(groups[0]?.items.map((item) => item.label)).toEqual([
       "/compact",
       "/mcp",
+      "/review",
       "/grill-me",
       "/goal",
       "/plan",

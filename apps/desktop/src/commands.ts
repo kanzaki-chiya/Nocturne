@@ -18,6 +18,7 @@ import { invocableSkills, skillLabel, WORK_MODE_ITEMS, type InputLabelData } fro
 export const COMMANDS = [
   { name: "/compact", summary: "压缩当前上下文" },
   { name: "/mcp", summary: "查看本会话 MCP 状态" },
+  { name: "/review", summary: "审查当前改动" },
 ] as const;
 
 export type SlashCommandName = (typeof COMMANDS)[number]["name"];
@@ -81,7 +82,8 @@ export function parseSlash(
   const known = COMMANDS.find((command) => command.name === lowerName);
   if (multiline && (known || REDIRECTS[lowerName] !== undefined)) return null;
   if (known) {
-    if (args !== "") return { kind: "unknown", name, hint: `用法：${known.name}` };
+    if (args !== "" && known.name !== "/review")
+      return { kind: "unknown", name, hint: `用法：${known.name}` };
     return { kind: "command", name: known.name, raw: line };
   }
   const hint = REDIRECTS[lowerName];

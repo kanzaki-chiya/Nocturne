@@ -69,6 +69,7 @@ import {
   readGoalCheckBackend,
   type GoalCheckBackend,
 } from "./goal-check";
+import { GitSettingsSection, WorktreeSettingsSection } from "./GitWorktreeSettings";
 import {
   Button,
   Checkbox,
@@ -163,12 +164,14 @@ function FontPicker({
 }
 
 /** 设置区里由本组件渲染的导航项（服务商页另见 ProvidersPage） */
-export type SettingsPageSection = "general" | "models" | "appearance";
+export type SettingsPageSection = "general" | "models" | "appearance" | "git" | "worktrees";
 
 const SECTION_HEAD: Record<SettingsPageSection, { title: string }> = {
   general: { title: "常规" },
   models: { title: "模型" },
   appearance: { title: "外观" },
+  git: { title: "Git" },
+  worktrees: { title: "工作树" },
 };
 
 const THEMES: { value: ThemePref; label: string }[] = [
@@ -372,6 +375,8 @@ export function SettingsPage({
   onConfigSaved,
   onOpenSubagents,
   onOpenModels,
+  onOpenDirectory,
+  onOpenSession,
   appearance,
 }: {
   section: SettingsPageSection;
@@ -416,6 +421,10 @@ export function SettingsPage({
   onConfigSaved?: () => void;
   onOpenSubagents?: () => void;
   onOpenModels?: () => void;
+  /** 打开工作树或快照目录（系统文件管理器） */
+  onOpenDirectory?: ((path: string) => Promise<void>) | undefined;
+  /** 从工作树页跳回来源会话 */
+  onOpenSession?: ((sessionId: string, projectPath: string) => void) | undefined;
   /** 外观页的字体与字号；不给时不显示这两组 */
   appearance?: AppearanceControls | undefined;
 }) {
@@ -478,6 +487,8 @@ export function SettingsPage({
   const [shellBusy, setShellBusy] = useState(false);
   /** 「发送测试通知」：busy 防重复点；blocked = 系统关掉了本应用的通知权限 */
   const [notifyTest, setNotifyTest] = useState<null | { busy: boolean; blocked: boolean }>(null);
+  const [wtCleanOpen, setWtCleanOpen] = useState(false);
+  const [wtCanClean, setWtCanClean] = useState(false);
   const shellTrigger = useRef<HTMLButtonElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -496,6 +507,10 @@ export function SettingsPage({
         if (accept()) setLoadError(errText(e));
       }
     };
+    if (section === "git" || section === "worktrees") {
+      await load(client.runtime.describeSettings(), setItems);
+      return;
+    }
     await Promise.all([
       load(client.runtime.describeSettings(), setItems),
       load(client.runtime.listModels(), setModels),
@@ -577,15 +592,28 @@ export function SettingsPage({
     key: string,
     label: string,
     patch: SettingsPatch,
-    options?: { reviewerKey?: string; decisionModelKey?: string },
+    options?: {
+      reviewerKey?: string;
+      decisionModelKey?: string;
+      toastText?: string | undefined;
+    },
   ): Promise<string | undefined> => {
     if (client === undefined) return "后台尚未就绪";
     setRowErr(key, null);
     try {
-      const next = await commitSettings(() => client.runtime.updateSettings(patch, options));
+      const updateOptions =
+        options?.reviewerKey !== undefined || options?.decisionModelKey !== undefined
+          ? {
+              ...(options.reviewerKey !== undefined ? { reviewerKey: options.reviewerKey } : {}),
+              ...(options.decisionModelKey !== undefined
+                ? { decisionModelKey: options.decisionModelKey }
+                : {}),
+            }
+          : undefined;
+      const next = await commitSettings(() => client.runtime.updateSettings(patch, updateOptions));
       onConfigSaved?.();
       const value = next.find((x) => x.key === key)?.effective;
-      showToast(`已保存 ${label}${value !== undefined ? ` = ${value}` : ""}`);
+      showToast(options?.toastText ?? `已保存 ${label}${value !== undefined ? ` = ${value}` : ""}`);
       return undefined;
     } catch (e) {
       const message = `保存失败：${errText(e)}，已恢复原值`;
@@ -740,7 +768,20 @@ export function SettingsPage({
       )}
       <div className="spage">
         <div className="readable">
-          <PageHeader title={head.title} />
+          <PageHeader
+            title={head.title}
+            actions={
+              section === "worktrees" && wtCanClean ? (
+                <Button
+                  onClick={() => {
+                    setWtCleanOpen(true);
+                  }}
+                >
+                  清理…
+                </Button>
+              ) : undefined
+            }
+          />
           <div className="sbody">
             {needsCore && client === undefined && (
               <p className="desc">后台尚未就绪，稍后自动刷新。</p>
@@ -1402,6 +1443,33 @@ export function SettingsPage({
                   <AppearancePreview />
                 </SettingsGroup>
               </>
+            )}
+            {section === "git" && items !== null && (
+              <GitSettingsSection
+                items={items}
+                save={save}
+                rowError={rowError}
+                setRowErr={setRowErr}
+                disabled={client === undefined}
+              />
+            )}
+            {section === "worktrees" && items !== null && (
+              <WorktreeSettingsSection
+                client={client}
+                items={items}
+                version={providersVersion}
+                save={save}
+                showToast={showToast}
+                rowError={rowError}
+                setRowErr={setRowErr}
+                cleanOpen={wtCleanOpen}
+                onCloseClean={() => {
+                  setWtCleanOpen(false);
+                }}
+                onCanCleanChange={setWtCanClean}
+                onOpenDirectory={onOpenDirectory}
+                onOpenSession={onOpenSession}
+              />
             )}
           </div>
         </div>

@@ -102,7 +102,7 @@ describe("Sidebar", () => {
     }
 
     expect(groups).toEqual([
-      { heading: "基础设置", items: ["常规", "外观", "服务商", "模型"] },
+      { heading: "基础设置", items: ["常规", "外观", "服务商", "模型", "Git", "工作树"] },
       { heading: "Agent 能力", items: ["子代理", "记忆", "技能", "MCP", "插件", "Hook"] },
       { heading: "连接", items: ["浏览器", "电脑操控", "远程"] },
       { heading: "数据与安全", items: ["授权", "已归档的会话", "用量", "后台日志"] },
@@ -394,7 +394,7 @@ describe("Sidebar", () => {
     expect(onArchive).toHaveBeenCalledWith("idle");
   });
 
-  it("设置导航顺序：常规、外观、服务商、模型、子代理、记忆、技能、MCP、插件、Hook、浏览器、电脑操控、远程、授权、已归档的会话、用量、后台日志", () => {
+  it("设置导航顺序：常规、外观、服务商、模型、Git、工作树、子代理、记忆、技能、MCP、插件、Hook、浏览器、电脑操控、远程、授权、已归档的会话、用量、后台日志", () => {
     render(<Sidebar {...props({ page: "general" })} />);
     const nav = screen.getByRole("navigation", { name: "设置" });
     const labels = [...nav.querySelectorAll("button.item")].map((button) => button.textContent);
@@ -403,6 +403,8 @@ describe("Sidebar", () => {
       "外观",
       "服务商",
       "模型",
+      "Git",
+      "工作树",
       "子代理",
       "记忆",
       "技能",

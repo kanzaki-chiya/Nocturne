@@ -1678,6 +1678,34 @@ export function App({ host }: { host: DesktopHost }) {
       await refresh();
       return true;
     }
+    if (parsed.name === "/review") {
+      const client = await pool.ensure();
+      const target = line.trim().slice("/review".length).trim();
+      const current = conversations.selected;
+      const baseWorkspace =
+        current?.workspace ?? effectiveWorkspace ?? defaultWorkspace ?? undefined;
+      const result = await client.runtime.startReview({
+        ...(current !== undefined ? { sessionId: current.session.id } : {}),
+        ...(baseWorkspace !== undefined ? { cwd: baseWorkspace } : {}),
+        ...(target !== "" ? { prompt: target } : {}),
+      });
+      if (result.createdSession) {
+        await refresh();
+        if (baseWorkspace !== undefined) {
+          await selectSession(result.sessionId, baseWorkspace);
+        }
+        await conversations.submitInput(
+          { text: result.prompt, attachments: [] },
+          "steer",
+          undefined,
+          undefined,
+          result.sessionId,
+        );
+      } else {
+        await conversations.submitInput({ text: result.prompt, attachments: [] });
+      }
+      return true;
+    }
     const active = conversations.selected;
     if (active === undefined) throw new Error("请先打开会话");
     if (parsed.name === "/ensemble") {
@@ -2750,6 +2778,11 @@ export function App({ host }: { host: DesktopHost }) {
                       }}
                       onOpenModels={() => {
                         setPage("models");
+                      }}
+                      onOpenDirectory={(dirPath) => host.openPath(dirPath)}
+                      onOpenSession={(sessionId, projectPath) => {
+                        setPage(null);
+                        void selectSession(sessionId, projectPath);
                       }}
                       appearance={{
                         uiFont: p.uiFont,
