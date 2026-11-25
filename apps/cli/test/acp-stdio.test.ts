@@ -72,9 +72,11 @@ interface AcpPermissionRequest {
   sessionId: string;
   toolCall: {
     toolCallId: string;
+    name?: string;
     title?: string;
     kind?: string;
     locations?: { path: string; line?: number }[];
+    rawInput?: unknown;
   };
   options: { optionId: string; name: string; kind: string }[];
 }
@@ -678,6 +680,7 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
     );
     expect(toolStart?.update).toMatchObject({
       sessionUpdate: "tool_call",
+      title: "read note.txt",
       kind: "read",
       locations: [{ path: expect.stringContaining("note.txt") }],
     });
@@ -801,8 +804,28 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
     expect(existsSync(path.join(ws, "denied.txt"))).toBe(false);
     expect(child.permissions.length).toBe(1);
     expect(child.permissions[0]?.options.map((o) => o.kind)).toEqual(["allow_once", "reject_once"]);
+    expect(child.permissions[0]?.toolCall).toMatchObject({
+      name: "write",
+      title: "write denied.txt",
+      kind: "edit",
+      rawInput: { path: "denied.txt", content: "must-not-exist" },
+    });
+    const deniedCallId = child.permissions[0]?.toolCall.toolCallId;
+    expect(
+      child.updates.filter(
+        (u) => u.update.toolCallId === deniedCallId && u.update.sessionUpdate === "tool_call",
+      ),
+    ).toHaveLength(1);
+    expect(
+      child.updates.some(
+        (u) =>
+          u.update.toolCallId === deniedCallId &&
+          u.update.sessionUpdate === "tool_call_update" &&
+          u.update.status === "failed",
+      ),
+    ).toBe(true);
 
-    // 2) 批准：真实落盘
+    // 2) 批准：真实落盘，且同一 toolCallId 仅发一次 tool_call，后续走 tool_call_update
     expect(
       await child.request("session/prompt", {
         sessionId,
@@ -811,6 +834,25 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
     ).toEqual({ stopReason: "end_turn" });
     expect(readFileSync(path.join(ws, "approved.txt"), "utf8")).toBe("approved-payload");
     expect(child.permissions.length).toBe(2);
+    expect(child.permissions[1]?.toolCall).toMatchObject({
+      name: "write",
+      title: "write approved.txt",
+      kind: "edit",
+    });
+    const approvedCallId = child.permissions[1]?.toolCall.toolCallId;
+    expect(
+      child.updates.filter(
+        (u) => u.update.toolCallId === approvedCallId && u.update.sessionUpdate === "tool_call",
+      ),
+    ).toHaveLength(1);
+    expect(
+      child.updates.some(
+        (u) =>
+          u.update.toolCallId === approvedCallId &&
+          u.update.sessionUpdate === "tool_call_update" &&
+          u.update.status === "completed",
+      ),
+    ).toBe(true);
 
     // 3) 已有 deny 规则：不向宿主弹窗，直接拒绝且零写入
     expect(
@@ -934,12 +976,16 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
     const sessionIdB = sB.sessionId;
     expect(sessionIdA).not.toBe(sessionIdB);
 
-    // 1) A 会话首次调宿主工具被拒绝：MCP 服务器端零执行
+    // 1) A 会话首次调宿主工具被拒绝：MCP 服务器端零执行，且审批卡片显示真实宿主工具名
     await child.request("session/prompt", {
       sessionId: sessionIdA,
       prompt: [{ type: "text", text: "call-stdio denied-first" }],
     });
     expect(existsSync(callLogA)).toBe(false);
+    expect(child.permissions[0]?.toolCall).toMatchObject({
+      name: "mcp__orch__dispatch",
+      title: "mcp__orch__dispatch",
+    });
 
     // 2) A 与 B 并发调用同名 stdio 和 HTTP 宿主工具：各自落到各自实例与凭据
     const [rA1, rB1] = await Promise.all([

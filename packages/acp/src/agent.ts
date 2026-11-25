@@ -98,9 +98,15 @@ interface ActiveToolRecord {
   progressText: string;
 }
 
+interface PlannedToolCall {
+  name: string;
+  input: unknown;
+}
+
 interface ManagedSession {
   id: string;
   cwd: string;
+  realCwd: string;
   session: RuntimeSession;
   unsubscribe: () => void;
   credentialsMap: Map<string, string>;
@@ -112,6 +118,7 @@ interface ManagedSession {
   turnPromise: Promise<void> | undefined;
   turnError: { code: string; message: string } | undefined;
   notifyQueue: Promise<void>;
+  plannedTools: Map<string, PlannedToolCall>;
   activeTools: Map<string, ActiveToolRecord>;
   streamedTextMessages: Set<string>;
   streamedReasoningMessages: Set<string>;
@@ -448,6 +455,7 @@ function buildToolTitle(
   name: string,
   subjects: readonly PermissionSubject[],
   locations: readonly ToolCallLocation[],
+  realCwd?: string,
 ): string {
   const shellSubject = subjects.find((s) => s.kind === "shell" && s.target.trim().length > 0);
   if (shellSubject !== undefined) {
@@ -455,9 +463,11 @@ function buildToolTitle(
   }
   const firstLocation = locations[0];
   if (firstLocation !== undefined) {
-    const displayPath = platform.paths.isWithin(firstLocation.path, cwd)
+    const displayPath = platform.paths.isWithin(cwd, firstLocation.path)
       ? platform.paths.relative(cwd, firstLocation.path) || "."
-      : firstLocation.path;
+      : realCwd !== undefined && platform.paths.isWithin(realCwd, firstLocation.path)
+        ? platform.paths.relative(realCwd, firstLocation.path) || "."
+        : firstLocation.path;
     return `${name} ${truncateText(displayPath, MAX_TITLE_TARGET_CHARS)}`;
   }
   const networkSubject = subjects.find((s) => s.kind === "network" && s.target.trim().length > 0);
@@ -465,6 +475,28 @@ function buildToolTitle(
     return `${name} ${truncateText(networkSubject.target, MAX_TITLE_TARGET_CHARS)}`;
   }
   return name;
+}
+
+function resolvePlannedTool(
+  planned: PlannedToolCall | undefined,
+  subjects: readonly PermissionSubject[],
+): PlannedToolCall {
+  const mcpTarget = subjects.find((s) => s.kind === "mcp" && s.target.trim().length > 0)?.target;
+  if (mcpTarget !== undefined) {
+    const mcpName = `mcp__${mcpTarget.replace("/", "__")}`;
+    if (
+      planned !== undefined &&
+      planned.name !== mcpName &&
+      typeof planned.input === "object" &&
+      planned.input !== null &&
+      "arguments" in planned.input
+    ) {
+      return { name: mcpName, input: (planned.input as { arguments?: unknown }).arguments };
+    }
+    return { name: mcpName, input: planned?.input };
+  }
+  if (planned !== undefined) return planned;
+  return { name: "tool", input: undefined };
 }
 
 function mapToolCompletedStatus(status: string): AcpToolCallStatus {
@@ -651,7 +683,8 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
           record?.locations ?? extractLocations(platform, entry.cwd, subjects, undefined);
         const kind = record?.kind ?? deriveToolKind("", subjects);
         const title =
-          record?.title ?? buildToolTitle(platform, entry.cwd, "tool", subjects, locations);
+          record?.title ??
+          buildToolTitle(platform, entry.cwd, "tool", subjects, locations, entry.realCwd);
 
         const response = await entry.client.request(
           methods.client.session.requestPermission,
@@ -736,7 +769,14 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
           const locations = extractLocations(platform, entry.cwd, item.subjects, undefined);
           const toolName = item.toolName ?? "subagent";
           const kind = deriveToolKind(toolName, item.subjects);
-          const title = buildToolTitle(platform, entry.cwd, toolName, item.subjects, locations);
+          const title = buildToolTitle(
+            platform,
+            entry.cwd,
+            toolName,
+            item.subjects,
+            locations,
+            entry.realCwd,
+          );
 
           const response = await entry.client.request(
             methods.client.session.requestPermission,
@@ -818,6 +858,9 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
 
       case "message.assistant": {
         const messageId = event.payload.messageId;
+        for (const tc of event.payload.toolCalls) {
+          entry.plannedTools.set(tc.callId, { name: tc.name, input: tc.input });
+        }
         const hadText = entry.streamedTextMessages.has(messageId);
         const hadReasoning = entry.streamedReasoningMessages.has(messageId);
         for (const block of event.payload.content) {
@@ -845,8 +888,16 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         const effectiveInput = target?.input ?? input;
         const kind = deriveToolKind(effectiveName, subjects);
         const locations = extractLocations(platform, entry.cwd, subjects, effectiveInput);
-        const title = buildToolTitle(platform, entry.cwd, effectiveName, subjects, locations);
+        const title = buildToolTitle(
+          platform,
+          entry.cwd,
+          effectiveName,
+          subjects,
+          locations,
+          entry.realCwd,
+        );
         const status: AcpToolCallStatus = permission.action === "allow" ? "in_progress" : "pending";
+        const existing = entry.activeTools.get(callId);
 
         entry.activeTools.set(callId, {
           callId,
@@ -855,23 +906,71 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
           kind,
           locations,
           rawInput: effectiveInput,
-          progressText: "",
+          progressText: existing?.progressText ?? "",
         });
-        entry.enqueueUpdate({
-          sessionUpdate: "tool_call",
-          toolCallId: callId,
-          name: effectiveName,
-          title,
-          kind,
-          status,
-          ...(locations.length > 0 ? { locations } : {}),
-          rawInput: effectiveInput,
-        });
+        if (existing !== undefined) {
+          entry.enqueueUpdate({
+            sessionUpdate: "tool_call_update",
+            toolCallId: callId,
+            title,
+            kind,
+            status,
+            ...(locations.length > 0 ? { locations } : {}),
+            rawInput: effectiveInput,
+          });
+        } else {
+          entry.enqueueUpdate({
+            sessionUpdate: "tool_call",
+            toolCallId: callId,
+            name: effectiveName,
+            title,
+            kind,
+            status,
+            ...(locations.length > 0 ? { locations } : {}),
+            rawInput: effectiveInput,
+          });
+        }
         return;
       }
 
       case "permission.requested": {
         const { requestId, callId, subjects, reason, options: permOptions } = event.payload;
+        if (!entry.activeTools.has(callId)) {
+          const planned = entry.plannedTools.get(callId);
+          const { name: effectiveName, input: effectiveInput } = resolvePlannedTool(
+            planned,
+            subjects,
+          );
+          const kind = deriveToolKind(effectiveName, subjects);
+          const locations = extractLocations(platform, entry.cwd, subjects, effectiveInput);
+          const title = buildToolTitle(
+            platform,
+            entry.cwd,
+            effectiveName,
+            subjects,
+            locations,
+            entry.realCwd,
+          );
+          entry.activeTools.set(callId, {
+            callId,
+            name: effectiveName,
+            title,
+            kind,
+            locations,
+            rawInput: effectiveInput,
+            progressText: "",
+          });
+          entry.enqueueUpdate({
+            sessionUpdate: "tool_call",
+            toolCallId: callId,
+            name: effectiveName,
+            title,
+            kind,
+            status: "pending",
+            ...(locations.length > 0 ? { locations } : {}),
+            ...(effectiveInput !== undefined ? { rawInput: effectiveInput } : {}),
+          });
+        }
         forwardPermission(entry, requestId, callId, subjects, reason, permOptions);
         return;
       }
@@ -937,6 +1036,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
           text.length > 0 ? [{ type: "content", content: { type: "text", text } }] : undefined;
         const rawOutput = output ?? error ?? modelContent;
         const hadStarted = entry.activeTools.delete(callId);
+        entry.plannedTools.delete(callId);
 
         if (!hadStarted) {
           entry.enqueueUpdate({
@@ -1096,6 +1196,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       const entry: ManagedSession = {
         id: session.id,
         cwd: params.cwd,
+        realCwd,
         session,
         unsubscribe: () => undefined,
         credentialsMap,
@@ -1107,6 +1208,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         turnPromise: undefined,
         turnError: undefined,
         notifyQueue: Promise.resolve(),
+        plannedTools: new Map(),
         activeTools: new Map(),
         streamedTextMessages: new Set(),
         streamedReasoningMessages: new Set(),
@@ -1170,6 +1272,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     entry.busy = true;
     entry.cancelRequested = false;
     entry.turnError = undefined;
+    entry.plannedTools.clear();
     entry.activeTools.clear();
     entry.streamedTextMessages.clear();
     entry.streamedReasoningMessages.clear();
@@ -1213,6 +1316,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       entry.turnAbort.abort();
       entry.turnAbort = undefined;
       abortEntryPermissions(entry);
+      entry.plannedTools.clear();
       entry.activeTools.clear();
       entry.streamedTextMessages.clear();
       entry.streamedReasoningMessages.clear();
