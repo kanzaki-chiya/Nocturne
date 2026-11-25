@@ -5,7 +5,7 @@
  *
  * 子进程跑的是构建产物，所以 beforeAll 先执行一次 `pnpm build`（几秒），避免用过期 dist 给出假通过。
  */
-import { execSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -32,6 +32,7 @@ import { createRpcClient, RPC_PROTOCOL_VERSION } from "@nocturne/rpc/client";
 import type { LineTransport } from "@nocturne/rpc/server";
 import { createProcessCleanup, removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
 import { listenFetchSafe } from "../../../scripts/test/ports.mjs";
+import { ensureCliBuilt } from "./ensure-cli-build.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../..");
@@ -45,7 +46,7 @@ const hanging: ServerResponse[] = [];
 let modelRequests = 0;
 
 beforeAll(async () => {
-  execSync("pnpm build", { cwd: repoRoot, stdio: "pipe" });
+  await ensureCliBuilt(repoRoot);
   fake = createServer((request, response) => {
     request.resume();
     request.on("end", () => {

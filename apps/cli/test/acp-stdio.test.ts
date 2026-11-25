@@ -12,7 +12,7 @@
  * - 运行中 session/cancel 取消后本会话可继续且另一会话不受影响
  * - 连接 EOF 断开后待审操作零执行、释放 MCP 进程与锁、保留正常会话日志与宿主目录
  */
-import { execSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -33,6 +33,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { listenFetchSafe } from "../../../scripts/test/ports.mjs";
 import { createProcessCleanup, removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
+import { ensureCliBuilt } from "./ensure-cli-build.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../..");
@@ -530,7 +531,7 @@ function assertAllStdoutLinesValidJsonRpc(lines: readonly string[]): void {
 }
 
 beforeAll(async () => {
-  execSync("pnpm build", { cwd: repoRoot, stdio: "pipe" });
+  await ensureCliBuilt(repoRoot);
   providerServer = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
