@@ -231,7 +231,7 @@
 | `pages.css` | `.page3 .wait.warnb` | `function-disallowed-list` | `color-mix(in srgb, var(--a-warning) 40%, var(--a-border))` | 登录等待警告态用 40% `--a-warning` 混入 `--a-border` 的描边 |
 | `pages.css` | `.page3 .pbanner` | `function-disallowed-list` | `1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border))` | 服务商提示横幅用 45% `--a-warning` 混入 `--a-border` 的描边 |
 | `pages.css` | `.page3 .keybox` | `function-disallowed-list` | `1px solid color-mix(in srgb, var(--a-warning) 45%, var(--a-border))` | 密钥提示框用 45% `--a-warning` 混入 `--a-border` 的描边 |
-| `pages.css` | `.page3 .scrim` | `color-no-hex, function-disallowed-list` | `color-mix(in srgb, #000 32%, transparent)` | 设置页对话框遮罩固定 32% 黑，深浅色共用 |
+| `pages.css` | `.scrim` | `color-no-hex, function-disallowed-list` | `color-mix(in srgb, #000 32%, transparent)` | 对话框遮罩固定 32% 黑，深浅色共用 |
 | `pages.css` | `.page3 .effs button.on` | `function-disallowed-list` | `color-mix(in srgb, var(--a-accent) 50%, transparent)` | 推理档位选中态用 50% `--a-accent` 半透明描边 |
 | `remote.css` | `.scrim:has(> .agent-pair-dlg)` | `color-no-hex, function-disallowed-list` | `color-mix(in srgb, #000 36%, transparent)` | 外部代理配对对话框遮罩固定 36% 黑，深浅色共用 |
 | `skills.css` | `.skill-banner.warn` | `function-disallowed-list` | `color-mix(in srgb, var(--a-warning) 35%, var(--a-border))` | 技能警告横幅用 35% `--a-warning` 混入 `--a-border` 的描边 |
