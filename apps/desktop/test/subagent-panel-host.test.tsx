@@ -283,6 +283,33 @@ it("概览：列出运行中的内置子代理（档位、摘要、已运行时�
   expect(backend.state.listCalls).toHaveLength(calls);
 });
 
+it("概览：长模型名的运行行把「档位 · 模型 · 思考档位」放在截断单元里并带 title 全称，耗时与取消按钮独立", async () => {
+  const { prefs, host, backend } = setup({ overview: true });
+  backend.state.list = [
+    summary({
+      childSessionId: "a",
+      background: true,
+      profile: "",
+      model: "magpie/kiro/claude-opus-5.5",
+      effort: "high",
+      taskSummary: "整理仓库结构调研报告，覆盖目录划分与构建产物的完整调查",
+    }),
+  ];
+  render(<Harness prefs={prefs} host={host} sessionId="p" client={backend.client} />);
+  await flush();
+  const box = group() as HTMLElement;
+  const profile = box.querySelector(".ovpop-agent-profile") as HTMLElement;
+  expect(profile.textContent).toBe("magpie/kiro/claude-opus-5.5 · high");
+  // 名称在窄浮层里截断时，悬停可看全称（与分支行同一约定）
+  expect(profile.title).toBe("magpie/kiro/claude-opus-5.5 · high");
+  const time = box.querySelector(".ovpop-time");
+  expect(time).toBeTruthy();
+  // 耗时是名称的兄弟节点、不与名称同流；后台行有独立的取消按钮
+  expect(profile.parentElement?.contains(time as Node)).toBe(false);
+  const cancel = within(box).getByRole("button", { name: /^取消后台子代理/ });
+  expect(cancel).toBeTruthy();
+});
+
 it("进入会话查一次（浮层本来开着也只查一次）；之后每次打开浮层再查一次", async () => {
   const { prefs, host, backend } = setup({ overview: true });
   const view = render(<Harness prefs={prefs} host={host} sessionId="p" client={backend.client} />);
