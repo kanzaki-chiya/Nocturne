@@ -7,6 +7,8 @@ import { z } from "zod";
 
 import {
   DEFAULT_SUBAGENT_PROFILE,
+  GIT_MERGE_METHODS,
+  GIT_REVIEW_VIEWS,
   GOAL_CHECK_BACKENDS,
   REASONING_EFFORT_LEVELS,
   REASONING_EFFORT_ORDER,
@@ -16,6 +18,9 @@ import {
   parseCompactionPruneLimit,
   parseCompactionThreshold,
   subjectKindSchema,
+  validateGitBranchPrefix,
+  validateWorktreeKeepCount,
+  validateWorktreeRoot,
 } from "../protocol/index.js";
 import type {
   ConfigFile,
@@ -567,6 +572,56 @@ const configFileSchema = z.object({
       toolSearch: z.enum(["auto", "always", "never"]).optional(),
     })
     .optional(),
+  git: z
+    .object({
+      branchPrefix: z
+        .string()
+        .superRefine((v, ctx) => {
+          const err = validateGitBranchPrefix(v);
+          if (err !== null) ctx.addIssue({ code: "custom", message: err });
+        })
+        .optional(),
+      forcePush: z.boolean().optional(),
+      mergeMethod: z.enum(GIT_MERGE_METHODS).optional(),
+      draftPr: z.boolean().optional(),
+      reviewView: z.enum(GIT_REVIEW_VIEWS).optional(),
+      instructions: z
+        .object({
+          commit: z.string().optional(),
+          prTitle: z.string().optional(),
+          prBody: z.string().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  worktree: z
+    .object({
+      sessionRoot: z
+        .string()
+        .superRefine((v, ctx) => {
+          const err = validateWorktreeRoot(v);
+          if (err !== null) ctx.addIssue({ code: "custom", message: err });
+        })
+        .optional(),
+      subagentRoot: z
+        .string()
+        .superRefine((v, ctx) => {
+          const err = validateWorktreeRoot(v);
+          if (err !== null) ctx.addIssue({ code: "custom", message: err });
+        })
+        .optional(),
+      fetchBeforeCreate: z.boolean().optional(),
+      autoDelete: z.boolean().optional(),
+      keepCount: z
+        .number()
+        .superRefine((v, ctx) => {
+          const err = validateWorktreeKeepCount(v);
+          if (err !== null) ctx.addIssue({ code: "custom", message: err });
+        })
+        .optional(),
+      askBeforeDelete: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 /**
@@ -652,20 +707,24 @@ export function parseConfigFile(
   layer: "user" | "project" = "user",
 ): ConfigFile {
   const externalAgentWarnings: string[] = [];
-  // 项目中的任意命令声明永不生效；先剥离，避免非法段拖累其他合法字段。
-  if (
-    layer === "project" &&
-    typeof raw === "object" &&
-    raw !== null &&
-    !Array.isArray(raw) &&
-    "externalAgents" in raw &&
-    Object.hasOwn(raw, "externalAgents")
-  ) {
-    const { externalAgents: _ignored, ...fields } = raw;
-    raw = fields;
-    externalAgentWarnings.push(
-      `项目配置 ${filePath} 中的 externalAgents 配置已忽略（只允许用户级配置，信任项目也不生效）`,
-    );
+  const worktreeWarnings: string[] = [];
+  // 项目中的任意命令声明与本机工作树根目录/清理策略永不生效；先剥离，避免非法段拖累其他合法字段。
+  if (layer === "project" && typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    const obj = raw as Record<string, unknown>;
+    if (Object.hasOwn(obj, "externalAgents")) {
+      const { externalAgents: _ignored, ...fields } = obj;
+      raw = fields;
+      externalAgentWarnings.push(
+        `项目配置 ${filePath} 中的 externalAgents 配置已忽略（只允许用户级配置，信任项目也不生效）`,
+      );
+    }
+    if (Object.hasOwn(raw as Record<string, unknown>, "worktree")) {
+      const { worktree: _ignoredWt, ...fields } = raw as Record<string, unknown>;
+      raw = fields;
+      worktreeWarnings.push(
+        `项目配置 ${filePath} 中的 worktree 配置已忽略（只允许用户级配置，信任项目也不生效）`,
+      );
+    }
   }
   rejectCredentialKeys(raw, filePath);
   const parsed = configFileSchema.safeParse(raw);
@@ -734,6 +793,7 @@ export function parseConfigFile(
       : {}),
     ...(configuredAgents ? { externalAgents } : {}),
     ...(externalAgentWarnings.length > 0 ? { externalAgentWarnings } : {}),
+    ...(worktreeWarnings.length > 0 ? { worktreeWarnings } : {}),
     ...(configuredSubagents
       ? {
           subagents: {

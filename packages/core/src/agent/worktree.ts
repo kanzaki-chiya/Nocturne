@@ -12,7 +12,11 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { SubagentChanges } from "../protocol/index.js";
+import {
+  DEFAULT_GIT_CONFIG,
+  formatAutoBranchName,
+  type SubagentChanges,
+} from "../protocol/index.js";
 import { compileGitignore, matchGitignore } from "../tools/builtin/gitignore.js";
 
 /** Git is invoked directly: patch bytes never pass through a shell. */
@@ -57,43 +61,86 @@ export interface WorktreeRecord {
   skippedSymlinks?: string[] | undefined;
   applied?: boolean | undefined;
   changes?: SubagentChanges | undefined;
+  /** 规范元数据路径（<sessionsDir>/worktrees/<childSessionId>.json）；兼容旧记录缺省 */
+  metadataPath?: string | undefined;
+  createdAt?: number | undefined;
+}
+
+function recordMetaPath(record: Pick<WorktreeRecord, "worktree" | "metadataPath">): string {
+  return record.metadataPath ?? `${record.worktree}.json`;
+}
+
+function resolveConfiguredRoot(configured: string | undefined): string | undefined {
+  const trimmed = configured?.trim() ?? "";
+  if (trimmed === "") return undefined;
+  if (trimmed === "~") return path.resolve(os.homedir());
+  if (trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
+    return path.resolve(os.homedir(), trimmed.slice(2));
+  }
+  return path.resolve(trimmed);
+}
+
+async function fetchRepositoryUpstream(repository: string): Promise<void> {
+  const remotes = (await worktreeGit(repository, ["remote"]))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (remotes.length === 0) return;
+  try {
+    await worktreeGit(repository, ["fetch", "--all", "--prune"], undefined, {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_ASKPASS: "",
+    });
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message.trim() : String(cause);
+    throw new Error(
+      `创建工作树前获取上游更新失败：${detail || "无法连接远端仓库"}。请检查网络后重试，或在设置 › 工作树中关闭「创建工作树前始终获取上游更新」。`,
+    );
+  }
+}
+
+export async function listAllWorktreeRecords(sessionsDir: string): Promise<WorktreeRecord[]> {
+  const directory = path.join(sessionsDir, "worktrees");
+  const files = await readdir(directory).catch((cause: unknown) => {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw cause;
+  });
+  const records: WorktreeRecord[] = [];
+  for (const file of files.filter((f) => f.endsWith(".json") && f !== "managed.json")) {
+    const metaPath = path.join(directory, file);
+    let record: WorktreeRecord;
+    try {
+      record = JSON.parse(await readFile(metaPath, "utf8")) as WorktreeRecord;
+    } catch {
+      continue;
+    }
+    if (
+      typeof record.childSessionId !== "string" ||
+      typeof record.parentSessionId !== "string" ||
+      typeof record.repository !== "string" ||
+      typeof record.worktree !== "string" ||
+      typeof record.branch !== "string" ||
+      !/^[A-Za-z0-9_-]+$/.test(record.childSessionId)
+    )
+      continue;
+    if (
+      file !== `${record.childSessionId}.json` ||
+      path.basename(record.worktree) !== record.childSessionId ||
+      (!record.branch.startsWith("nocturne/") && !record.branch.endsWith(record.childSessionId))
+    )
+      continue;
+    records.push({ ...record, metadataPath: record.metadataPath ?? metaPath });
+  }
+  return records;
 }
 
 export async function listWorktreeRecords(
   sessionsDir: string,
   parentSessionId: string,
 ): Promise<WorktreeRecord[]> {
-  const directory = path.join(sessionsDir, "worktrees");
-  const canonicalDirectory = await realpath(directory).catch(() => path.resolve(directory));
-  const files = await readdir(directory).catch((cause: unknown) => {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw cause;
-  });
-  const records: WorktreeRecord[] = [];
-  for (const file of files.filter((file) => file.endsWith(".json"))) {
-    let record: WorktreeRecord;
-    try {
-      record = JSON.parse(await readFile(path.join(directory, file), "utf8")) as WorktreeRecord;
-    } catch {
-      continue;
-    }
-    if (
-      typeof record.childSessionId !== "string" ||
-      typeof record.worktree !== "string" ||
-      !/^[A-Za-z0-9_-]+$/.test(record.childSessionId)
-    )
-      continue;
-    if (
-      record.parentSessionId === parentSessionId &&
-      record.branch === `nocturne/${record.childSessionId}` &&
-      path.resolve(
-        await realpath(path.dirname(record.worktree)),
-        path.basename(record.worktree),
-      ) === path.resolve(canonicalDirectory, record.childSessionId)
-    )
-      records.push(record);
-  }
-  return records;
+  const all = await listAllWorktreeRecords(sessionsDir);
+  return all.filter((record) => record.parentSessionId === parentSessionId);
 }
 
 export async function inspectWorktreeRepository(cwd: string): Promise<string> {
@@ -147,7 +194,10 @@ async function commit(cwd: string, message: string): Promise<void> {
 }
 
 export async function removeWorktree(
-  record: Pick<WorktreeRecord, "repository" | "worktree" | "branch">,
+  record: Pick<WorktreeRecord, "repository" | "worktree" | "branch"> & {
+    childSessionId?: string | undefined;
+    metadataPath?: string | undefined;
+  },
   removeBranch: boolean,
 ): Promise<void> {
   try {
@@ -157,7 +207,9 @@ export async function removeWorktree(
     await worktreeGit(record.repository, ["worktree", "prune"]);
   }
   if (removeBranch) {
-    if (!record.branch.startsWith("nocturne/"))
+    const ownedByChild =
+      record.childSessionId !== undefined && record.branch.endsWith(record.childSessionId);
+    if (!record.branch.startsWith("nocturne/") && !ownedByChild)
       throw new Error("Refusing to delete an unregistered branch namespace");
     try {
       await worktreeGit(record.repository, ["branch", "-D", record.branch]);
@@ -172,6 +224,9 @@ export async function removeWorktree(
       if (refOut.trim() !== "") throw cause;
     }
     await rm(`${record.worktree}.json`, { force: true });
+    if (record.metadataPath && record.metadataPath !== `${record.worktree}.json`) {
+      await rm(record.metadataPath, { force: true });
+    }
   }
 }
 
@@ -184,19 +239,34 @@ export async function createWorktree(input: {
   workspaceRoot: string;
   task: string;
   trusted: boolean;
+  /** 可选自定义子代理工作树根目录；缺省用 <sessionsDir>/worktrees */
+  subagentRoot?: string | undefined;
+  /** 可选自动分支前缀；缺省 nocturne/ */
+  branchPrefix?: string | undefined;
+  /** true 时创建前执行 git fetch 更新远端跟踪引用，仍保留父会话基线与快照 */
+  fetchBeforeCreate?: boolean | undefined;
   /** 可选起始提交（缺省 "HEAD"） */
   commit?: string | undefined;
   /** true 时以分离头指针创建工作树（用于审查指定提交，不拷贝主工作区未提交脏文件） */
   detach?: boolean | undefined;
 }): Promise<WorktreeRecord> {
   if (!/^[A-Za-z0-9_-]+$/.test(input.childSessionId)) throw new Error("Invalid child session ID");
+  if (input.fetchBeforeCreate === true) {
+    await fetchRepositoryUpstream(input.repository);
+  }
   const repositoryReal = await realpath(input.repository);
   const cwdRelative = path.relative(repositoryReal, await realpath(input.cwd));
   const workspaceRelative = path.relative(repositoryReal, await realpath(input.workspaceRoot));
   safeWorktreePath(input.repository, cwdRelative);
   safeWorktreePath(input.repository, workspaceRelative);
-  const worktree = path.join(input.sessionsDir, "worktrees", input.childSessionId);
-  const branch = `nocturne/${input.childSessionId}`;
+  const customRoot = resolveConfiguredRoot(input.subagentRoot);
+  const worktreeBase = customRoot ?? path.join(input.sessionsDir, "worktrees");
+  const worktree = path.join(worktreeBase, input.childSessionId);
+  const metadataPath = path.join(input.sessionsDir, "worktrees", `${input.childSessionId}.json`);
+  const branch = formatAutoBranchName(
+    input.branchPrefix ?? DEFAULT_GIT_CONFIG.branchPrefix,
+    input.childSessionId,
+  );
   const startRef = input.commit ?? "HEAD";
   const record: WorktreeRecord = {
     childSessionId: input.childSessionId,
@@ -210,10 +280,13 @@ export async function createWorktree(input: {
     workspaceRoot: path.join(worktree, workspaceRelative),
     task: input.task,
     includeSkipped: false,
+    metadataPath,
+    createdAt: Date.now(),
   };
   let created = false;
   try {
     await mkdir(path.dirname(worktree), { recursive: true });
+    await mkdir(path.dirname(metadataPath), { recursive: true });
     if (input.detach === true) {
       await worktreeGit(input.repository, ["worktree", "add", "--detach", worktree, startRef]);
     } else {
@@ -274,7 +347,7 @@ export async function createWorktree(input: {
       }
     }
     if (skippedSymlinks.length > 0) record.skippedSymlinks = skippedSymlinks;
-    await writeFile(`${worktree}.json`, JSON.stringify(record), "utf8");
+    await writeFile(recordMetaPath(record), JSON.stringify(record), "utf8");
     return record;
   } catch (cause) {
     if (created) await removeWorktree(record, true);
@@ -359,7 +432,7 @@ export async function settleWorktree(record: WorktreeRecord): Promise<SubagentCh
   }
   const changes = await computeWorktreeChanges(record, head);
   record.changes = changes;
-  await writeFile(`${record.worktree}.json`, JSON.stringify(record), "utf8");
+  await writeFile(recordMetaPath(record), JSON.stringify(record), "utf8");
   return changes;
 }
 
@@ -394,7 +467,7 @@ export async function checkpointWorktreeTurn(
   }
   const changes = await computeWorktreeChanges(record, head);
   record.changes = changes;
-  await writeFile(`${record.worktree}.json`, JSON.stringify(record), "utf8");
+  await writeFile(recordMetaPath(record), JSON.stringify(record), "utf8");
   return changes;
 }
 
@@ -416,7 +489,7 @@ export async function markWorktreeApplied(
   record.base = appliedHead;
   record.applied = true;
   delete record.changes;
-  await writeFile(`${record.worktree}.json`, JSON.stringify(record), "utf8");
+  await writeFile(recordMetaPath(record), JSON.stringify(record), "utf8");
 }
 
 export async function worktreeCurrentHead(worktree: string): Promise<string> {

@@ -519,8 +519,10 @@ export async function runTurn(
         attachmentData = data;
       }
       const memorySnapshot = deps.memory?.();
+      const gitPreferences = deps.gitPreferences?.();
       const built = buildContext({
         ...(memorySnapshot !== undefined ? { memory: memorySnapshot } : {}),
+        ...(gitPreferences !== undefined ? { gitPreferences } : {}),
         skills: deps.skills,
         ...(state.hookContext !== undefined ? { hookContext: state.hookContext } : {}),
         history: state.history,

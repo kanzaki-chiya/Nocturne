@@ -37,6 +37,12 @@ import type {
   CustomTheme,
   GoalCheckConfig,
   MemorySettings,
+  GitConfig,
+  GitMergeMethod,
+  GitReviewView,
+  ResolvedGitConfig,
+  WorktreeConfig,
+  ResolvedWorktreeConfig,
 } from "../protocol/index.js";
 
 export type { AnnotatedRule };
@@ -284,6 +290,10 @@ export interface ConfigFile {
       }
     | undefined;
   notifications?: NotificationsConfig | undefined;
+  git?: GitConfig | undefined;
+  /** 工作树配置（仅用户级，项目配置忽略） */
+  worktree?: WorktreeConfig | undefined;
+  worktreeWarnings?: string[] | undefined;
   /** false 时只使用本地 models.dev 数据，不联网刷新 */
   modelsDev?: false | undefined;
   model?: string | undefined;
@@ -345,6 +355,10 @@ export interface ResolvedConfig {
   notifications?: Required<{ enabled: boolean; doneAfterSeconds: number; sound: boolean }> & {
     events: Required<{ attention: boolean; error: boolean; done: boolean }>;
   };
+  /** Git 偏好：settings → user → trusted project 逐字段合并，未声明时取缺省 */
+  git?: ResolvedGitConfig;
+  /** 工作树偏好：settings → user 逐字段合并（项目层忽略），未声明时取缺省 */
+  worktree?: ResolvedWorktreeConfig;
   providerThinkingWarnings?: string[] | undefined;
   /** Runtime 以 provider_auth_conflict 发出的鉴权配置警告。 */
   providerAuthWarnings?: string[] | undefined;
@@ -659,6 +673,20 @@ export interface SettingItem {
     | "appearance.customThemes"
     | "memory.global"
     | "memory.project"
+    | "git.branchPrefix"
+    | "git.forcePush"
+    | "git.mergeMethod"
+    | "git.draftPr"
+    | "git.reviewView"
+    | "git.instructions.commit"
+    | "git.instructions.prTitle"
+    | "git.instructions.prBody"
+    | "worktree.sessionRoot"
+    | "worktree.subagentRoot"
+    | "worktree.fetchBeforeCreate"
+    | "worktree.autoDelete"
+    | "worktree.keepCount"
+    | "worktree.askBeforeDelete"
     /** 子代理档位逐条：effective/saved 为档位 JSON（ADR-0058） */
     | `subagents.profiles.${string}`
     /** 插件子代理模型逐条：effective/saved 为 provider/model（ADR-0105） */
@@ -694,6 +722,20 @@ export type SettingsPatch = Partial<{
   "appearance.customThemes": CustomTheme[] | null;
   "memory.global": boolean | null;
   "memory.project": boolean | null;
+  "git.branchPrefix": string | null;
+  "git.forcePush": boolean | null;
+  "git.mergeMethod": GitMergeMethod | null;
+  "git.draftPr": boolean | null;
+  "git.reviewView": GitReviewView | null;
+  "git.instructions.commit": string | null;
+  "git.instructions.prTitle": string | null;
+  "git.instructions.prBody": string | null;
+  "worktree.sessionRoot": string | null;
+  "worktree.subagentRoot": string | null;
+  "worktree.fetchBeforeCreate": boolean | null;
+  "worktree.autoDelete": boolean | null;
+  "worktree.keepCount": number | null;
+  "worktree.askBeforeDelete": boolean | null;
 }> &
   /** 子代理档位逐条补丁：null 删除设置层条目（ADR-0058） */
   Partial<Record<`subagents.profiles.${string}`, SubagentProfileConfig | null>> &

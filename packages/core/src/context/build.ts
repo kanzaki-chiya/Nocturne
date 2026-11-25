@@ -18,6 +18,7 @@ import {
   DEFAULT_PRUNE_LIMIT,
   MEMORY_WRITE_GUIDANCE,
   estimateTokens,
+  formatGitPreferencesContext,
   formatHookContextSystem,
   formatSubdirInstructions,
   parseCompactionPruneLimit,
@@ -336,6 +337,9 @@ function environmentText(input: BuildContextInput): string {
     `Workspace root: ${e.workspaceRoot}`,
     `Session date: ${e.sessionDate}`,
   ];
+  const gitBlock =
+    input.gitPreferences !== undefined ? formatGitPreferencesContext(input.gitPreferences) : "";
+  if (gitBlock !== "") lines.push("", gitBlock);
   return lines.join("\n");
 }
 

@@ -197,6 +197,16 @@ import {
   gitWorktrees,
   gitSwitchBranch,
   prepareSessionBranchWorktree,
+  resolveWorktreeRootPath,
+  registerManagedWorktree,
+  touchManagedWorktree,
+  unregisterManagedWorktree,
+  setManagedWorktreePinned,
+  describeManagedWorktrees,
+  deleteManagedWorktrees,
+  pruneExcessManagedWorktrees,
+  restoreWorktreeRecoverySnapshot,
+  type ManagedWorktreeInspector,
 } from "./platform/index.js";
 import {
   clampReasoningEffort,
@@ -267,9 +277,17 @@ import type {
   TurnChanges,
   TurnChangeDiff,
   WorkspaceBranches,
+  ManagedWorktreesDescription,
+  StartReviewInput,
+  StartReviewResult,
+  WorktreeCleanupResult,
+  WorktreeRestoreResult,
 } from "./protocol/index.js";
 import {
+  buildReviewPrompt,
+  DEFAULT_GIT_CONFIG,
   DEFAULT_LOOP_GUARD,
+  DEFAULT_WORKTREE_CONFIG,
   deriveSessionPages,
   isMemoryScope,
   isValidMemoryName,
@@ -1066,6 +1084,22 @@ export interface Runtime {
   cancelSubagent(input: { parentSessionId: string; childSessionId: string }): Promise<void>;
   listSubagentWorktrees(input: { parentSessionId: string }): Promise<WorktreeRecord[]>;
   deleteSubagentWorktree(input: { parentSessionId: string; childSessionId: string }): Promise<void>;
+  describeManagedWorktrees(): Promise<ManagedWorktreesDescription>;
+  setManagedWorktreePinned(input: {
+    id: string;
+    pinned: boolean;
+  }): Promise<{ id: string; pinned: boolean }>;
+  deleteManagedWorktrees(input: {
+    ids: string[];
+    saveSnapshot?: boolean | undefined;
+  }): Promise<WorktreeCleanupResult>;
+  pruneManagedWorktrees(): Promise<WorktreeCleanupResult>;
+  restoreWorktreeSnapshot(input: {
+    snapshotId: string;
+    targetPath?: string | undefined;
+    branch?: string | undefined;
+  }): Promise<WorktreeRestoreResult>;
+  startReview(input: StartReviewInput): Promise<StartReviewResult>;
   readSubagentDiff(input: {
     parentSessionId: string;
     childSessionId: string;
@@ -1530,6 +1564,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
    */
   interface OpenSessionHooks {
     workspace: string;
+    currentCwd(): string;
     repositoryFor(cwd: string): string;
     branchBusy(): boolean;
     pumpPending(): void;
@@ -1578,6 +1613,57 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     defaultWorkspaceRoot: workspaceRoot,
     getOpenSessionEvents: (id) => openSessions.get(id)?.durableEvents(),
   });
+  const managedWorktreeInspector: ManagedWorktreeInspector = {
+    async isActive(entry) {
+      if (entry.kind === "subagent" && entry.childSessionId) {
+        if (subagentRegistry.find(entry.childSessionId) !== undefined) return true;
+        for (const hooks of openSessions.values()) {
+          if (hooks.ensembleActiveIsolatedChildIds?.().has(entry.childSessionId)) return true;
+          if (hooks.suiteActiveIsolatedChildIds?.().has(entry.childSessionId)) return true;
+        }
+        return false;
+      }
+      const targetReal = await platform.resolveReal(entry.worktreePath);
+      for (const hooks of openSessions.values()) {
+        const activeCwd = await platform.resolveReal(hooks.currentCwd());
+        if (paths.equals(targetReal, activeCwd) || paths.isWithin(targetReal, activeCwd)) {
+          return true;
+        }
+      }
+      return false;
+    },
+    async sessionInfo(sessionId) {
+      const summaries = await store.list({ includeArchived: true }).catch(() => []);
+      const found = summaries.find((s) => s.id === sessionId);
+      if (!found) {
+        return { title: sessionId, exists: false };
+      }
+      const trimmed = found.firstText?.trim();
+      const title = trimmed !== undefined && trimmed !== "" ? trimmed : sessionId;
+      return {
+        title,
+        exists: true,
+        lastActivityAt: found.lastUserMs ?? found.mtimeMs,
+      };
+    },
+    worktreeConfig() {
+      const resolved = config?.resolvedSettings().worktree ?? DEFAULT_WORKTREE_CONFIG;
+      return {
+        subagentRoot: resolved.subagentRoot,
+        autoDelete: resolved.autoDelete,
+        keepCount: resolved.keepCount,
+      };
+    },
+  };
+  const maybePruneManagedWorktrees = async (): Promise<void> => {
+    try {
+      await pruneExcessManagedWorktrees(sessionsDir, managedWorktreeInspector);
+    } catch (cause) {
+      diagnostics.record("worktree.auto_prune_failed", {
+        error: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  };
   const branchSwitches = new Set<string>();
   const directoryKey = (path: string) => platform.paths.canonicalize(path);
   const switching = (path: string) =>
@@ -2573,9 +2659,20 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             const resolvedInput = await platform.resolveReal(
               paths.resolve(currentCwd(), rawTarget),
             );
-            if (paths.isWithin(isolatedWorktreesRoot, resolvedInput))
+            const customSubagentRoot = resolveWorktreeRootPath(
+              config?.resolvedSettings(meta.workspaceRoot).worktree?.subagentRoot,
+            );
+            const customSubagentRootReal =
+              customSubagentRoot !== undefined
+                ? await platform.resolveReal(customSubagentRoot)
+                : undefined;
+            if (
+              paths.isWithin(isolatedWorktreesRoot, resolvedInput) ||
+              (customSubagentRootReal !== undefined &&
+                paths.isWithin(customSubagentRootReal, resolvedInput))
+            )
               throw new Error(
-                `Cannot switch into isolated subagent worktree under ${isolatedWorktreesRoot}. Available worktrees: ${available.join(", ")}`,
+                `Cannot switch into isolated subagent worktree under ${customSubagentRootReal && paths.isWithin(customSubagentRootReal, resolvedInput) ? customSubagentRootReal : isolatedWorktreesRoot}. Available worktrees: ${available.join(", ")}`,
               );
             const matchedRoot = available.find((wt) => paths.equals(wt, resolvedInput));
             if (matchedRoot === undefined)
@@ -2611,6 +2708,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               });
               policy = buildPolicy(session.state().config.permissionPreset);
             }
+            void touchManagedWorktree(sessionsDir, realTarget, session.id).catch(() => undefined);
             return { current: realTarget, ...(branch !== undefined ? { branch } : {}) };
           },
         }),
@@ -3750,6 +3848,35 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             ...(ws?.grants !== undefined ? { project: ws.grants } : {}),
           },
           worktrees: activeWorktrees,
+          worktreeOptions: () => {
+            const resolved = config?.resolvedSettings(session.state().meta.workspaceRoot);
+            return {
+              subagentRoot: resolved?.worktree?.subagentRoot,
+              branchPrefix: resolved?.git?.branchPrefix,
+              fetchBeforeCreate: resolved?.worktree?.fetchBeforeCreate,
+            };
+          },
+          onWorktreeCreated: async (record) => {
+            await registerManagedWorktree(sessionsDir, {
+              kind: "subagent",
+              repository: record.repository,
+              worktreePath: record.worktree,
+              branch: record.branch,
+              ownsBranch: true,
+              sessionId: record.parentSessionId,
+              childSessionId: record.childSessionId,
+            }).catch(() => undefined);
+          },
+          onWorktreeSettled: async (record, kept) => {
+            if (!kept) {
+              await unregisterManagedWorktree(
+                sessionsDir,
+                `subagent:${record.childSessionId}`,
+              ).catch(() => undefined);
+            } else {
+              await maybePruneManagedWorktrees();
+            }
+          },
           depth: 0,
           limits: subagentLimits,
           limiter: subagentLimiter,
@@ -4699,8 +4826,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     ): ResidentWorktreeOps => ({
       inspectRepository: (dir) => inspectWorktreeRepository(dir),
       create: (input) =>
-        runWorktreeTask(() =>
-          createWorktree({
+        runWorktreeTask(async () => {
+          const resolved = config?.resolvedSettings(session.state().meta.workspaceRoot);
+          const record = await createWorktree({
             childSessionId: input.childSessionId,
             parentSessionId,
             repository: input.repository,
@@ -4709,8 +4837,23 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             workspaceRoot: input.workspaceRoot,
             task: input.task,
             trusted: ws?.projectConfig.trusted === true,
-          }),
-        ),
+            ...(resolved?.worktree?.subagentRoot
+              ? { subagentRoot: resolved.worktree.subagentRoot }
+              : {}),
+            ...(resolved?.git?.branchPrefix ? { branchPrefix: resolved.git.branchPrefix } : {}),
+            ...(resolved?.worktree?.fetchBeforeCreate === true ? { fetchBeforeCreate: true } : {}),
+          });
+          await registerManagedWorktree(sessionsDir, {
+            kind: "subagent",
+            repository: record.repository,
+            worktreePath: record.worktree,
+            branch: record.branch,
+            ownsBranch: true,
+            sessionId: parentSessionId,
+            childSessionId: record.childSessionId,
+          }).catch(() => undefined);
+          return record;
+        }),
       loadRecord: async (childSessionId) => {
         const list = await listWorktreeRecords(sessionsDir, parentSessionId);
         return list.find((r) => r.childSessionId === childSessionId);
@@ -5075,6 +5218,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 : {}),
             skills: catalog,
             memory: () => memorySnapshot,
+            gitPreferences: () => config?.resolvedSettings(session.state().meta.workspaceRoot).git,
             refreshMemory: refreshMemorySnapshot,
             visionModel: () =>
               resolveModelRole(
@@ -5394,6 +5538,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       get workspace() {
         return branchWatchPath();
       },
+      currentCwd,
       repositoryFor,
       branchBusy: () =>
         busy() ||
@@ -6234,8 +6379,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             if (bytes !== undefined)
               attachmentData.set(ref.sha256, Buffer.from(bytes).toString("base64"));
           }
+          const gitPreferences = config?.resolvedSettings(environment.workspaceRoot).git;
           const plan = buildContext({
             ...(memorySnapshot !== undefined ? { memory: memorySnapshot } : {}),
+            ...(gitPreferences !== undefined ? { gitPreferences } : {}),
             skills: catalog,
             ...(state.hookContext !== undefined ? { hookContext: state.hookContext } : {}),
             history,
@@ -6321,6 +6468,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const resolved = config?.resolvedSettings(environment.workspaceRoot);
         const compactionThreshold = resolved?.compactionThreshold;
         const compactionPruneLimit = resolved?.compactionPruneLimit;
+        const gitPreferences = resolved?.git;
         const residentBasePrompt = residentChild?.basePrompt() ?? suiteController?.basePrompt();
         const key = JSON.stringify({
           seq: events.at(-1)?.seq,
@@ -6331,6 +6479,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           skills: catalog,
           instructions,
           environment,
+          gitPreferences,
           compactionThreshold,
           compactionPruneLimit,
           loopGuard: turnConfig.loopGuard ?? DEFAULT_LOOP_GUARD,
@@ -6340,6 +6489,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         const state = session.state();
         const value = buildContext({
           ...(memorySnapshot !== undefined ? { memory: memorySnapshot } : {}),
+          ...(gitPreferences !== undefined ? { gitPreferences } : {}),
           skills: catalog,
           ...(state.hookContext !== undefined ? { hookContext: state.hookContext } : {}),
           compactionThreshold,
@@ -8093,6 +8243,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               projectCwd: sessionCwd,
               branch: opts.branch.name,
               create: opts.branch.create === true,
+              sessionRoot: defaults?.worktree?.sessionRoot,
+              fetchBeforeCreate: defaults?.worktree?.fetchBeforeCreate,
             })
           : undefined;
       const session = await store.create({
@@ -8119,8 +8271,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               current: preparedWorktree.branch,
             },
           });
+          if (preparedWorktree.createdWorktreeRoot !== undefined) {
+            await registerManagedWorktree(sessionsDir, {
+              kind: "session",
+              repository: preparedWorktree.repository,
+              worktreePath: preparedWorktree.createdWorktreeRoot,
+              branch: preparedWorktree.branch,
+              ownsBranch: preparedWorktree.ownsBranch,
+              sessionId: session.id,
+            }).catch(() => undefined);
+          }
         }
         const wrapped = await wrapSession(session, undefined, opts.interactive === false);
+        if (preparedWorktree?.createdWorktreeRoot !== undefined) {
+          await maybePruneManagedWorktrees();
+        }
         // recent-models.json：新建会话记录初始模型（provider-setup.md 第 6 节）
         void config?.recordRecentModel(session.state().config.model).catch((e: unknown) => {
           diagnostics.record("config.recent_models_write_failed", {
@@ -8272,6 +8437,110 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (subagentRegistry.find(input.childSessionId) || ensembleActive || suiteActive)
         throw new RuntimeCommandError("invalid_command", "子代理仍在运行");
       await removeWorktree(record, true);
+      await unregisterManagedWorktree(sessionsDir, `subagent:${input.childSessionId}`).catch(
+        () => undefined,
+      );
+    },
+    async describeManagedWorktrees() {
+      return describeManagedWorktrees(sessionsDir, managedWorktreeInspector);
+    },
+    async setManagedWorktreePinned(input) {
+      const id = z.string().trim().min(1).parse(input.id);
+      const pinned = z.boolean().parse(input.pinned);
+      return setManagedWorktreePinned(sessionsDir, id, pinned);
+    },
+    async deleteManagedWorktrees(input) {
+      const ids = z.array(z.string().trim().min(1)).parse(input.ids);
+      const saveSnapshot =
+        input.saveSnapshot === undefined ? undefined : z.boolean().parse(input.saveSnapshot);
+      return deleteManagedWorktrees(sessionsDir, managedWorktreeInspector, {
+        ids,
+        reason: "manual",
+        ...(saveSnapshot !== undefined ? { saveSnapshot } : {}),
+      });
+    },
+    async pruneManagedWorktrees() {
+      return pruneExcessManagedWorktrees(sessionsDir, managedWorktreeInspector);
+    },
+    async restoreWorktreeSnapshot(input) {
+      const snapshotId = z.string().trim().min(1).parse(input.snapshotId);
+      const targetPath =
+        input.targetPath !== undefined
+          ? z.string().trim().min(1).parse(input.targetPath)
+          : undefined;
+      const branch =
+        input.branch !== undefined ? z.string().trim().min(1).parse(input.branch) : undefined;
+      return restoreWorktreeRecoverySnapshot(sessionsDir, {
+        snapshotId,
+        ...(targetPath !== undefined ? { targetPath } : {}),
+        ...(branch !== undefined ? { branch } : {}),
+      });
+    },
+    async startReview(input) {
+      const open = input.sessionId !== undefined ? openSessions.get(input.sessionId) : undefined;
+      const effectiveCwd =
+        input.cwd !== undefined
+          ? paths.resolve(input.cwd, ".")
+          : open !== undefined
+            ? open.currentCwd()
+            : cwd;
+      const effectiveRoot = await platform.resolveReal(
+        open !== undefined ? open.skillModel.workspaceRoot : effectiveCwd,
+      );
+      const resolvedSettings =
+        config !== undefined ? (await config.forWorkspace(effectiveRoot)).resolved : undefined;
+      const gitPrefs = resolvedSettings?.git ?? DEFAULT_GIT_CONFIG;
+      const presentation = input.presentation ?? gitPrefs.reviewView;
+      const prompt = buildReviewPrompt(input.prompt, { reviewView: presentation });
+
+      if (presentation === "inline" && input.sessionId !== undefined) {
+        return {
+          presentation: "inline",
+          sessionId: input.sessionId,
+          createdSession: false,
+          prompt,
+        };
+      }
+
+      const explicitModel = input.model?.trim();
+      const defaultRef =
+        explicitModel && explicitModel !== ""
+          ? parseModelRef(explicitModel)
+          : open !== undefined
+            ? open.currentModel()
+            : runtime.defaultModel({ workspaceRoot: effectiveRoot });
+      const modelRef: ModelRef =
+        defaultRef ??
+        registry.providers()[0]?.models()[0]?.ref ??
+        (() => {
+          throw new RuntimeCommandError("invalid_command", "没有可用模型，无法发起独立审查会话");
+        })();
+      const preset = normalizePermissionPreset(
+        resolvedSettings?.permissionPreset ?? DEFAULT_PERMISSION_PRESET,
+      );
+      const initialEffort = resolvedSettings?.reasoningEffort;
+      const created = await store.create({
+        cwd: effectiveCwd,
+        workspaceRoot: effectiveRoot,
+        model: modelRef,
+        permissionPreset: isPermissionPresetName(preset) ? preset : DEFAULT_PERMISSION_PRESET,
+        nocturneVersion: options.version ?? NOCTURNE_VERSION,
+        ...(initialEffort !== undefined && isReasoningEffort(initialEffort)
+          ? { reasoningEffort: initialEffort }
+          : {}),
+      });
+      try {
+        await created.emit("session.titled", { title: "代码审查", source: "user" });
+      } finally {
+        await created.close();
+      }
+      notifySessionsChanged();
+      return {
+        presentation: "separate",
+        sessionId: created.id,
+        createdSession: true,
+        prompt,
+      };
     },
     listSubagents: (input) => subagentObservation.list(input),
     observeSubagent: (input, observer) => subagentObservation.observe(input, observer),

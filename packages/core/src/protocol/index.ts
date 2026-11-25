@@ -48,3 +48,4 @@ export * from "./inline-page-export.js";
 export * from "./page-comments.js";
 export * from "./quotes.js";
 export * from "./shell-pattern.js";
+export * from "./git.js";

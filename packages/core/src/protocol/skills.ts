@@ -149,6 +149,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "subagents",
   "tasks",
   "compact",
+  "review",
   "resume",
   "search",
   "rewind",

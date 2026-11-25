@@ -7,6 +7,7 @@ import type {
   LoopGuardConfig,
   MemoryContextSnapshot,
   PreparedInput,
+  ResolvedGitConfig,
   SkillInvocation,
 } from "../protocol/index.js";
 import type { ResolvedModel } from "../provider/index.js";
@@ -73,6 +74,8 @@ export interface TurnDeps {
   skills?: { text: string; truncated: boolean } | undefined;
   /** 长期记忆索引快照（ADR-0098）：会话打开与 L2 压缩后刷新；agent 不直接读盘 */
   memory?: (() => MemoryContextSnapshot | undefined) | undefined;
+  /** 当前生效的 Git 偏好（从配置实时读取，不改写日志） */
+  gitPreferences?: (() => ResolvedGitConfig | undefined) | undefined;
   refreshMemory?: (() => Promise<void>) | undefined;
   compactionThreshold?: string | number | undefined;
   compactionPruneLimit?: number | undefined;

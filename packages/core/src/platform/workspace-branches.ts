@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, realpath, stat } from "node:fs/promises";
+import os from "node:os";
 import { promisify } from "node:util";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
@@ -16,7 +18,12 @@ function hasGitMarker(workspace: string): boolean {
   }
 }
 
-async function git(cwd: string, args: string[], timeout = 4000): Promise<string> {
+async function git(
+  cwd: string,
+  args: string[],
+  timeout = 4000,
+  env?: NodeJS.ProcessEnv,
+): Promise<string> {
   try {
     const { stdout } = await runFile("git", args, {
       cwd,
@@ -24,12 +31,57 @@ async function git(cwd: string, args: string[], timeout = 4000): Promise<string>
       windowsHide: true,
       timeout,
       maxBuffer: 1024 * 1024,
+      ...(env ? { env } : {}),
     });
     return stdout;
   } catch (error) {
     const stderr = (error as { stderr?: string }).stderr;
     if (stderr) throw new Error(stderr);
     throw error;
+  }
+}
+
+/** 展开配置的工作树根目录（支持 `~/` 与当前平台绝对路径）；留空返回 undefined。 */
+export function resolveWorktreeRootPath(
+  configured: string | undefined,
+  homeDir: string = os.homedir(),
+): string | undefined {
+  const trimmed = configured?.trim() ?? "";
+  if (trimmed === "") return undefined;
+  if (trimmed === "~") return resolve(homeDir);
+  if (trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
+    return resolve(homeDir, trimmed.slice(2));
+  }
+  return resolve(trimmed);
+}
+
+/**
+ * 创建工作树前获取上游更新：仅更新远端跟踪引用（`refs/remotes/*`），不修改任何本地分支或工作区。
+ * 无 remote 时安全跳过；离线或远端失败时抛出明确可恢复的错误。
+ */
+export async function fetchUpstreamRefs(
+  repoRoot: string,
+  timeoutMs = 30_000,
+): Promise<{ fetched: boolean; remotes: string[] }> {
+  const remotesRaw = await git(repoRoot, ["remote"], 4000);
+  const remotes = remotesRaw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (remotes.length === 0) return { fetched: false, remotes: [] };
+  const nonInteractiveEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "",
+  };
+  try {
+    await git(repoRoot, ["fetch", "--all", "--prune"], timeoutMs, nonInteractiveEnv);
+    return { fetched: true, remotes };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.trim() : String(error);
+    throw new Error(
+      `创建工作树前获取上游更新失败：${detail || "无法连接远端仓库"}。请检查网络后重试，或在设置 › 工作树中关闭「创建工作树前始终获取上游更新」。`,
+    );
   }
 }
 
@@ -152,35 +204,80 @@ export async function gitSwitchBranch(
   await git(workspace, create ? ["switch", "-c", branch, "--"] : ["switch", "--", branch], 60000);
 }
 
+async function sessionWorktreeDirectory(
+  repoReal: string,
+  dirName: string,
+  sessionRoot?: string,
+): Promise<string> {
+  const customRoot = resolveWorktreeRootPath(sessionRoot);
+  if (customRoot === undefined) {
+    return resolve(dirname(repoReal), `${basename(repoReal)}-wt`, dirName);
+  }
+  const repoName = basename(repoReal);
+  const candidate = resolve(customRoot, repoName, dirName);
+  // 若同名仓库已在自定义根下占用该路径但归属不同主仓库，按仓库路径哈希消歧避免覆盖
+  if (existsSync(candidate)) {
+    const owner = await gitMainRepository(candidate).catch(() => null);
+    const key = (value: string) =>
+      process.platform === "win32" ? resolve(value).toLowerCase() : resolve(value);
+    if (owner !== null && key(owner) !== key(repoReal)) {
+      const suffix = createHash("sha256").update(key(repoReal)).digest("hex").slice(0, 6);
+      return resolve(customRoot, `${repoName}-${suffix}`, dirName);
+    }
+  }
+  return candidate;
+}
+
 /**
  * 新会话分支解析与工作树准备（ADR-0085）：
  * - 选当前分支：返回 undefined（不建工作树，留在项目目录）
  * - 选已在某个工作树检出的分支：返回该工作树（含子目录映射）
- * - 选已有未检出分支：在 `<repoParent>/<repoName>-wt/<branchWithHyphen>` 建工作树检出该分支
+ * - 选已有未检出分支：在配置的新会话根目录或 `<repoParent>/<repoName>-wt/<branchWithHyphen>` 建工作树检出该分支
  * - 新建分支（create = true）：从基准分支（main → origin/HEAD → master）开出并在上述位置建工作树
+ * - 开启 fetchBeforeCreate 时仅在需要新建工作树前执行 `git fetch`，更新远端跟踪引用而不改动本地分支
  */
 export async function prepareSessionBranchWorktree(input: {
   projectCwd: string;
   branch: string;
   create: boolean;
-}): Promise<{ targetCwd: string; branch: string } | undefined> {
+  sessionRoot?: string | undefined;
+  fetchBeforeCreate?: boolean | undefined;
+}): Promise<
+  | {
+      targetCwd: string;
+      branch: string;
+      repository: string;
+      createdWorktreeRoot?: string | undefined;
+      ownsBranch: boolean;
+    }
+  | undefined
+> {
   const repoRoot = await gitRepository(input.projectCwd);
   if (repoRoot === null) throw new Error("Project directory is not a git repository");
   await validateGitBranchName(repoRoot, input.branch);
 
   const repoReal = await realpath(repoRoot).catch(() => resolve(repoRoot));
+  const mainRepo = (await gitMainRepository(repoReal)) ?? repoReal;
+  const mainRepoReal = await realpath(mainRepo).catch(() => resolve(mainRepo));
   const projectReal = await realpath(input.projectCwd).catch(() => resolve(input.projectCwd));
   const subRel = relative(repoReal, projectReal);
   const pathKey = (value: string) =>
     process.platform === "win32" ? resolve(value).toLowerCase() : resolve(value);
 
-  const info = await gitWorkspaceBranches(projectReal, repoReal);
-  const localBranches = new Set(info.branches.map((b) => b.name));
+  let info = await gitWorkspaceBranches(projectReal, repoReal);
+  let localBranches = new Set(info.branches.map((b) => b.name));
 
   let worktreeRoot: string;
+  let createdWorktreeRoot: string | undefined;
+  let ownsBranch = false;
   if (input.create) {
     if (localBranches.has(input.branch)) {
       throw new Error(`分支已存在：${input.branch}`);
+    }
+    if (input.fetchBeforeCreate === true) {
+      await fetchUpstreamRefs(repoReal);
+      info = await gitWorkspaceBranches(projectReal, repoReal);
+      localBranches = new Set(info.branches.map((b) => b.name));
     }
     const baseRef = info.defaultBranch;
     if (baseRef === null) {
@@ -190,12 +287,14 @@ export async function prepareSessionBranchWorktree(input: {
     if (!dirName || dirName === "." || dirName === "..") {
       throw new Error(`无效的分支目录名：${input.branch}`);
     }
-    worktreeRoot = resolve(dirname(repoReal), `${basename(repoReal)}-wt`, dirName);
+    worktreeRoot = await sessionWorktreeDirectory(mainRepoReal, dirName, input.sessionRoot);
     if (existsSync(worktreeRoot)) {
       throw new Error(`目标工作树目录已存在：${worktreeRoot}`);
     }
     await mkdir(dirname(worktreeRoot), { recursive: true });
     await git(repoReal, ["worktree", "add", "-b", input.branch, worktreeRoot, baseRef], 60000);
+    createdWorktreeRoot = await realpath(worktreeRoot).catch(() => resolve(worktreeRoot));
+    ownsBranch = true;
   } else {
     if (info.current === input.branch) {
       return undefined;
@@ -207,16 +306,20 @@ export async function prepareSessionBranchWorktree(input: {
     if (matched.worktree !== undefined) {
       worktreeRoot = matched.worktree;
     } else {
+      if (input.fetchBeforeCreate === true) {
+        await fetchUpstreamRefs(repoReal);
+      }
       const dirName = input.branch.replaceAll("/", "-");
       if (!dirName || dirName === "." || dirName === "..") {
         throw new Error(`无效的分支目录名：${input.branch}`);
       }
-      worktreeRoot = resolve(dirname(repoReal), `${basename(repoReal)}-wt`, dirName);
+      worktreeRoot = await sessionWorktreeDirectory(mainRepoReal, dirName, input.sessionRoot);
       if (existsSync(worktreeRoot)) {
         throw new Error(`目标工作树目录已存在且不是分支 ${input.branch} 的工作树：${worktreeRoot}`);
       }
       await mkdir(dirname(worktreeRoot), { recursive: true });
       await git(repoReal, ["worktree", "add", worktreeRoot, input.branch], 60000);
+      createdWorktreeRoot = await realpath(worktreeRoot).catch(() => resolve(worktreeRoot));
     }
   }
 
@@ -231,7 +334,13 @@ export async function prepareSessionBranchWorktree(input: {
     return undefined;
   }
   const actualBranch = (await gitCurrentBranch(realTargetCwd)) ?? input.branch;
-  return { targetCwd: realTargetCwd, branch: actualBranch };
+  return {
+    targetCwd: realTargetCwd,
+    branch: actualBranch,
+    repository: mainRepoReal,
+    ...(createdWorktreeRoot !== undefined ? { createdWorktreeRoot } : {}),
+    ownsBranch,
+  };
 }
 
 export async function gitWorktrees(workspace: string): Promise<string[]> {

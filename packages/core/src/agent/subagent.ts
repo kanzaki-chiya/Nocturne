@@ -344,6 +344,18 @@ export interface SubagentDeps {
   checkpoint?: ExecutionEnvironment["checkpoint"];
   store: SessionStore;
   sessionsDir: string;
+  /** 实时读取子代理工作树配置（自定义根目录、自动分支前缀、创建前 fetch） */
+  worktreeOptions?:
+    | (() => {
+        subagentRoot?: string | undefined;
+        branchPrefix?: string | undefined;
+        fetchBeforeCreate?: boolean | undefined;
+      })
+    | undefined;
+  /** 新建子代理工作树后通知托管注册表 */
+  onWorktreeCreated?: ((record: WorktreeRecord) => void | Promise<void>) | undefined;
+  /** 子代理工作树结算保留改动后通知托管注册表与自动清理 */
+  onWorktreeSettled?: ((record: WorktreeRecord, kept: boolean) => void | Promise<void>) | undefined;
   imageProcessor?: ImageProcessor | undefined;
   /** 子会话执行环境的共享部分（ExecutionEnvironment 同名成员） */
   platform: ExecutionEnvironment["platform"];
@@ -695,6 +707,7 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
         const createChild = async () => {
           const id = repository ? newSessionId() : undefined;
           if (repository && id) {
+            const wtOpts = deps.worktreeOptions?.();
             worktree = await createWorktree({
               childSessionId: id,
               parentSessionId: ctx.sessionId,
@@ -704,7 +717,11 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
               workspaceRoot: ctx.workspaceRoot,
               task: request.task,
               trusted: deps.trusted === true,
+              ...(wtOpts?.subagentRoot ? { subagentRoot: wtOpts.subagentRoot } : {}),
+              ...(wtOpts?.branchPrefix ? { branchPrefix: wtOpts.branchPrefix } : {}),
+              ...(wtOpts?.fetchBeforeCreate === true ? { fetchBeforeCreate: true } : {}),
             });
+            await deps.onWorktreeCreated?.(worktree);
             if (worktree.includeSkipped)
               deps.warning?.(
                 "worktree_include_skipped",
@@ -1208,7 +1225,9 @@ export function createSubagentLauncher(deps: SubagentDeps): SubagentLauncher {
             async () => {
               if (!worktree) return undefined;
               try {
-                return await settleWorktree(worktree);
+                const changes = await settleWorktree(worktree);
+                await deps.onWorktreeSettled?.(worktree, changes !== undefined);
+                return changes;
               } catch (cause) {
                 deps.warning?.(
                   "worktree_cleanup_failed",

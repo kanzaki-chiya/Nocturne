@@ -11,6 +11,7 @@ import type {
   LoopGuardConfig,
   MemoryContextSnapshot,
   NoteItem,
+  ResolvedGitConfig,
   TodoItem,
   ToolSpec,
 } from "../protocol/index.js";
@@ -70,6 +71,8 @@ export interface BuildContextInput {
   tools: ToolSpec[];
   instructions: InstructionSet;
   environment: EnvironmentInfo;
+  /** 生效的 Git 偏好（未传时不注入，保持纯单测与旧行为一致） */
+  gitPreferences?: ResolvedGitConfig | undefined;
   /** 本次 Turn 尚未持久化的即时消息（进行中 Step 的增量历史） */
   pendingMessages?: readonly ModelMessage[] | undefined;
   /**

@@ -8,6 +8,11 @@
  */
 import { inferShellKindFromPath } from "../platform/index.js";
 import type { HookOrigin, HookPoint, RuleOrigin } from "../protocol/index.js";
+import {
+  DEFAULT_GIT_CONFIG,
+  DEFAULT_WORKTREE_CONFIG,
+  normalizeWorktreeRootInput,
+} from "../protocol/index.js";
 import type {
   ConfigFile,
   McpServerEntry,
@@ -96,7 +101,21 @@ export interface MergeResult {
       | "notifications.events.error"
       | "notifications.events.done"
       | "notifications.doneAfterSeconds"
-      | "notifications.sound",
+      | "notifications.sound"
+      | "git.branchPrefix"
+      | "git.forcePush"
+      | "git.mergeMethod"
+      | "git.draftPr"
+      | "git.reviewView"
+      | "git.instructions.commit"
+      | "git.instructions.prTitle"
+      | "git.instructions.prBody"
+      | "worktree.sessionRoot"
+      | "worktree.subagentRoot"
+      | "worktree.fetchBeforeCreate"
+      | "worktree.autoDelete"
+      | "worktree.keepCount"
+      | "worktree.askBeforeDelete",
       LayerKind
     >
   >;
@@ -343,6 +362,11 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
       doneAfterSeconds: 60,
       sound: true,
     },
+    git: {
+      ...DEFAULT_GIT_CONFIG,
+      instructions: { ...DEFAULT_GIT_CONFIG.instructions },
+    },
+    worktree: { ...DEFAULT_WORKTREE_CONFIG },
   };
   const providers = new Map<string, ProviderEntryConfig>();
   const mcpServers = new Map<
@@ -361,6 +385,7 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
     out.warnings.push(...(file.mcpWarnings ?? []));
     out.warnings.push(...(file.externalAgentWarnings ?? []));
     out.warnings.push(...(file.subagentProfileWarnings ?? []));
+    out.warnings.push(...(file.worktreeWarnings ?? []));
     if (kind === "app" || kind === "user") {
       const layerNames = new Set<string>();
       for (const entry of file.externalAgents ?? []) {
@@ -485,6 +510,82 @@ export function mergeLayers(layers: readonly MergeLayer[]): MergeResult {
         origins["notifications.sound"] = kind;
       }
       out.notifications = { ...current, events };
+    }
+    const git = file.git;
+    if (git !== undefined) {
+      const current = out.git ?? {
+        ...DEFAULT_GIT_CONFIG,
+        instructions: { ...DEFAULT_GIT_CONFIG.instructions },
+      };
+      const instructions = { ...current.instructions };
+      if (git.branchPrefix !== undefined) {
+        current.branchPrefix = git.branchPrefix;
+        origins["git.branchPrefix"] = kind;
+      }
+      if (git.forcePush !== undefined) {
+        current.forcePush = git.forcePush;
+        origins["git.forcePush"] = kind;
+      }
+      if (git.mergeMethod !== undefined) {
+        current.mergeMethod = git.mergeMethod;
+        origins["git.mergeMethod"] = kind;
+      }
+      if (git.draftPr !== undefined) {
+        current.draftPr = git.draftPr;
+        origins["git.draftPr"] = kind;
+      }
+      if (git.reviewView !== undefined) {
+        current.reviewView = git.reviewView;
+        origins["git.reviewView"] = kind;
+      }
+      if (git.instructions?.commit !== undefined) {
+        instructions.commit = git.instructions.commit;
+        origins["git.instructions.commit"] = kind;
+      }
+      if (git.instructions?.prTitle !== undefined) {
+        instructions.prTitle = git.instructions.prTitle;
+        origins["git.instructions.prTitle"] = kind;
+      }
+      if (git.instructions?.prBody !== undefined) {
+        instructions.prBody = git.instructions.prBody;
+        origins["git.instructions.prBody"] = kind;
+      }
+      out.git = { ...current, instructions };
+    }
+    const wt = file.worktree;
+    if (wt !== undefined) {
+      if (kind === "project") {
+        out.warnings.push(
+          `项目配置 ${layer.path ?? "config.json"} 中的 worktree 配置已忽略（只允许用户级配置，信任项目也不生效）`,
+        );
+      } else {
+        const current = out.worktree ?? { ...DEFAULT_WORKTREE_CONFIG };
+        if (wt.sessionRoot !== undefined) {
+          current.sessionRoot = normalizeWorktreeRootInput(wt.sessionRoot);
+          origins["worktree.sessionRoot"] = kind;
+        }
+        if (wt.subagentRoot !== undefined) {
+          current.subagentRoot = normalizeWorktreeRootInput(wt.subagentRoot);
+          origins["worktree.subagentRoot"] = kind;
+        }
+        if (wt.fetchBeforeCreate !== undefined) {
+          current.fetchBeforeCreate = wt.fetchBeforeCreate;
+          origins["worktree.fetchBeforeCreate"] = kind;
+        }
+        if (wt.autoDelete !== undefined) {
+          current.autoDelete = wt.autoDelete;
+          origins["worktree.autoDelete"] = kind;
+        }
+        if (wt.keepCount !== undefined) {
+          current.keepCount = wt.keepCount;
+          origins["worktree.keepCount"] = kind;
+        }
+        if (wt.askBeforeDelete !== undefined) {
+          current.askBeforeDelete = wt.askBeforeDelete;
+          origins["worktree.askBeforeDelete"] = kind;
+        }
+        out.worktree = current;
+      }
     }
     if (file.reasoningEffort !== undefined) out.reasoningEffort = file.reasoningEffort;
     // ADR-0034：所有 shell 声明均在配置合并链里处理。

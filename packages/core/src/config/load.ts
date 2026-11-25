@@ -5,8 +5,10 @@
  * v0.2 增补：凭据存储、providers.json 向导写入接口、recent-models.json。
  */
 import {
+  DEFAULT_GIT_CONFIG,
   DEFAULT_HOOK_TIMEOUT_MS,
   DEFAULT_PRUNE_LIMIT,
+  DEFAULT_WORKTREE_CONFIG,
   HOOK_POINTS,
   isToolHookPoint,
   MAX_HOOK_TIMEOUT_MS,
@@ -528,6 +530,99 @@ export async function loadConfig(
           String(effectiveMemory.project),
           savedMemory?.project === undefined ? undefined : String(savedMemory.project),
         ],
+        [
+          "git.branchPrefix",
+          "git.branchPrefix",
+          merged.resolved.git?.branchPrefix ?? DEFAULT_GIT_CONFIG.branchPrefix,
+          saved.git?.branchPrefix,
+        ],
+        [
+          "git.forcePush",
+          "git.forcePush",
+          String(merged.resolved.git?.forcePush ?? DEFAULT_GIT_CONFIG.forcePush),
+          saved.git?.forcePush === undefined ? undefined : String(saved.git.forcePush),
+        ],
+        [
+          "git.mergeMethod",
+          "git.mergeMethod",
+          merged.resolved.git?.mergeMethod ?? DEFAULT_GIT_CONFIG.mergeMethod,
+          saved.git?.mergeMethod,
+        ],
+        [
+          "git.draftPr",
+          "git.draftPr",
+          String(merged.resolved.git?.draftPr ?? DEFAULT_GIT_CONFIG.draftPr),
+          saved.git?.draftPr === undefined ? undefined : String(saved.git.draftPr),
+        ],
+        [
+          "git.reviewView",
+          "git.reviewView",
+          merged.resolved.git?.reviewView ?? DEFAULT_GIT_CONFIG.reviewView,
+          saved.git?.reviewView,
+        ],
+        [
+          "git.instructions.commit",
+          "git.instructions.commit",
+          merged.resolved.git?.instructions.commit ?? DEFAULT_GIT_CONFIG.instructions.commit,
+          saved.git?.instructions?.commit,
+        ],
+        [
+          "git.instructions.prTitle",
+          "git.instructions.prTitle",
+          merged.resolved.git?.instructions.prTitle ?? DEFAULT_GIT_CONFIG.instructions.prTitle,
+          saved.git?.instructions?.prTitle,
+        ],
+        [
+          "git.instructions.prBody",
+          "git.instructions.prBody",
+          merged.resolved.git?.instructions.prBody ?? DEFAULT_GIT_CONFIG.instructions.prBody,
+          saved.git?.instructions?.prBody,
+        ],
+        [
+          "worktree.sessionRoot",
+          "worktree.sessionRoot",
+          merged.resolved.worktree?.sessionRoot ?? DEFAULT_WORKTREE_CONFIG.sessionRoot,
+          saved.worktree?.sessionRoot,
+        ],
+        [
+          "worktree.subagentRoot",
+          "worktree.subagentRoot",
+          merged.resolved.worktree?.subagentRoot ?? DEFAULT_WORKTREE_CONFIG.subagentRoot,
+          saved.worktree?.subagentRoot,
+        ],
+        [
+          "worktree.fetchBeforeCreate",
+          "worktree.fetchBeforeCreate",
+          String(
+            merged.resolved.worktree?.fetchBeforeCreate ??
+              DEFAULT_WORKTREE_CONFIG.fetchBeforeCreate,
+          ),
+          saved.worktree?.fetchBeforeCreate === undefined
+            ? undefined
+            : String(saved.worktree.fetchBeforeCreate),
+        ],
+        [
+          "worktree.autoDelete",
+          "worktree.autoDelete",
+          String(merged.resolved.worktree?.autoDelete ?? DEFAULT_WORKTREE_CONFIG.autoDelete),
+          saved.worktree?.autoDelete === undefined ? undefined : String(saved.worktree.autoDelete),
+        ],
+        [
+          "worktree.keepCount",
+          "worktree.keepCount",
+          String(merged.resolved.worktree?.keepCount ?? DEFAULT_WORKTREE_CONFIG.keepCount),
+          saved.worktree?.keepCount === undefined ? undefined : String(saved.worktree.keepCount),
+        ],
+        [
+          "worktree.askBeforeDelete",
+          "worktree.askBeforeDelete",
+          String(
+            merged.resolved.worktree?.askBeforeDelete ?? DEFAULT_WORKTREE_CONFIG.askBeforeDelete,
+          ),
+          saved.worktree?.askBeforeDelete === undefined
+            ? undefined
+            : String(saved.worktree.askBeforeDelete),
+        ],
         ...Object.entries(merged.resolved.subagentProfiles ?? {}).map(
           ([name, profile]) =>
             [
@@ -644,7 +739,10 @@ export async function loadConfig(
     let projectPresent = false;
     try {
       projectFile = await loadConfigFile(fs, projectPath, "project");
-      if (!trusted) warnings.push(...(projectFile?.externalAgentWarnings ?? []));
+      if (!trusted) {
+        warnings.push(...(projectFile?.externalAgentWarnings ?? []));
+        warnings.push(...(projectFile?.worktreeWarnings ?? []));
+      }
       projectPresent = projectFile !== undefined;
     } catch (e) {
       // 项目配置损坏：整份忽略 + 警告，不阻塞会话（config.md 第 2 节）

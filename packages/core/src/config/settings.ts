@@ -13,8 +13,11 @@ import type { ConfigFile, SettingsPatch } from "./types.js";
 import { MODEL_ROLES } from "./types.js";
 import type { CustomTheme, MemorySettings, ReasoningEffort } from "../protocol/index.js";
 import {
+  GIT_SETTING_KEYS,
+  WORKTREE_SETTING_KEYS,
   isValidPluginSubagentId,
   isValidSubagentProfileName,
+  normalizeWorktreeRootInput,
   validateCustomThemes,
 } from "../protocol/index.js";
 
@@ -67,6 +70,8 @@ const reservedFields = new Set([
   "notifications",
   "appearance",
   "memory",
+  "git",
+  "worktree",
   "disabledProviders",
   "disabledModels",
 ]);
@@ -108,11 +113,13 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
         key !== "appearance.customThemes" &&
         key !== "memory.global" &&
         key !== "memory.project" &&
+        !(GIT_SETTING_KEYS as readonly string[]).includes(key) &&
+        !(WORKTREE_SETTING_KEYS as readonly string[]).includes(key) &&
         !NOTIFY_KEYS.includes(key),
     )
   ) {
     throw new TypeError(
-      "仅支持 decisionModel、goalCheck、permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.*、notifications.*、subagents.profiles.*、appearance.themePreset、appearance.customThemes、memory.global 与 memory.project；默认档位随默认模型经 setDefaultModel 保存",
+      "仅支持 decisionModel、goalCheck、permissions.preset、permission.reviewer、permission.reviewerRules、compaction.threshold、compaction.pruneLimit、mcp.toolSearch、modelRoles.*、notifications.*、subagents.profiles.*、appearance.themePreset、appearance.customThemes、memory.global、memory.project、git.* 与 worktree.*；默认档位随默认模型经 setDefaultModel 保存",
     );
   }
   const patch = input as SettingsPatch;
@@ -225,6 +232,84 @@ export function validateSettingsPatch(input: unknown): asserts input is Settings
                 : {}),
               ...(patch["notifications.sound"] != null
                 ? { sound: patch["notifications.sound"] }
+                : {}),
+            },
+          }
+        : {}),
+      ...(patch["git.branchPrefix"] != null ||
+      patch["git.forcePush"] != null ||
+      patch["git.mergeMethod"] != null ||
+      patch["git.draftPr"] != null ||
+      patch["git.reviewView"] != null ||
+      patch["git.instructions.commit"] != null ||
+      patch["git.instructions.prTitle"] != null ||
+      patch["git.instructions.prBody"] != null
+        ? {
+            git: {
+              ...(patch["git.branchPrefix"] != null
+                ? { branchPrefix: patch["git.branchPrefix"] }
+                : {}),
+              ...(patch["git.forcePush"] != null ? { forcePush: patch["git.forcePush"] } : {}),
+              ...(patch["git.mergeMethod"] != null
+                ? { mergeMethod: patch["git.mergeMethod"] }
+                : {}),
+              ...(patch["git.draftPr"] != null ? { draftPr: patch["git.draftPr"] } : {}),
+              ...(patch["git.reviewView"] != null ? { reviewView: patch["git.reviewView"] } : {}),
+              ...(patch["git.instructions.commit"] != null ||
+              patch["git.instructions.prTitle"] != null ||
+              patch["git.instructions.prBody"] != null
+                ? {
+                    instructions: {
+                      ...(patch["git.instructions.commit"] != null
+                        ? { commit: patch["git.instructions.commit"] }
+                        : {}),
+                      ...(patch["git.instructions.prTitle"] != null
+                        ? { prTitle: patch["git.instructions.prTitle"] }
+                        : {}),
+                      ...(patch["git.instructions.prBody"] != null
+                        ? { prBody: patch["git.instructions.prBody"] }
+                        : {}),
+                    },
+                  }
+                : {}),
+            },
+          }
+        : {}),
+      ...(patch["worktree.sessionRoot"] != null ||
+      patch["worktree.subagentRoot"] != null ||
+      patch["worktree.fetchBeforeCreate"] != null ||
+      patch["worktree.autoDelete"] != null ||
+      patch["worktree.keepCount"] != null ||
+      patch["worktree.askBeforeDelete"] != null
+        ? {
+            worktree: {
+              ...(patch["worktree.sessionRoot"] != null
+                ? {
+                    sessionRoot:
+                      typeof patch["worktree.sessionRoot"] === "string"
+                        ? normalizeWorktreeRootInput(patch["worktree.sessionRoot"])
+                        : patch["worktree.sessionRoot"],
+                  }
+                : {}),
+              ...(patch["worktree.subagentRoot"] != null
+                ? {
+                    subagentRoot:
+                      typeof patch["worktree.subagentRoot"] === "string"
+                        ? normalizeWorktreeRootInput(patch["worktree.subagentRoot"])
+                        : patch["worktree.subagentRoot"],
+                  }
+                : {}),
+              ...(patch["worktree.fetchBeforeCreate"] != null
+                ? { fetchBeforeCreate: patch["worktree.fetchBeforeCreate"] }
+                : {}),
+              ...(patch["worktree.autoDelete"] != null
+                ? { autoDelete: patch["worktree.autoDelete"] }
+                : {}),
+              ...(patch["worktree.keepCount"] != null
+                ? { keepCount: patch["worktree.keepCount"] }
+                : {}),
+              ...(patch["worktree.askBeforeDelete"] != null
+                ? { askBeforeDelete: patch["worktree.askBeforeDelete"] }
                 : {}),
             },
           }
@@ -357,6 +442,84 @@ function configFields(data: SettingsData, warn?: (message: string) => void): Con
               warn?.(`settings.json 的 notifications.events.${key} 无效，已忽略`);
             }
           }
+        }
+      }
+    }
+  }
+  if (Object.hasOwn(data, "git")) {
+    const git = data.git;
+    if (typeof git !== "object" || git === null || Array.isArray(git)) {
+      warn?.("settings.json 的 git 无效，已忽略");
+    } else {
+      const fields = git as Record<string, unknown>;
+      for (const key of [
+        "branchPrefix",
+        "forcePush",
+        "mergeMethod",
+        "draftPr",
+        "reviewView",
+      ] as const) {
+        if (!Object.hasOwn(fields, key) || fields[key] === undefined) continue;
+        try {
+          const parsed = parseConfigFile({ git: { [key]: fields[key] } }, "settings.json");
+          result.git = { ...result.git, ...parsed.git };
+        } catch {
+          warn?.(`settings.json 的 git.${key} 无效，已忽略`);
+        }
+      }
+      if (Object.hasOwn(fields, "instructions")) {
+        const instructions = fields.instructions;
+        if (
+          typeof instructions !== "object" ||
+          instructions === null ||
+          Array.isArray(instructions)
+        ) {
+          warn?.("settings.json 的 git.instructions 无效，已忽略");
+        } else {
+          const insFields = instructions as Record<string, unknown>;
+          for (const key of ["commit", "prTitle", "prBody"] as const) {
+            if (!Object.hasOwn(insFields, key) || insFields[key] === undefined) continue;
+            try {
+              const parsed = parseConfigFile(
+                { git: { instructions: { [key]: insFields[key] } } },
+                "settings.json",
+              );
+              result.git = {
+                ...result.git,
+                instructions: { ...result.git?.instructions, ...parsed.git?.instructions },
+              };
+            } catch {
+              warn?.(`settings.json 的 git.instructions.${key} 无效，已忽略`);
+            }
+          }
+        }
+      }
+    }
+  }
+  if (Object.hasOwn(data, "worktree")) {
+    const worktree = data.worktree;
+    if (typeof worktree !== "object" || worktree === null || Array.isArray(worktree)) {
+      warn?.("settings.json 的 worktree 无效，已忽略");
+    } else {
+      const fields = worktree as Record<string, unknown>;
+      for (const key of [
+        "sessionRoot",
+        "subagentRoot",
+        "fetchBeforeCreate",
+        "autoDelete",
+        "keepCount",
+        "askBeforeDelete",
+      ] as const) {
+        if (!Object.hasOwn(fields, key) || fields[key] === undefined) continue;
+        try {
+          const value =
+            (key === "sessionRoot" || key === "subagentRoot") && typeof fields[key] === "string"
+              ? normalizeWorktreeRootInput(fields[key])
+              : fields[key];
+          const parsed = parseConfigFile({ worktree: { [key]: value } }, "settings.json");
+          result.worktree = { ...result.worktree, ...parsed.worktree };
+        } catch {
+          warn?.(`settings.json 的 worktree.${key} 无效，已忽略`);
         }
       }
     }
@@ -837,6 +1000,97 @@ export async function loadSettingsStore(
             else if (memoryProject !== undefined) memory.project = memoryProject;
             if (Object.keys(memory).length > 0) next.memory = memory;
             else delete next.memory;
+          }
+          const gitBranchPrefix = patch["git.branchPrefix"];
+          const gitForcePush = patch["git.forcePush"];
+          const gitMergeMethod = patch["git.mergeMethod"];
+          const gitDraftPr = patch["git.draftPr"];
+          const gitReviewView = patch["git.reviewView"];
+          const gitInsCommit = patch["git.instructions.commit"];
+          const gitInsPrTitle = patch["git.instructions.prTitle"];
+          const gitInsPrBody = patch["git.instructions.prBody"];
+          if (
+            gitBranchPrefix !== undefined ||
+            gitForcePush !== undefined ||
+            gitMergeMethod !== undefined ||
+            gitDraftPr !== undefined ||
+            gitReviewView !== undefined ||
+            gitInsCommit !== undefined ||
+            gitInsPrTitle !== undefined ||
+            gitInsPrBody !== undefined
+          ) {
+            const raw = next.git;
+            const git: Record<string, unknown> =
+              typeof raw === "object" && raw !== null && !Array.isArray(raw)
+                ? { ...(raw as Record<string, unknown>) }
+                : {};
+            const rawIns = git.instructions;
+            const instructions: Record<string, unknown> =
+              typeof rawIns === "object" && rawIns !== null && !Array.isArray(rawIns)
+                ? { ...(rawIns as Record<string, unknown>) }
+                : {};
+            if (gitBranchPrefix === null) delete git.branchPrefix;
+            else if (gitBranchPrefix !== undefined) git.branchPrefix = gitBranchPrefix;
+            if (gitForcePush === null) delete git.forcePush;
+            else if (gitForcePush !== undefined) git.forcePush = gitForcePush;
+            if (gitMergeMethod === null) delete git.mergeMethod;
+            else if (gitMergeMethod !== undefined) git.mergeMethod = gitMergeMethod;
+            if (gitDraftPr === null) delete git.draftPr;
+            else if (gitDraftPr !== undefined) git.draftPr = gitDraftPr;
+            if (gitReviewView === null) delete git.reviewView;
+            else if (gitReviewView !== undefined) git.reviewView = gitReviewView;
+            if (gitInsCommit === null || gitInsCommit === "") delete instructions.commit;
+            else if (gitInsCommit !== undefined) instructions.commit = gitInsCommit;
+            if (gitInsPrTitle === null || gitInsPrTitle === "") delete instructions.prTitle;
+            else if (gitInsPrTitle !== undefined) instructions.prTitle = gitInsPrTitle;
+            if (gitInsPrBody === null || gitInsPrBody === "") delete instructions.prBody;
+            else if (gitInsPrBody !== undefined) instructions.prBody = gitInsPrBody;
+            if (Object.keys(instructions).length > 0) git.instructions = instructions;
+            else delete git.instructions;
+            if (Object.keys(git).length > 0) next.git = git;
+            else delete next.git;
+          }
+          const wtSessionRoot = patch["worktree.sessionRoot"];
+          const wtSubagentRoot = patch["worktree.subagentRoot"];
+          const wtFetch = patch["worktree.fetchBeforeCreate"];
+          const wtAutoDelete = patch["worktree.autoDelete"];
+          const wtKeepCount = patch["worktree.keepCount"];
+          const wtAskDelete = patch["worktree.askBeforeDelete"];
+          if (
+            wtSessionRoot !== undefined ||
+            wtSubagentRoot !== undefined ||
+            wtFetch !== undefined ||
+            wtAutoDelete !== undefined ||
+            wtKeepCount !== undefined ||
+            wtAskDelete !== undefined
+          ) {
+            const raw = next.worktree;
+            const worktree: Record<string, unknown> =
+              typeof raw === "object" && raw !== null && !Array.isArray(raw)
+                ? { ...(raw as Record<string, unknown>) }
+                : {};
+            if (wtSessionRoot === null) delete worktree.sessionRoot;
+            else if (wtSessionRoot !== undefined) {
+              const normalized = normalizeWorktreeRootInput(wtSessionRoot);
+              if (normalized === "") delete worktree.sessionRoot;
+              else worktree.sessionRoot = normalized;
+            }
+            if (wtSubagentRoot === null) delete worktree.subagentRoot;
+            else if (wtSubagentRoot !== undefined) {
+              const normalized = normalizeWorktreeRootInput(wtSubagentRoot);
+              if (normalized === "") delete worktree.subagentRoot;
+              else worktree.subagentRoot = normalized;
+            }
+            if (wtFetch === null) delete worktree.fetchBeforeCreate;
+            else if (wtFetch !== undefined) worktree.fetchBeforeCreate = wtFetch;
+            if (wtAutoDelete === null) delete worktree.autoDelete;
+            else if (wtAutoDelete !== undefined) worktree.autoDelete = wtAutoDelete;
+            if (wtKeepCount === null) delete worktree.keepCount;
+            else if (wtKeepCount !== undefined) worktree.keepCount = wtKeepCount;
+            if (wtAskDelete === null) delete worktree.askBeforeDelete;
+            else if (wtAskDelete !== undefined) worktree.askBeforeDelete = wtAskDelete;
+            if (Object.keys(worktree).length > 0) next.worktree = worktree;
+            else delete next.worktree;
           }
         });
       },
