@@ -113,6 +113,7 @@ interface ManagedSession {
   client: AgentContext;
   busy: boolean;
   closing: boolean;
+  closePromise: Promise<void> | undefined;
   cancelRequested: boolean;
   turnAbort: AbortController | undefined;
   turnPromise: Promise<void> | undefined;
@@ -573,6 +574,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
   const { runtime, platform, version, diagnostics } = options;
   const sessions = new Map<string, ManagedSession>();
   const inFlightCreations = new Set<Promise<void>>();
+  const inFlightCloses = new Set<Promise<void>>();
   let activeConnection: AgentConnection | undefined;
   let closing = false;
   let closePromise: Promise<void> | undefined;
@@ -600,39 +602,52 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     entry.session.interrupt();
   };
 
-  const closeEntry = async (entry: ManagedSession): Promise<void> => {
-    if (entry.closing) return;
+  const closeEntry = (entry: ManagedSession): Promise<void> => {
+    if (entry.closePromise !== undefined) return entry.closePromise;
     entry.closing = true;
     sessions.delete(entry.id);
-    if (entry.busy) {
-      cancelEntry(entry);
-      await entry.turnPromise?.catch(() => undefined);
-    } else {
-      abortEntryPermissions(entry);
-    }
-    entry.unsubscribe();
-    try {
-      await entry.session.close();
-    } finally {
-      entry.credentialsMap.clear();
-    }
+    const promise = (async () => {
+      if (entry.busy) {
+        cancelEntry(entry);
+        await entry.turnPromise?.catch(() => undefined);
+      } else {
+        abortEntryPermissions(entry);
+      }
+      entry.unsubscribe();
+      try {
+        await entry.session.close();
+      } finally {
+        entry.credentialsMap.clear();
+      }
+    })();
+    const tracked = promise.then(
+      () => undefined,
+      () => undefined,
+    );
+    inFlightCloses.add(tracked);
+    void tracked.finally(() => {
+      inFlightCloses.delete(tracked);
+    });
+    entry.closePromise = promise;
+    return promise;
   };
 
   const closeAll = (): Promise<void> => {
     if (closePromise !== undefined) return closePromise;
     closing = true;
     closePromise = (async () => {
-      const open = [...sessions.values()];
-      for (const entry of open) {
-        if (entry.busy) cancelEntry(entry);
+      while (sessions.size > 0 || inFlightCreations.size > 0 || inFlightCloses.size > 0) {
+        const open = [...sessions.values()];
+        for (const entry of open) {
+          if (entry.busy) cancelEntry(entry);
+        }
+        const tasks: Promise<unknown>[] = [
+          ...open.map((entry) => closeEntry(entry).catch(() => undefined)),
+          ...inFlightCreations,
+          ...inFlightCloses,
+        ];
+        await Promise.allSettled(tasks);
       }
-      await Promise.all(open.map((entry) => closeEntry(entry).catch(() => undefined)));
-      if (inFlightCreations.size > 0) {
-        await Promise.allSettled([...inFlightCreations]);
-      }
-      // 再次兜底清理关闭途中刚完成登记的会话
-      const remaining = [...sessions.values()];
-      await Promise.all(remaining.map((entry) => closeEntry(entry).catch(() => undefined)));
       activeConnection?.close();
     })();
     return closePromise;
@@ -650,9 +665,14 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     return runtime.listModels({ workspaceRoot }).find((m) => m.unavailable === undefined)?.ref;
   };
 
-  const isServerClosing = (): boolean => closing;
+  const isServerClosing = (): boolean => closing || Boolean(activeConnection?.signal.aborted);
+  const isCreationAborted = (signal?: AbortSignal): boolean =>
+    isServerClosing() || Boolean(signal?.aborted);
   const isEntryStopped = (entry: ManagedSession, controller?: AbortController): boolean =>
-    Boolean(controller?.signal.aborted) || entry.closing || closing || entry.cancelRequested;
+    Boolean(controller?.signal.aborted) ||
+    entry.closing ||
+    isServerClosing() ||
+    entry.cancelRequested;
 
   const forwardPermission = (
     entry: ManagedSession,
@@ -833,7 +853,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
   };
 
   const handleSessionEvent = (entry: ManagedSession, event: RuntimeEvent): void => {
-    if (entry.closing || closing) return;
+    if (entry.closing || isServerClosing()) return;
 
     switch (event.type) {
       case "message.assistant.delta": {
@@ -1109,8 +1129,9 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
   const handleNewSession = async (
     params: NewSessionRequest,
     client: AgentContext,
+    signal: AbortSignal,
   ): Promise<NewSessionResponse> => {
-    if (closing) {
+    if (isCreationAborted(signal)) {
       throw RequestError.invalidRequest(undefined, "ACP 连接正在关闭");
     }
     if (!isAbsolutePath(platform, params.cwd)) {
@@ -1124,21 +1145,48 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     }
 
     const stat = await platform.fs.stat(params.cwd).catch(() => undefined);
+    if (isCreationAborted(signal)) {
+      throw RequestError.invalidRequest(undefined, "ACP 连接已关闭");
+    }
     if (stat?.type !== "directory") {
       throw RequestError.invalidParams(
         { cwd: params.cwd },
         `工作目录不存在或不是目录：${params.cwd}`,
       );
     }
-    const realCwd = await platform.resolveReal(params.cwd);
+
+    let realCwd: string;
+    try {
+      realCwd = await platform.resolveReal(params.cwd);
+    } catch (err) {
+      if (isCreationAborted(signal)) {
+        throw RequestError.invalidRequest(undefined, "ACP 连接已关闭");
+      }
+      throw RequestError.invalidParams(
+        { cwd: params.cwd },
+        `无法解析工作目录：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (isCreationAborted(signal)) {
+      throw RequestError.invalidRequest(undefined, "ACP 连接已关闭");
+    }
+
     const translatedMcp = translateHostMcpServers(params.mcpServers);
     const credentialsMap = translatedMcp?.credentialsMap ?? new Map<string, string>();
+
+    const onPreCreateAbort = (): void => {
+      credentialsMap.clear();
+    };
+    signal.addEventListener("abort", onPreCreateAbort, { once: true });
 
     let resolvedModel: string | ModelRef | undefined;
     try {
       resolvedModel = await resolveSessionModel(realCwd);
     } catch (err) {
       credentialsMap.clear();
+      if (isCreationAborted(signal)) {
+        throw RequestError.invalidRequest(undefined, "ACP 连接已关闭");
+      }
       if (err instanceof RequestError) throw err;
       if (err instanceof RuntimeCommandError) {
         if (err.code === "invalid_model") {
@@ -1150,14 +1198,23 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         throw RequestError.internalError({ code: err.code }, err.message);
       }
       throw RequestError.internalError(undefined, err instanceof Error ? err.message : String(err));
+    } finally {
+      signal.removeEventListener("abort", onPreCreateAbort);
+    }
+    if (isCreationAborted(signal)) {
+      credentialsMap.clear();
+      throw RequestError.invalidRequest(undefined, "ACP 连接已关闭");
     }
     if (resolvedModel === undefined) {
       credentialsMap.clear();
       throw formatModelConfigError();
     }
 
+    // 同步登记到 inFlightCreations，确保在进入 runtime.createSession 后 closeAll 必等其释放完毕
+    const { promise: tracked, resolve: finishTracked } = Promise.withResolvers<undefined>();
+    inFlightCreations.add(tracked);
     let createdSession: RuntimeSession | undefined;
-    const creation = (async () => {
+    try {
       try {
         createdSession = await runtime.createSession({
           model: resolvedModel,
@@ -1186,7 +1243,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         );
       }
 
-      if (isServerClosing()) {
+      if (isCreationAborted(signal)) {
         await createdSession.close().catch(() => undefined);
         credentialsMap.clear();
         throw RequestError.invalidRequest(undefined, "ACP 连接已关闭");
@@ -1203,6 +1260,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         client,
         busy: false,
         closing: false,
+        closePromise: undefined,
         cancelRequested: false,
         turnAbort: undefined,
         turnPromise: undefined,
@@ -1215,7 +1273,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         pendingPermissions: new Map(),
         pendingSubagentPermissions: new Map(),
         enqueueUpdate: (update) => {
-          if (entry.closing || closing || activeConnection?.signal.aborted) return;
+          if (entry.closing || isServerClosing()) return;
           entry.notifyQueue = entry.notifyQueue
             .then(() =>
               entry.client.notify(methods.client.session.update, {
@@ -1232,22 +1290,11 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       });
       sessions.set(session.id, entry);
       recordDiag({ event: "session_new", sessionId: session.id });
-    })();
-
-    const tracked = creation.then(
-      () => undefined,
-      () => undefined,
-    );
-    inFlightCreations.add(tracked);
-    void tracked.finally(() => {
+      return { sessionId: session.id };
+    } finally {
       inFlightCreations.delete(tracked);
-    });
-
-    await creation;
-    if (createdSession === undefined) {
-      throw RequestError.internalError(undefined, "创建会话失败");
+      finishTracked(undefined);
     }
-    return { sessionId: createdSession.id };
   };
 
   const handlePrompt = async (
@@ -1258,7 +1305,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     if (entry === undefined) {
       throw RequestError.resourceNotFound(params.sessionId);
     }
-    if (entry.closing || closing) {
+    if (entry.closing || isServerClosing()) {
       throw RequestError.invalidRequest({ sessionId: params.sessionId }, "会话已关闭");
     }
     if (entry.busy) {
@@ -1345,7 +1392,9 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
 
   const app = agent({ name: "nocturne" })
     .onRequest(methods.agent.initialize, (ctx) => handleInitialize(ctx.params))
-    .onRequest(methods.agent.session.new, (ctx) => handleNewSession(ctx.params, ctx.client))
+    .onRequest(methods.agent.session.new, (ctx) =>
+      handleNewSession(ctx.params, ctx.client, ctx.signal),
+    )
     .onRequest(methods.agent.session.prompt, (ctx) => handlePrompt(ctx.params, ctx.signal))
     .onRequest(methods.agent.session.close, (ctx) => handleCloseSession(ctx.params.sessionId))
     .onNotification(methods.agent.session.cancel, (ctx) => {
