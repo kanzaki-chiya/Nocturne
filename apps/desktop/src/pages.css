@@ -307,17 +307,18 @@
   color: var(--a-warning);
 }
 
-/* 对话框（模型设置、设置页复合项共用） */
-.page3 .scrim {
+/* 对话框（DESIGN.md §5 的共享组件类）：设置区各页与会话区概览的确认框共用同一套样式；
+   遮罩压在概览浮层（z 22）与快速打开（z 30）之上，语义色与尺寸沿用 token */
+.scrim {
   position: absolute;
   inset: 0;
   /* stylelint-disable-next-line color-no-hex, function-disallowed-list -- 设置页对话框遮罩固定 32% 黑，深浅色共用 */
   background: color-mix(in srgb, #000 32%, transparent);
   display: grid;
   place-items: center;
-  z-index: 4;
+  z-index: 40;
 }
-.page3 .dlg {
+.dlg {
   width: 580px;
   max-width: calc(100% - 48px);
   max-height: calc(100% - 48px);
@@ -328,19 +329,19 @@
   box-shadow: var(--shadow-dialog);
   display: grid;
 }
-.page3 .dlg .dh3 {
+.dlg .dh3 {
   padding: 16px 20px 10px;
   display: grid;
   gap: 2px;
 }
-.page3 .dlg .dh3 b {
+.dlg .dh3 b {
   font-size: var(--fs-4);
 }
-.page3 .dlg .dh3 span {
+.dlg .dh3 span {
   color: var(--a-muted);
   font-size: var(--fs-1);
 }
-.page3 .dlg .db {
+.dlg .db {
   padding: 4px 20px 14px;
   display: grid;
   gap: 2px;
@@ -370,28 +371,28 @@
   color: var(--a-faint);
   cursor: default;
 }
-.page3 .dlg .df {
+.dlg .df {
   display: flex;
   gap: 8px;
   padding: 12px 20px 16px;
   border-top: 1px solid var(--a-border);
   align-items: center;
 }
-.page3 .dlg .df .sp {
+.dlg .df .sp {
   margin-left: auto;
 }
-.page3 .dlg .errt {
+.dlg .errt {
   font-size: var(--fs-1);
   color: var(--a-error);
   padding: 0 20px 8px;
 }
-.page3 .dlg .picklist {
+.dlg .picklist {
   display: grid;
   gap: 1px;
   max-height: 260px;
   overflow-y: auto;
 }
-.page3 .dlg .picklist button {
+.dlg .picklist button {
   display: flex;
   gap: 8px;
   align-items: baseline;
@@ -404,17 +405,17 @@
   text-align: left;
   cursor: pointer;
 }
-.page3 .dlg .picklist button:hover {
+.dlg .picklist button:hover {
   background: var(--a-sel);
 }
-.page3 .dlg .picklist button .pv {
+.dlg .picklist button .pv {
   font-family: var(--mono);
   color: var(--a-text);
 }
-.page3 .dlg .picklist button small {
+.dlg .picklist button small {
   color: var(--a-faint);
 }
-.page3 .dlg .picklist button.on {
+.dlg .picklist button.on {
   background: var(--a-sel);
   color: var(--a-text);
 }
@@ -473,7 +474,7 @@
   letter-spacing: 0.08em;
   color: var(--a-text);
 }
-.page3 .dlg.narrow {
+.dlg.narrow {
   width: 440px;
 }
 .page3 .dlg .db > .field,
@@ -1220,7 +1221,7 @@
   align-items: center;
   gap: 10px;
 }
-.page3 .dlg .db {
+.dlg .db {
   gap: var(--space-4);
 }
 .page3 .dlg .field-head {

@@ -1112,16 +1112,58 @@ function UnstoredKey({ value }: { value: NonNullable<LoginCompleted["unstoredKey
 /* ---------------- 确认对话框 ---------------- */
 
 export function Scrim({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  // 关闭后把焦点还给打开对话框前聚焦的元素（如概览里的删除按钮）；元素已卸载则放弃。
+  // 必须在首次渲染时捕获：对话框内的 autoFocus 在提交阶段就把焦点挪进对话框，
+  // 等 effect 再读 activeElement 已经晚了
+  const [returnFocusTo] = useState<HTMLElement | null>(() => {
+    const active = document.activeElement;
+    return active instanceof HTMLElement ? active : null;
+  });
+  const root = useRef<HTMLDivElement>(null);
+  // onClose 每次渲染都换引用；窗口监听只注册一次、经 ref 读最新回调，
+  // 避免 effect 反复重跑导致清理与新注册交错时残留重复监听
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  // React 提交阶段会把焦点恢复给提交前聚焦的元素（触发器），覆盖按钮的 autoFocus，
+  // 导致焦点从没进过对话框、Esc 冒泡不到遮罩。提交后（effect）再把焦点拉进对话框
+  useEffect(() => {
+    const el = root.current;
+    if (el?.contains(document.activeElement) !== true) {
+      el?.querySelector<HTMLElement>(
+        "button, input, select, textarea, a[href], [tabindex]",
+      )?.focus();
+    }
+    // Esc 挂在窗口捕获阶段，注册顺序即优先级：权限卡片、提问卡片等更早注册的
+    // 捕获监听（Conversation.tsx）先执行，处理了会 preventDefault，这里就让位；
+    // 晚于对话框出现的层（概览、设置区返回、输入框弹层）反而排在后头， Esc 先关对话框。
+    // 焦点在对话框内时它在目标链上，本监听就会命中，遮罩上的合成 onKeyDown 只是
+    // 同一事件的重复保险；嵌套遮罩时后注册（内层）的先关，外层不吃这次 Esc。
+    // 已卸载遮罩的监听（卸载到被动清理之间，或清理遗漏）必须完全失活，
+    // 不能 preventDefault 或再触发关闭，否则吃掉之后打开的对话框的 Esc
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!el?.isConnected) return;
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      event.preventDefault();
+      onCloseRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      // 注册与移除的 capture 必须一致，否则监听泄漏
+      window.removeEventListener("keydown", onKeyDown, true);
+      if (returnFocusTo?.isConnected) returnFocusTo.focus();
+    };
+  }, [returnFocusTo]);
   return (
     <div
+      ref={root}
       className="scrim"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
       onKeyDown={(e) => {
         if (e.key !== "Escape") return;
-        // 设置区的 Esc =「返回」（App.tsx）认 defaultPrevented：这里关掉对话框后它已不在
-        // DOM 里，不标记的话同一次 Esc 会连设置页一起退出
+        // 窗口捕获监听（上方 effect）通常已先一步关闭并 preventDefault，这里是同一事件的
+        // 重复保险；不标记 defaultPrevented 的话同一次 Esc 会连带触发概览开关或设置区返回
         e.preventDefault();
         onClose();
       }}
@@ -1157,6 +1199,9 @@ export function ConfirmDialog({
   onConfirm: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  // busy 置位渲染前拦截重复确认（快速双击）：onConfirm 每次打开至多执行一次，
+  // 失败恢复为可重试（界面仍在原位显示错误的是各调用方的责任）
+  const confirming = useRef(false);
   return (
     <Scrim onClose={onClose}>
       <div className="dlg narrow" role="dialog" aria-label={title}>
@@ -1175,8 +1220,11 @@ export function ConfirmDialog({
             variant={danger ? "danger-solid" : "primary"}
             disabled={busy}
             onClick={() => {
+              if (confirming.current) return;
+              confirming.current = true;
               setBusy(true);
               void onConfirm().finally(() => {
+                confirming.current = false;
                 setBusy(false);
               });
             }}
