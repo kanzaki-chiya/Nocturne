@@ -384,4 +384,89 @@ describe("工作树设置页", () => {
       (screen.getByRole("textbox", { name: "保留的工作树数量" }) as HTMLInputElement).disabled,
     ).toBe(true);
   });
+
+  it("工作树删除确认与清理预览对话框遵循共享 Scrim 契约：默认聚焦取消、Esc 单层关闭还焦、双击只删一次", async () => {
+    const items = makeGitWorktreeItems();
+    const desc = makeWorktreeDescription();
+    let resolveDelete: ((res: WorktreeCleanupResult) => void) | undefined;
+    const deletedCalls: string[][] = [];
+    const srv = fakeServer(
+      withInit({
+        "runtime.describeSettings": () => items,
+        "worktrees.describe": () => desc,
+        "worktrees.delete": (params: { ids: string[] }) => {
+          deletedCalls.push(params.ids);
+          return new Promise<WorktreeCleanupResult>((resolve) => {
+            resolveDelete = resolve;
+          });
+        },
+      }),
+    );
+
+    // 模拟 App.tsx 设置区在弹窗打开前注册的窗口 Esc 监听（仅在无 .scrim / dialog / alertdialog 时关闭设置）
+    let settingsClosedByEsc = false;
+    const onSettingsEsc = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector('.scrim, [role="dialog"], [role="alertdialog"]') != null) return;
+      settingsClosedByEsc = true;
+    };
+    window.addEventListener("keydown", onSettingsEsc);
+    try {
+      renderSection("worktrees", srv.client);
+      expect(await screen.findByText("nocturne/20261125-a1b2c3")).toBeTruthy();
+
+      // 1) 清理预览弹窗：打开后默认聚焦「取消」，Esc 仅关弹窗不关设置、不删并还焦给「清理…」
+      const cleanTrigger = screen.getByRole("button", { name: "清理…" });
+      cleanTrigger.focus();
+      fireEvent.click(cleanTrigger);
+      const cleanDialog = await screen.findByRole("dialog", { name: "清理工作树" });
+      const cleanCancel = within(cleanDialog).getByRole("button", { name: "取消" });
+      expect(document.activeElement).toBe(cleanCancel);
+      fireEvent.keyDown(cleanCancel, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "清理工作树" })).toBeNull());
+      expect(settingsClosedByEsc).toBe(false);
+      expect(deletedCalls).toHaveLength(0);
+      expect(document.activeElement).toBe(cleanTrigger);
+
+      // 2) 删除确认弹窗：打开后默认聚焦「取消」，Esc 仅关弹窗不触发删除也不关设置，且还焦给行内删除按钮
+      const row = screen.getByText("nocturne/20261125-a1b2c3").closest(".wt-row") as HTMLElement;
+      const delTrigger = within(row).getByRole("button", { name: "删除" });
+      delTrigger.focus();
+      fireEvent.click(delTrigger);
+      const delDialog = await screen.findByRole("alertdialog", { name: "删除工作树？" });
+      const delCancel = within(delDialog).getByRole("button", { name: "取消" });
+      expect(document.activeElement).toBe(delCancel);
+      fireEvent.keyDown(delCancel, { key: "Escape" });
+      await waitFor(() =>
+        expect(screen.queryByRole("alertdialog", { name: "删除工作树？" })).toBeNull(),
+      );
+      expect(settingsClosedByEsc).toBe(false);
+      expect(deletedCalls).toHaveLength(0);
+      expect(document.activeElement).toBe(delTrigger);
+
+      // 3) 再次打开并快速双击「删除」：同步 ref 拦截，仅发出一次 worktrees.delete
+      fireEvent.click(delTrigger);
+      const delDialog2 = await screen.findByRole("alertdialog", { name: "删除工作树？" });
+      const confirmBtn = within(delDialog2).getByRole("button", { name: "删除" });
+      fireEvent.click(confirmBtn);
+      fireEvent.click(confirmBtn);
+      await waitFor(() => expect(deletedCalls).toHaveLength(1));
+      expect(deletedCalls[0]).toEqual(["subagent:2"]);
+      resolveDelete?.({
+        deleted: [
+          {
+            id: "subagent:2",
+            branch: "nocturne/20261125-a1b2c3",
+            path: "C:\\Users\\test\\.nocturne\\sessions\\worktrees\\child-2",
+            status: "deleted",
+            removedBranch: true,
+          },
+        ],
+        skipped: [],
+        failed: [],
+      });
+    } finally {
+      window.removeEventListener("keydown", onSettingsEsc);
+    }
+  });
 });

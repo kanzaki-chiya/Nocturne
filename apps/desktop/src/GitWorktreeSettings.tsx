@@ -282,6 +282,7 @@ export function GitSettingsSection({
                 event.preventDefault();
                 event.currentTarget.blur();
               } else if (event.key === "Escape") {
+                event.preventDefault();
                 setRowErr("git.branchPrefix", null);
                 setPrefixDraft(prefixValue);
                 event.currentTarget.blur();
@@ -524,6 +525,8 @@ export function WorktreeSettingsSection({
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const cleanCancelRef = useRef<HTMLButtonElement>(null);
   const delCancelRef = useRef<HTMLButtonElement>(null);
+  // 与共享 ConfirmDialog 对齐：在 cleaning 渲染生效前同步拦截快速双击，保证每次确认至多执行一次删除
+  const deletingRef = useRef(false);
 
   useEffect(() => {
     setSessionRootDraft(sessionRoot);
@@ -587,17 +590,13 @@ export function WorktreeSettingsSection({
           .map((item) => item.id),
       ),
     );
-    requestAnimationFrame(() => {
-      cleanCancelRef.current?.focus();
-    });
+    cleanCancelRef.current?.focus();
   }, [cleanOpen, cleanCandidates]);
 
   useEffect(() => {
     if (delTarget === null) return;
     setSkipAsk(false);
-    requestAnimationFrame(() => {
-      delCancelRef.current?.focus();
-    });
+    delCancelRef.current?.focus();
   }, [delTarget]);
 
   const commitRoot = async (
@@ -698,7 +697,8 @@ export function WorktreeSettingsSection({
     ids: string[],
     opts: { label?: string | undefined; skipAfter?: boolean | undefined },
   ) => {
-    if (client === undefined || ids.length === 0) return;
+    if (client === undefined || ids.length === 0 || deletingRef.current) return;
+    deletingRef.current = true;
     setCleaning(true);
     setListError(null);
     try {
@@ -737,6 +737,7 @@ export function WorktreeSettingsSection({
     } catch (error) {
       setListError(errText(error));
     } finally {
+      deletingRef.current = false;
       setCleaning(false);
     }
   };
@@ -838,6 +839,7 @@ export function WorktreeSettingsSection({
                 event.preventDefault();
                 event.currentTarget.blur();
               } else if (event.key === "Escape") {
+                event.preventDefault();
                 setRowErr("worktree.sessionRoot", null);
                 setSessionRootDraft(sessionRoot);
                 event.currentTarget.blur();
@@ -895,6 +897,7 @@ export function WorktreeSettingsSection({
                 event.preventDefault();
                 event.currentTarget.blur();
               } else if (event.key === "Escape") {
+                event.preventDefault();
                 setRowErr("worktree.subagentRoot", null);
                 setSubagentRootDraft(subagentRoot);
                 event.currentTarget.blur();
@@ -1004,6 +1007,7 @@ export function WorktreeSettingsSection({
                 event.preventDefault();
                 event.currentTarget.blur();
               } else if (event.key === "Escape") {
+                event.preventDefault();
                 setRowErr("worktree.keepCount", null);
                 setKeepDraft(String(keepCount));
                 event.currentTarget.blur();

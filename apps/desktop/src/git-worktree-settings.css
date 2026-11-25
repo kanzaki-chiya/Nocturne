@@ -113,16 +113,16 @@
   color: var(--a-muted);
 }
 
-.page3 .dlg.clean-dlg,
-.page3 .dlg.del-dlg {
+.dlg.clean-dlg,
+.dlg.del-dlg {
   grid-template-columns: minmax(0, 1fr);
 }
-.page3 .dlg.clean-dlg .db,
-.page3 .dlg.del-dlg .db {
+.dlg.clean-dlg .db,
+.dlg.del-dlg .db {
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
 }
-.page3 .dlg.clean-dlg .db {
+.dlg.clean-dlg .db {
   gap: 0;
   max-height: 440px;
   overflow-y: auto;

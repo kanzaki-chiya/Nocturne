@@ -1042,7 +1042,10 @@ export function App({ host }: { host: DesktopHost }) {
     if (page === null) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || searchOpenRef.current) return;
-      if (settingsRef.current?.querySelector('[role="dialog"]') != null) return;
+      if (
+        settingsRef.current?.querySelector('.scrim, [role="dialog"], [role="alertdialog"]') != null
+      )
+        return;
       setPage(null);
     };
     window.addEventListener("keydown", onKey);
