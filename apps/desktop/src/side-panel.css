@@ -1288,8 +1288,12 @@
   min-width: 0;
 }
 .ovpop-agent-profile {
+  overflow: hidden;
   color: var(--a-accent);
   font: var(--fs-1) var(--mono);
+  /* 档位·模型·耗时一行放下：长模型名截断（悬停 title 看全称），不许折行压进耗时区 */
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ovpop-agent-summary {
   overflow: hidden;
@@ -1349,6 +1353,7 @@
   font-size: var(--fs-1);
 }
 .ovpop-time {
+  flex: none;
   color: var(--a-muted);
   font-variant-numeric: tabular-nums;
 }

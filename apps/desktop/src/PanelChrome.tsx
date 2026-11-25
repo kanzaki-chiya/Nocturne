@@ -292,6 +292,8 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
           subagents.pendingPermissions?.some(
             (p) => p.childSessionId === agent.childSessionId || p.parentCallId === agent.callId,
           ) ?? false;
+        // 档位 · 模型 · 思考档位（可截断，截断时悬停经 title 看全称）
+        const agentProfile = [agent.profile, agent.model, agent.effort].filter(Boolean).join(" · ");
         const open = (
           <button
             key={agent.childSessionId}
@@ -304,8 +306,8 @@ function SubagentRows({ subagents }: { subagents: OverviewSubagents }) {
           >
             <Icon name="robot" size={ICON_SM} className="sp-glyph" />
             <span className="ovpop-agent-text">
-              <span className="ovpop-agent-profile">
-                {[agent.profile, agent.model, agent.effort].filter(Boolean).join(" · ")}
+              <span className="ovpop-agent-profile" title={agentProfile}>
+                {agentProfile}
               </span>
               <span className={`ovpop-agent-summary${awaitingPermission ? " warn" : ""}`}>
                 {Array.from(agent.taskSummary).slice(0, SUBAGENT_SUMMARY_MAX).join("")}
