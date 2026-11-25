@@ -779,6 +779,92 @@ it("快速切换时旧请求迟到不覆盖：返回后迟到的详情与乱序�
   f.close();
 });
 
+it("焦点恢复限定在当前记忆页：DOM 中更早的其他设置页 .crumb 不抢占", async () => {
+  // 模拟 SettingsDeck：另一个设置页（已 hidden）先渲染并保留同名 .crumb 按钮
+  const decoy = document.createElement("button");
+  decoy.className = "crumb";
+  decoy.textContent = "其他设置页";
+  const hiddenPage = document.createElement("div");
+  hiddenPage.hidden = true;
+  hiddenPage.appendChild(decoy);
+  document.body.prepend(hiddenPage);
+
+  const entries = projectEntries(30);
+  const f = fakeServer(
+    withInit({
+      "memory.describeMemory": () =>
+        desc({
+          global: scope({ entries: [meta()] }),
+          otherProjects: [otherProject({ key: "alpha-12345678", path: "Z:/code/alpha", entries })],
+        }),
+      "memory.readMemory": (params: Record<string, unknown>) => ({
+        scope: "project",
+        name: String(params.name),
+        description: "desc",
+        type: "user",
+        updatedAt: "2026-11-19T04:00:00.000Z",
+        content: "content",
+        raw: "raw",
+      }),
+    }),
+  );
+  await f.initialize();
+  renderMemoryPage(f);
+
+  const activeEl = () => document.activeElement as HTMLElement | null;
+  const memoryRoot = () => document.querySelector(".memory-page") as HTMLElement;
+
+  // 键盘进入项目子页：焦点必须落在记忆页自己的面包屑，而不是隐藏页的 .crumb
+  const region = await screen.findByRole("region", { name: "其他项目 · 1" });
+  const alphaRow = within(region).getByText("Z:/code/alpha").closest(".slist-row") as HTMLElement;
+  const openBtn = within(alphaRow).getByRole("button", { name: /alpha/ });
+  openBtn.focus();
+  fireEvent.keyDown(openBtn, { key: "Enter" });
+  fireEvent.click(openBtn);
+
+  await screen.findByRole("region", { name: "Z:/code/alpha · 30" });
+  await waitFor(() => {
+    expect(activeEl()?.classList.contains("crumb")).toBe(true);
+    expect(memoryRoot().contains(activeEl())).toBe(true);
+    expect(hiddenPage.contains(activeEl())).toBe(false);
+  });
+
+  // 键盘打开条目详情：同样聚焦记忆页自己的面包屑
+  const spage = document.querySelector(".spage") as HTMLElement;
+  spage.scrollTop = 90;
+  const listRegion = screen.getByRole("region", { name: "Z:/code/alpha · 30" });
+  const entryBtn = within(listRegion).getByRole("button", { name: /rule-15/ });
+  entryBtn.focus();
+  fireEvent.keyDown(entryBtn, { key: "Enter" });
+  fireEvent.click(entryBtn);
+  await screen.findByText("content");
+  await waitFor(() => {
+    expect(activeEl()?.classList.contains("crumb")).toBe(true);
+    expect(memoryRoot().contains(activeEl())).toBe(true);
+    expect(hiddenPage.contains(activeEl())).toBe(false);
+  });
+
+  // 返回项目子页：焦点落回 rule-15 行且滚动位置保持
+  fireEvent.click(screen.getByRole("button", { name: "Z:/code/alpha" }));
+  await screen.findByRole("region", { name: "Z:/code/alpha · 30" });
+  expect(spage.scrollTop).toBe(90);
+  await waitFor(() => {
+    expect(activeEl()?.closest('[data-mem-entry="rule-15"]')).toBeTruthy();
+    expect(hiddenPage.contains(activeEl())).toBe(false);
+  });
+
+  // 返回总览：焦点落回项目行
+  fireEvent.click(screen.getByRole("button", { name: "记忆" }));
+  await screen.findByRole("region", { name: "其他项目 · 1" });
+  await waitFor(() => {
+    expect(activeEl()?.closest('[data-mem-key="alpha-12345678"]')).toBeTruthy();
+    expect(hiddenPage.contains(activeEl())).toBe(false);
+  });
+
+  hiddenPage.remove();
+  f.close();
+});
+
 it("逐级返回恢复焦点与滚动位置", async () => {
   const entries = projectEntries(40);
   const f = fakeServer(

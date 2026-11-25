@@ -145,14 +145,20 @@ export function MemoryPage({
   const focusMemory = useRef({ overview: "", project: "" });
   const pendingApply = useRef<{ scroll: number; selectors: string[] } | undefined>(undefined);
 
+  const rootRef = useRef<HTMLDivElement>(null);
+
   useLayoutEffect(() => {
     const pending = pendingApply.current;
     if (pending === undefined) return;
     pendingApply.current = undefined;
     const spage = spageRef.current;
     if (spage !== null) spage.scrollTop = pending.scroll;
+    // 焦点查找限定在本实例容器：SettingsDeck 隐藏但保留其他设置页，
+    // 其中的面包屑返回按钮（.crumb）必须先渲染，不能抢占记忆页的恢复焦点
+    const root = rootRef.current;
+    if (root === null) return;
     for (const selector of pending.selectors) {
-      const el = document.querySelector<HTMLElement>(selector);
+      const el = root.querySelector<HTMLElement>(selector);
       if (el !== null) {
         el.focus();
         return;
@@ -443,7 +449,7 @@ export function MemoryPage({
   };
 
   return (
-    <div className="page3 memory-page">
+    <div className="page3 memory-page" ref={rootRef}>
       <div className="spage" ref={spageRef}>
         <div className="readable">
           {inDetail && data !== undefined ? (
