@@ -11,8 +11,8 @@ export class UsageError extends Error {
   }
 }
 
-/** trust / untrust / setup / rpc / mcp / grants 子命令（trust 写 trust.json；setup 走配置向导；rpc 是 RPC 服务端；mcp 是对外 MCP 服务器桥） */
-export type CliCommand = "trust" | "untrust" | "setup" | "rpc" | "mcp" | "grants";
+/** trust / untrust / setup / rpc / mcp / grants / acp 子命令（trust 写 trust.json；setup 走配置向导；rpc 是 RPC 服务端；mcp 是对外 MCP 服务器桥；acp 是 ACP Agent 服务端） */
+export type CliCommand = "trust" | "untrust" | "setup" | "rpc" | "mcp" | "grants" | "acp";
 
 export interface CliArgs {
   /** -p/--print：非交互模式 */
@@ -82,6 +82,7 @@ export const HELP_TEXT = `nctrn — Nocturne CLI
   nctrn rpc --stdio --scheduler  同上，并在本进程里运行定时任务调度器（桌面端后台用）
   nctrn rpc --stdio --agent-pipe 同上，并监听本机外部 agent 管道（桌面端后台用）
   nctrn mcp [--name <label>]   对外 MCP 服务器桥（stdio，连接桌面端后台驱动会话）
+  nctrn acp                    ACP Agent 服务端（stdio，供 Paseo 等外部宿主调用）
 
 参数：
   -p, --print [prompt]   非交互模式；值省略时读 stdin
@@ -179,7 +180,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         first === "untrust" ||
         first === "setup" ||
         first === "rpc" ||
-        first === "mcp") &&
+        first === "mcp" ||
+        first === "acp") &&
       positionals.length === 1
     ) {
       command = first;
@@ -266,6 +268,9 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       values["force-unlock"])
   ) {
     throw new UsageError("mcp 子命令只接受可选的 --name <label>");
+  }
+  if (command === "acp" && (print || cli || values.yes || values["force-unlock"])) {
+    throw new UsageError("acp 子命令不接受 -p、--cli、--yes 与 --force-unlock");
   }
   if (command !== undefined && command !== "setup" && command !== "rpc" && cli) {
     throw new UsageError(`${command} 子命令不接受 --cli`);

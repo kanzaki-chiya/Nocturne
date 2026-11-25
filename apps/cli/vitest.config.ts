@@ -29,6 +29,10 @@ export default defineConfig({
         replacement: path.resolve(here, "../../packages/acp/src/index.ts"),
       },
       {
+        find: /^@nocturne\/acp\/agent$/,
+        replacement: path.resolve(here, "../../packages/acp/src/agent.ts"),
+      },
+      {
         find: /^@nocturne\/tui\/provider-setup-flow$/,
         replacement: path.resolve(here, "../tui/src/provider-setup-flow.ts"),
       },

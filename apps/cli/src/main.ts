@@ -19,6 +19,7 @@ import {
 } from "@nocturne/core";
 import { createMcpConnector } from "@nocturne/mcp";
 
+import { runAcpStdio } from "./acp.js";
 import { HELP_TEXT, parseArgs, resolveUiMode, UsageError, type CliArgs } from "./args.js";
 import { resolveBuiltinPluginsDir } from "./builtin-plugins.js";
 import {
@@ -141,6 +142,19 @@ async function main(): Promise<number> {
   // （不在这里直接 process.exit：Windows 上对仍在关闭的句柄调用会触发 libuv 断言崩溃）
   if (args.command === "rpc") {
     const code = await runRpcStdio({
+      args,
+      platform,
+      cwd,
+      version: VERSION,
+      io: { stdin: process.stdin, stdout: process.stdout, stderr: process.stderr },
+    });
+    setTimeout(() => process.exit(code), 3000).unref();
+    return code;
+  }
+
+  // acp：ACP Agent 服务端（ADR-0120），经 stdin/stdout 上的 ACP NDJSON 与外部宿主通信
+  if (args.command === "acp") {
+    const code = await runAcpStdio({
       args,
       platform,
       cwd,

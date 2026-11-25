@@ -152,6 +152,40 @@ describe("参数解析（cli.md 第 2 节）", () => {
     expect(() => parseArgs(["trust", "--inline"])).toThrow(UsageError);
   });
 
+  it("acp 子命令参数解析与互斥校验（ADR-0120）", () => {
+    const a = parseArgs(["acp"]);
+    expect(a.command).toBe("acp");
+    const withModel = parseArgs([
+      "acp",
+      "--model",
+      "openai/gpt-5",
+      "--preset",
+      "auto-edit",
+      "--debug",
+    ]);
+    expect(withModel.command).toBe("acp");
+    expect(withModel.model).toBe("openai/gpt-5");
+    expect(withModel.preset).toBe("auto-edit");
+    expect(withModel.debug).toBe(true);
+    for (const extra of [
+      ["--cli"],
+      ["--yes"],
+      ["--tui"],
+      ["--inline"],
+      ["--stdio"],
+      ["-c"],
+      ["--resume", "x"],
+      ["--sessions"],
+      ["--force-unlock"],
+      ["--scheduler"],
+      ["--agent-pipe"],
+      ["--name", "foo"],
+      ["extra"],
+    ]) {
+      expect(() => parseArgs(["acp", ...extra])).toThrow(UsageError);
+    }
+  });
+
   it("trust / untrust 子命令", () => {
     expect(parseArgs(["trust"]).command).toBe("trust");
     expect(parseArgs(["untrust"]).command).toBe("untrust");
