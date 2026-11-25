@@ -31,6 +31,7 @@
       "@nocturne/mcp": ["./packages/mcp/src/index.ts"],
       "@nocturne/mcp-server": ["./packages/mcp-server/src/index.ts"],
       "@nocturne/acp": ["./packages/acp/src/index.ts"],
+      "@nocturne/acp/agent": ["./packages/acp/src/agent.ts"],
       "@nocturne/remote": ["./packages/remote/src/index.ts"],
       "@nocturne/rpc/server": ["./packages/rpc/src/server/index.ts"],
       "@nocturne/rpc/client": ["./packages/rpc/src/client/index.ts"],

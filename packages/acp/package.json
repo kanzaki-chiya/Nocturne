@@ -1,7 +1,7 @@
 {
   "name": "@nocturne/acp",
   "version": "0.67.0",
-  "description": "Nocturne ACP external agent connector（ADR-0049）",
+  "description": "Nocturne ACP 客户端连接器与 Agent 服务端（ADR-0049、ADR-0120）",
   "license": "GPL-3.0-only",
   "private": true,
   "type": "module",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
+    },
+    "./agent": {
+      "types": "./dist/agent.d.mts",
+      "import": "./dist/agent.mjs"
     }
   },
   "files": [

@@ -1,0 +1,1267 @@
+/**
+ * Nocturne ACP Agent 服务端（ADR-0120 §1–3）。
+ *
+ * 将官方 ACP SDK（@agentclientprotocol/sdk）的 JSON-RPC 请求与通知映射到 Core 公开 API：
+ * - initialize：协议版本协商，如实声明已实现的能力
+ * - session/new：校验宿主绝对 cwd，按会话隔离接入宿主 mcpServers（stdio / Streamable HTTP）
+ * - session/prompt：单会话串行（拒绝重入）、多会话按 sessionId 隔离、转发文本与工具增量
+ * - session/request_permission：桥接 Core 权限层的 ask 请求，拒绝/取消/断线失败关闭
+ * - session/cancel / session/close / EOF：中止在途 turn、释放本连接会话与 MCP 资源
+ */
+import type { Readable, Writable } from "node:stream";
+import {
+  agent,
+  methods,
+  ndJsonStream,
+  PROTOCOL_VERSION,
+  RequestError,
+  type AgentConnection,
+  type AgentContext,
+  type ContentBlock as AcpContentBlock,
+  type InitializeRequest,
+  type InitializeResponse,
+  type McpServer as AcpMcpServer,
+  type NewSessionRequest,
+  type NewSessionResponse,
+  type PermissionOption as AcpPermissionOption,
+  type PromptRequest,
+  type PromptResponse,
+  type SessionUpdate,
+  type StopReason,
+  type Stream,
+  type ToolCallContent,
+  type ToolCallLocation,
+  type ToolCallStatus as AcpToolCallStatus,
+  type ToolKind,
+} from "@agentclientprotocol/sdk";
+import {
+  RuntimeCommandError,
+  type McpServerConfig,
+  type McpValue,
+  type ModelRef,
+  type PermissionOption,
+  type PermissionReply,
+  type PermissionSubject,
+  type Platform,
+  type Runtime,
+  type RuntimeEvent,
+  type RuntimeSession,
+  type SessionMcpInjection,
+  type SubagentPendingPermission,
+  type TurnEndReason,
+} from "@nocturne/core";
+
+const MAX_TOOL_PROGRESS_CHARS = 32_768;
+const MAX_TITLE_TARGET_CHARS = 80;
+
+export interface AcpAgentDiagnostic {
+  event: string;
+  sessionId?: string | undefined;
+  method?: string | undefined;
+  detail?: string | undefined;
+}
+
+export interface AcpAgentOptions {
+  /** Core Runtime 实例（生命周期由调用方管理） */
+  runtime: Runtime;
+  /** 平台抽象（路径与目录校验） */
+  platform: Platform;
+  /** Agent 版本号（写入 initialize.agentInfo.version） */
+  version: string;
+  /** 可选默认模型覆盖（如 CLI --model / NOCTURNE_MODEL） */
+  model?: string | ModelRef | undefined;
+  /** 可选权限预设覆盖（如 CLI --preset） */
+  permissionPreset?: string | undefined;
+  /**
+   * 按工作区解析并校验模型；返回 undefined 时由 agent 返回引导运行 `nctrn setup` 的配置错误。
+   * 未提供时依次使用 options.model、runtime.defaultModel、runtime.listModels 首个可用模型。
+   */
+  resolveModel?: ((workspaceRoot: string) => Promise<string | ModelRef | undefined>) | undefined;
+  /** 可选诊断回调（只写 stderr，绝不含密钥明文） */
+  diagnostics?: ((record: AcpAgentDiagnostic) => void) | undefined;
+}
+
+export interface AcpAgentServer {
+  /** 在给定的双向 ACP Stream 上提供服务，直至连接关闭或调用 close() */
+  serve(stream: Stream): Promise<void>;
+  /** 幂等关闭：中断全部在途 turn，关闭本连接持有的会话与 MCP 资源，关闭连接 */
+  close(): Promise<void>;
+}
+
+interface ActiveToolRecord {
+  callId: string;
+  name: string;
+  title: string;
+  kind: ToolKind;
+  locations: ToolCallLocation[];
+  rawInput: unknown;
+  progressText: string;
+}
+
+interface ManagedSession {
+  id: string;
+  cwd: string;
+  session: RuntimeSession;
+  unsubscribe: () => void;
+  credentialsMap: Map<string, string>;
+  client: AgentContext;
+  busy: boolean;
+  closing: boolean;
+  cancelRequested: boolean;
+  turnAbort: AbortController | undefined;
+  turnPromise: Promise<void> | undefined;
+  turnError: { code: string; message: string } | undefined;
+  notifyQueue: Promise<void>;
+  activeTools: Map<string, ActiveToolRecord>;
+  streamedTextMessages: Set<string>;
+  streamedReasoningMessages: Set<string>;
+  pendingPermissions: Map<string, AbortController>;
+  pendingSubagentPermissions: Map<string, AbortController>;
+  enqueueUpdate: (update: SessionUpdate) => void;
+  flushUpdates: () => Promise<void>;
+}
+
+/**
+ * 将 Node 的 stdin/stdout 适配为官方 SDK 的 ndJsonStream。
+ * stdout 触发 EPIPE 等写入错误时视为连接断开，不抛未捕获异常。
+ */
+export function createAcpStdioStream(
+  input: Readable,
+  output: Writable,
+  onOutputError?: (error: Error) => void,
+): Stream {
+  let inputClosed = false;
+  let outputBroken = false;
+  let cleanupInput: (() => void) | undefined;
+
+  const handleOutputError = (err: Error): void => {
+    outputBroken = true;
+    onOutputError?.(err);
+  };
+  output.on("error", handleOutputError);
+
+  const webInput = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const finish = () => {
+        if (inputClosed) return;
+        inputClosed = true;
+        cleanup();
+        try {
+          controller.close();
+        } catch {
+          // 已关闭时忽略
+        }
+      };
+      const onData = (chunk: Buffer | Uint8Array | string) => {
+        if (inputClosed) return;
+        const bytes =
+          typeof chunk === "string"
+            ? Buffer.from(chunk, "utf8")
+            : chunk instanceof Uint8Array
+              ? chunk
+              : Buffer.from(chunk);
+        if (bytes.byteLength > 0) controller.enqueue(bytes);
+      };
+      const onEnd = () => {
+        finish();
+      };
+      const onClose = () => {
+        finish();
+      };
+      const onError = (err: Error) => {
+        if (inputClosed) return;
+        inputClosed = true;
+        cleanup();
+        try {
+          controller.error(err);
+        } catch {
+          // 已关闭时忽略
+        }
+      };
+      const cleanup = () => {
+        input.off("data", onData);
+        input.off("end", onEnd);
+        input.off("close", onClose);
+        input.off("error", onError);
+      };
+      cleanupInput = cleanup;
+      input.on("data", onData);
+      input.on("end", onEnd);
+      input.on("close", onClose);
+      input.on("error", onError);
+      if (input.readableEnded || input.destroyed) finish();
+    },
+    cancel() {
+      inputClosed = true;
+      cleanupInput?.();
+    },
+  });
+
+  const webOutput = new WritableStream<Uint8Array>({
+    write(chunk) {
+      if (outputBroken || output.destroyed || output.writableEnded) {
+        return Promise.reject(new Error("ACP 输出流已关闭"));
+      }
+      return new Promise<void>((resolve, reject) => {
+        const ok = output.write(chunk, (err) => {
+          if (err) {
+            outputBroken = true;
+            reject(err);
+          } else if (ok) {
+            resolve();
+          }
+        });
+        if (!ok) {
+          const onDrain = () => {
+            output.off("error", onErr);
+            output.off("close", onClose);
+            resolve();
+          };
+          const onErr = (err: Error) => {
+            output.off("drain", onDrain);
+            output.off("close", onClose);
+            outputBroken = true;
+            reject(err);
+          };
+          const onClose = () => {
+            output.off("drain", onDrain);
+            output.off("error", onErr);
+            outputBroken = true;
+            reject(new Error("ACP 输出流已关闭"));
+          };
+          output.once("drain", onDrain);
+          output.once("error", onErr);
+          output.once("close", onClose);
+        }
+      });
+    },
+    close() {
+      output.off("error", handleOutputError);
+    },
+    abort() {
+      output.off("error", handleOutputError);
+    },
+  });
+
+  return ndJsonStream(webOutput, webInput);
+}
+
+function isAllowedHttpMcpUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    if (url.username || url.password || url.hash) return false;
+    if (url.protocol === "https:") return true;
+    if (url.protocol !== "http:") return false;
+    return (
+      url.hostname === "localhost" ||
+      url.hostname === "[::1]" ||
+      /^127(?:\.\d{1,3}){3}$/.test(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function translateHostMcpServers(
+  mcpServers: readonly AcpMcpServer[],
+): { injection: SessionMcpInjection; credentialsMap: Map<string, string> } | undefined {
+  if (mcpServers.length === 0) return undefined;
+  const servers: McpServerConfig[] = [];
+  const credentialsMap = new Map<string, string>();
+  const seenNames = new Set<string>();
+
+  for (const entry of mcpServers) {
+    const name = entry.name.trim();
+    if (name.length === 0) {
+      throw RequestError.invalidParams(undefined, "宿主 MCP 服务器名称不能为空");
+    }
+    const lowerName = name.toLowerCase();
+    if (seenNames.has(lowerName)) {
+      throw RequestError.invalidParams({ server: name }, `宿主 MCP 服务器名称重复：${name}`);
+    }
+    seenNames.add(lowerName);
+
+    if ("type" in entry) {
+      if (entry.type === "http") {
+        if (!isAllowedHttpMcpUrl(entry.url)) {
+          throw RequestError.invalidParams(
+            { server: name },
+            `宿主 MCP 服务器 ${name} 的 URL 无效或不受支持（仅支持 HTTPS 或回环 HTTP，且不能含凭据）`,
+          );
+        }
+        const headers: Record<string, McpValue> = {};
+        for (const header of entry.headers) {
+          const headerName = header.name.trim();
+          if (headerName.length === 0) continue;
+          const normalizedKey = headerName.toLowerCase();
+          headers[normalizedKey] = { stored: true };
+          credentialsMap.set(`mcp/${name}/${normalizedKey}`, header.value);
+        }
+        servers.push({
+          name,
+          origin: "host",
+          type: "http",
+          url: entry.url,
+          ...(Object.keys(headers).length > 0 ? { headers } : {}),
+        });
+        continue;
+      }
+      throw RequestError.invalidParams(
+        { server: name, type: entry.type },
+        `不支持的宿主 MCP 传输类型 "${entry.type}"（当前支持 stdio 与 Streamable HTTP）`,
+      );
+    }
+
+    const command = entry.command.trim();
+    if (command.length === 0) {
+      throw RequestError.invalidParams(
+        { server: name },
+        `宿主 stdio MCP 服务器 ${name} 缺少可执行命令`,
+      );
+    }
+    const env: Record<string, McpValue> = {};
+    for (const variable of entry.env) {
+      const varName = variable.name.trim();
+      if (varName.length === 0) continue;
+      env[varName] = { stored: true };
+      credentialsMap.set(`mcp/${name}/${varName}`, variable.value);
+    }
+    servers.push({
+      name,
+      origin: "host",
+      type: "stdio",
+      command,
+      ...(entry.args.length > 0 ? { args: [...entry.args] } : {}),
+      ...(Object.keys(env).length > 0 ? { env } : {}),
+    });
+  }
+
+  return {
+    credentialsMap,
+    injection: {
+      servers,
+      strict: true,
+      credentials: {
+        get: (id) => Promise.resolve(credentialsMap.get(id)),
+      },
+    },
+  };
+}
+
+function extractPromptText(blocks: readonly AcpContentBlock[]): string {
+  if (blocks.length === 0) {
+    throw RequestError.invalidParams(undefined, "prompt 内容不能为空");
+  }
+  const parts: string[] = [];
+  for (const block of blocks) {
+    switch (block.type) {
+      case "text":
+        parts.push(block.text);
+        break;
+      case "resource_link": {
+        const label = block.title ?? block.name;
+        parts.push(label ? `[${label}](${block.uri})` : block.uri);
+        break;
+      }
+      default:
+        throw RequestError.invalidParams(
+          { unsupportedContentType: block.type },
+          `当前仅支持文本输入，不支持 ${block.type} 内容块`,
+        );
+    }
+  }
+  const joined = parts.join("\n");
+  if (joined.trim().length === 0) {
+    throw RequestError.invalidParams(undefined, "prompt 文本不能为空");
+  }
+  return joined;
+}
+
+function isAbsolutePath(platform: Platform, raw: string): boolean {
+  if (raw.trim().length === 0) return false;
+  if (!platform.paths.isAbsolute(raw)) return false;
+  // Windows 上 "/foo" 在 path.isAbsolute 下为 true，但不是带盘符或 UNC 的完整绝对路径
+  if (process.platform === "win32") {
+    return /^[a-zA-Z]:[\\/]/.test(raw) || /^\\\\[^\\]+[\\/][^\\]+/.test(raw);
+  }
+  return true;
+}
+
+function deriveToolKind(name: string, subjects: readonly PermissionSubject[]): ToolKind {
+  if (subjects.some((s) => s.kind === "shell")) return "execute";
+  if (subjects.some((s) => s.kind === "edit")) return "edit";
+  if (subjects.some((s) => s.kind === "network")) return "fetch";
+  if (subjects.some((s) => s.kind === "read")) {
+    if (name === "grep" || name === "glob") return "search";
+    return "read";
+  }
+  if (subjects.length > 0 && subjects.every((s) => s.kind === "mcp" && s.readOnly === true)) {
+    return "read";
+  }
+  return "other";
+}
+
+function extractLocations(
+  platform: Platform,
+  cwd: string,
+  subjects: readonly PermissionSubject[],
+  input: unknown,
+): ToolCallLocation[] {
+  const seen = new Set<string>();
+  const locations: ToolCallLocation[] = [];
+  const line =
+    typeof input === "object" &&
+    input !== null &&
+    "offset" in input &&
+    typeof (input as { offset?: unknown }).offset === "number" &&
+    Number.isInteger((input as { offset: number }).offset) &&
+    (input as { offset: number }).offset > 0
+      ? (input as { offset: number }).offset
+      : undefined;
+
+  for (const subject of subjects) {
+    if (subject.kind !== "read" && subject.kind !== "edit") continue;
+    const rawTarget = subject.target.trim();
+    if (rawTarget.length === 0 || rawTarget === "*") continue;
+    const resolvedPath = platform.paths.isAbsolute(rawTarget)
+      ? rawTarget
+      : platform.paths.resolve(cwd, rawTarget);
+    if (seen.has(resolvedPath)) continue;
+    seen.add(resolvedPath);
+    locations.push({
+      path: resolvedPath,
+      ...(line !== undefined && locations.length === 0 ? { line } : {}),
+    });
+  }
+  return locations;
+}
+
+function truncateText(text: string, maxChars: number): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars - 1)}…`;
+}
+
+function buildToolTitle(
+  platform: Platform,
+  cwd: string,
+  name: string,
+  subjects: readonly PermissionSubject[],
+  locations: readonly ToolCallLocation[],
+): string {
+  const shellSubject = subjects.find((s) => s.kind === "shell" && s.target.trim().length > 0);
+  if (shellSubject !== undefined) {
+    return `${name}: ${truncateText(shellSubject.target, MAX_TITLE_TARGET_CHARS)}`;
+  }
+  const firstLocation = locations[0];
+  if (firstLocation !== undefined) {
+    const displayPath = platform.paths.isWithin(firstLocation.path, cwd)
+      ? platform.paths.relative(cwd, firstLocation.path) || "."
+      : firstLocation.path;
+    return `${name} ${truncateText(displayPath, MAX_TITLE_TARGET_CHARS)}`;
+  }
+  const networkSubject = subjects.find((s) => s.kind === "network" && s.target.trim().length > 0);
+  if (networkSubject !== undefined) {
+    return `${name} ${truncateText(networkSubject.target, MAX_TITLE_TARGET_CHARS)}`;
+  }
+  return name;
+}
+
+function mapToolCompletedStatus(status: string): AcpToolCallStatus {
+  return status === "ok" ? "completed" : "failed";
+}
+
+function mapTurnEndReason(
+  reason: TurnEndReason,
+  cancelRequested: boolean,
+  turnError: { code: string; message: string } | undefined,
+): StopReason {
+  switch (reason) {
+    case "done":
+      return "end_turn";
+    case "truncated":
+      return "max_tokens";
+    case "max_steps":
+      return "max_turn_requests";
+    case "refused":
+      return "refusal";
+    case "aborted":
+      return "cancelled";
+    case "error":
+      if (cancelRequested) return "cancelled";
+      throw RequestError.internalError(
+        { code: turnError?.code ?? "turn_error" },
+        turnError?.message ?? "本轮执行失败",
+      );
+  }
+}
+
+function buildAcpPermissionOptions(
+  coreOptions: readonly PermissionOption[],
+): AcpPermissionOption[] {
+  const result: AcpPermissionOption[] = [];
+  if (coreOptions.includes("allow_once")) {
+    result.push({
+      optionId: "allow_once",
+      name: "Allow once",
+      kind: "allow_once",
+    });
+  }
+  result.push({
+    optionId: "reject_once",
+    name: "Reject",
+    kind: "reject_once",
+  });
+  return result;
+}
+
+function toPermissionReply(
+  outcome: { outcome: "cancelled" } | { outcome: "selected"; optionId: string },
+  allowOptionAvailable: boolean,
+): PermissionReply {
+  if (outcome.outcome === "selected" && allowOptionAvailable && outcome.optionId === "allow_once") {
+    return { decision: "allow" };
+  }
+  return { decision: "deny" };
+}
+
+function isUnknownRequestError(error: unknown): boolean {
+  return error instanceof RuntimeCommandError && error.code === "unknown_request";
+}
+
+function formatModelConfigError(message?: string): RequestError {
+  const detail =
+    message !== undefined && message.trim().length > 0
+      ? `${message}。请运行 nctrn setup 配置服务商、默认模型与凭据`
+      : "未配置可用模型，请先运行 nctrn setup 配置服务商与默认模型";
+  return RequestError.internalError({ code: "model_not_configured" }, detail);
+}
+
+export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
+  const { runtime, platform, version, diagnostics } = options;
+  const sessions = new Map<string, ManagedSession>();
+  const inFlightCreations = new Set<Promise<void>>();
+  let activeConnection: AgentConnection | undefined;
+  let closing = false;
+  let closePromise: Promise<void> | undefined;
+
+  const recordDiag = (record: AcpAgentDiagnostic): void => {
+    diagnostics?.(record);
+  };
+
+  const abortEntryPermissions = (entry: ManagedSession): void => {
+    for (const controller of entry.pendingPermissions.values()) {
+      controller.abort();
+    }
+    entry.pendingPermissions.clear();
+    for (const controller of entry.pendingSubagentPermissions.values()) {
+      controller.abort();
+    }
+    entry.pendingSubagentPermissions.clear();
+  };
+
+  const cancelEntry = (entry: ManagedSession): void => {
+    if (!entry.busy) return;
+    entry.cancelRequested = true;
+    entry.turnAbort?.abort();
+    abortEntryPermissions(entry);
+    entry.session.interrupt();
+  };
+
+  const closeEntry = async (entry: ManagedSession): Promise<void> => {
+    if (entry.closing) return;
+    entry.closing = true;
+    sessions.delete(entry.id);
+    if (entry.busy) {
+      cancelEntry(entry);
+      await entry.turnPromise?.catch(() => undefined);
+    } else {
+      abortEntryPermissions(entry);
+    }
+    entry.unsubscribe();
+    try {
+      await entry.session.close();
+    } finally {
+      entry.credentialsMap.clear();
+    }
+  };
+
+  const closeAll = (): Promise<void> => {
+    if (closePromise !== undefined) return closePromise;
+    closing = true;
+    closePromise = (async () => {
+      const open = [...sessions.values()];
+      for (const entry of open) {
+        if (entry.busy) cancelEntry(entry);
+      }
+      await Promise.all(open.map((entry) => closeEntry(entry).catch(() => undefined)));
+      if (inFlightCreations.size > 0) {
+        await Promise.allSettled([...inFlightCreations]);
+      }
+      // 再次兜底清理关闭途中刚完成登记的会话
+      const remaining = [...sessions.values()];
+      await Promise.all(remaining.map((entry) => closeEntry(entry).catch(() => undefined)));
+      activeConnection?.close();
+    })();
+    return closePromise;
+  };
+
+  const resolveSessionModel = async (
+    workspaceRoot: string,
+  ): Promise<string | ModelRef | undefined> => {
+    if (options.resolveModel !== undefined) {
+      return await options.resolveModel(workspaceRoot);
+    }
+    if (options.model !== undefined) return options.model;
+    const configured = runtime.defaultModel({ workspaceRoot });
+    if (configured !== undefined) return configured;
+    return runtime.listModels({ workspaceRoot }).find((m) => m.unavailable === undefined)?.ref;
+  };
+
+  const isServerClosing = (): boolean => closing;
+  const isEntryStopped = (entry: ManagedSession, controller?: AbortController): boolean =>
+    Boolean(controller?.signal.aborted) || entry.closing || closing || entry.cancelRequested;
+
+  const forwardPermission = (
+    entry: ManagedSession,
+    requestId: string,
+    callId: string,
+    subjects: readonly PermissionSubject[],
+    reason: string,
+    coreOptions: readonly PermissionOption[],
+  ): void => {
+    if (isEntryStopped(entry)) {
+      void entry.session.respondPermission(requestId, { decision: "deny" }).catch(() => undefined);
+      return;
+    }
+    const controller = new AbortController();
+    entry.pendingPermissions.set(requestId, controller);
+    const acpOptions = buildAcpPermissionOptions(coreOptions);
+    const allowOptionAvailable = acpOptions.some((o) => o.optionId === "allow_once");
+
+    void (async () => {
+      try {
+        // 先确保 tool_call 通知已经写出，再请求宿主审批
+        await entry.flushUpdates();
+        if (isEntryStopped(entry, controller)) {
+          return;
+        }
+        const record = entry.activeTools.get(callId);
+        const locations =
+          record?.locations ?? extractLocations(platform, entry.cwd, subjects, undefined);
+        const kind = record?.kind ?? deriveToolKind("", subjects);
+        const title =
+          record?.title ?? buildToolTitle(platform, entry.cwd, "tool", subjects, locations);
+
+        const response = await entry.client.request(
+          methods.client.session.requestPermission,
+          {
+            sessionId: entry.id,
+            toolCall: {
+              toolCallId: callId,
+              ...(record?.name !== undefined ? { name: record.name } : {}),
+              title,
+              kind,
+              status: "pending",
+              ...(locations.length > 0 ? { locations } : {}),
+              ...(record?.rawInput !== undefined ? { rawInput: record.rawInput } : {}),
+              ...(reason.length > 0
+                ? { content: [{ type: "content", content: { type: "text", text: reason } }] }
+                : {}),
+            },
+            options: acpOptions,
+          },
+          { cancellationSignal: controller.signal },
+        );
+
+        if (isEntryStopped(entry, controller)) {
+          await entry.session
+            .respondPermission(requestId, { decision: "deny" })
+            .catch(() => undefined);
+          return;
+        }
+        const reply = toPermissionReply(response.outcome, allowOptionAvailable);
+        await entry.session.respondPermission(requestId, reply).catch((err: unknown) => {
+          if (!isUnknownRequestError(err)) {
+            recordDiag({
+              event: "permission_reply_failed",
+              sessionId: entry.id,
+              detail: err instanceof Error ? err.message : String(err),
+            });
+          }
+        });
+      } catch {
+        // 宿主断线、取消或拒绝处理请求时失败关闭，绝不执行待审操作
+        if (!controller.signal.aborted) {
+          await entry.session
+            .respondPermission(requestId, { decision: "deny" })
+            .catch(() => undefined);
+        }
+      } finally {
+        if (entry.pendingPermissions.get(requestId) === controller) {
+          entry.pendingPermissions.delete(requestId);
+        }
+      }
+    })();
+  };
+
+  const syncSubagentPermissions = (
+    entry: ManagedSession,
+    pending: readonly SubagentPendingPermission[],
+  ): void => {
+    const activeKeys = new Set<string>();
+    for (const item of pending) {
+      const key = `${item.childSessionId}:${item.requestId}`;
+      activeKeys.add(key);
+      if (entry.pendingSubagentPermissions.has(key)) continue;
+
+      if (isEntryStopped(entry)) {
+        void entry.session
+          .respondSubagentPermission(item.childSessionId, item.requestId, { decision: "deny" })
+          .catch(() => undefined);
+        continue;
+      }
+
+      const controller = new AbortController();
+      entry.pendingSubagentPermissions.set(key, controller);
+      const acpOptions = buildAcpPermissionOptions(item.options);
+      const allowOptionAvailable = acpOptions.some((o) => o.optionId === "allow_once");
+
+      void (async () => {
+        try {
+          await entry.flushUpdates();
+          if (isEntryStopped(entry, controller)) {
+            return;
+          }
+          const locations = extractLocations(platform, entry.cwd, item.subjects, undefined);
+          const toolName = item.toolName ?? "subagent";
+          const kind = deriveToolKind(toolName, item.subjects);
+          const title = buildToolTitle(platform, entry.cwd, toolName, item.subjects, locations);
+
+          const response = await entry.client.request(
+            methods.client.session.requestPermission,
+            {
+              sessionId: entry.id,
+              toolCall: {
+                toolCallId: item.parentCallId,
+                name: toolName,
+                title,
+                kind,
+                status: "pending",
+                ...(locations.length > 0 ? { locations } : {}),
+                ...(item.reason.length > 0
+                  ? {
+                      content: [{ type: "content", content: { type: "text", text: item.reason } }],
+                    }
+                  : {}),
+              },
+              options: acpOptions,
+            },
+            { cancellationSignal: controller.signal },
+          );
+
+          if (isEntryStopped(entry, controller)) {
+            await entry.session
+              .respondSubagentPermission(item.childSessionId, item.requestId, { decision: "deny" })
+              .catch(() => undefined);
+            return;
+          }
+          const reply = toPermissionReply(response.outcome, allowOptionAvailable);
+          await entry.session
+            .respondSubagentPermission(item.childSessionId, item.requestId, reply)
+            .catch(() => undefined);
+        } catch {
+          if (!controller.signal.aborted) {
+            await entry.session
+              .respondSubagentPermission(item.childSessionId, item.requestId, { decision: "deny" })
+              .catch(() => undefined);
+          }
+        } finally {
+          if (entry.pendingSubagentPermissions.get(key) === controller) {
+            entry.pendingSubagentPermissions.delete(key);
+          }
+        }
+      })();
+    }
+
+    for (const [key, controller] of [...entry.pendingSubagentPermissions.entries()]) {
+      if (!activeKeys.has(key)) {
+        controller.abort();
+        entry.pendingSubagentPermissions.delete(key);
+      }
+    }
+  };
+
+  const handleSessionEvent = (entry: ManagedSession, event: RuntimeEvent): void => {
+    if (entry.closing || closing) return;
+
+    switch (event.type) {
+      case "message.assistant.delta": {
+        if (event.payload.delta.length === 0) return;
+        if (event.payload.kind === "text") {
+          entry.streamedTextMessages.add(event.payload.messageId);
+          entry.enqueueUpdate({
+            sessionUpdate: "agent_message_chunk",
+            messageId: event.payload.messageId,
+            content: { type: "text", text: event.payload.delta },
+          });
+        } else {
+          entry.streamedReasoningMessages.add(event.payload.messageId);
+          entry.enqueueUpdate({
+            sessionUpdate: "agent_thought_chunk",
+            messageId: event.payload.messageId,
+            content: { type: "text", text: event.payload.delta },
+          });
+        }
+        return;
+      }
+
+      case "message.assistant": {
+        const messageId = event.payload.messageId;
+        const hadText = entry.streamedTextMessages.has(messageId);
+        const hadReasoning = entry.streamedReasoningMessages.has(messageId);
+        for (const block of event.payload.content) {
+          if (block.text.length === 0) continue;
+          if (block.type === "text" && !hadText) {
+            entry.enqueueUpdate({
+              sessionUpdate: "agent_message_chunk",
+              messageId,
+              content: { type: "text", text: block.text },
+            });
+          } else if (block.type === "reasoning" && !hadReasoning) {
+            entry.enqueueUpdate({
+              sessionUpdate: "agent_thought_chunk",
+              messageId,
+              content: { type: "text", text: block.text },
+            });
+          }
+        }
+        return;
+      }
+
+      case "tool.started": {
+        const { callId, name, input, target, subjects, permission } = event.payload;
+        const effectiveName = target?.name ?? name;
+        const effectiveInput = target?.input ?? input;
+        const kind = deriveToolKind(effectiveName, subjects);
+        const locations = extractLocations(platform, entry.cwd, subjects, effectiveInput);
+        const title = buildToolTitle(platform, entry.cwd, effectiveName, subjects, locations);
+        const status: AcpToolCallStatus = permission.action === "allow" ? "in_progress" : "pending";
+
+        entry.activeTools.set(callId, {
+          callId,
+          name: effectiveName,
+          title,
+          kind,
+          locations,
+          rawInput: effectiveInput,
+          progressText: "",
+        });
+        entry.enqueueUpdate({
+          sessionUpdate: "tool_call",
+          toolCallId: callId,
+          name: effectiveName,
+          title,
+          kind,
+          status,
+          ...(locations.length > 0 ? { locations } : {}),
+          rawInput: effectiveInput,
+        });
+        return;
+      }
+
+      case "permission.requested": {
+        const { requestId, callId, subjects, reason, options: permOptions } = event.payload;
+        forwardPermission(entry, requestId, callId, subjects, reason, permOptions);
+        return;
+      }
+
+      case "permission.resolved": {
+        const { requestId, callId, action } = event.payload;
+        if (requestId !== undefined) {
+          const controller = entry.pendingPermissions.get(requestId);
+          if (controller !== undefined) {
+            controller.abort();
+            entry.pendingPermissions.delete(requestId);
+          }
+        }
+        if (action === "allow" && entry.activeTools.has(callId)) {
+          entry.enqueueUpdate({
+            sessionUpdate: "tool_call_update",
+            toolCallId: callId,
+            status: "in_progress",
+          });
+        }
+        return;
+      }
+
+      case "subagent.permissions": {
+        syncSubagentPermissions(entry, event.payload.pending);
+        return;
+      }
+
+      case "question.requested": {
+        // ACP 首版未接问答交互；立即以 declined 结算，避免模型调用 ask_user 时无限挂起
+        void entry.session
+          .respondQuestion(event.payload.requestId, {
+            answers: event.payload.questions.map(() => ({ declined: true })),
+          })
+          .catch(() => undefined);
+        return;
+      }
+
+      case "tool.progress": {
+        const { callId, chunk } = event.payload;
+        if (chunk.length === 0) return;
+        const record = entry.activeTools.get(callId);
+        if (record === undefined) return;
+        const combined = record.progressText + chunk;
+        record.progressText =
+          combined.length > MAX_TOOL_PROGRESS_CHARS
+            ? combined.slice(-MAX_TOOL_PROGRESS_CHARS)
+            : combined;
+        entry.enqueueUpdate({
+          sessionUpdate: "tool_call_update",
+          toolCallId: callId,
+          status: "in_progress",
+          content: [{ type: "content", content: { type: "text", text: record.progressText } }],
+        });
+        return;
+      }
+
+      case "tool.completed": {
+        const { callId, name, status, modelContent, output, error } = event.payload;
+        const acpStatus = mapToolCompletedStatus(status);
+        const text = modelContent.length > 0 ? modelContent : (error?.message ?? "");
+        const content: ToolCallContent[] | undefined =
+          text.length > 0 ? [{ type: "content", content: { type: "text", text } }] : undefined;
+        const rawOutput = output ?? error ?? modelContent;
+        const hadStarted = entry.activeTools.delete(callId);
+
+        if (!hadStarted) {
+          entry.enqueueUpdate({
+            sessionUpdate: "tool_call",
+            toolCallId: callId,
+            name,
+            title: name,
+            kind: "other",
+            status: acpStatus,
+            ...(content !== undefined ? { content } : {}),
+            rawOutput,
+          });
+        } else {
+          entry.enqueueUpdate({
+            sessionUpdate: "tool_call_update",
+            toolCallId: callId,
+            status: acpStatus,
+            ...(content !== undefined ? { content } : {}),
+            rawOutput,
+          });
+        }
+        return;
+      }
+
+      case "turn.completed": {
+        if (event.payload.error !== undefined) {
+          entry.turnError = event.payload.error;
+        }
+        return;
+      }
+
+      case "runtime.error": {
+        entry.turnError ??= { code: event.payload.code, message: event.payload.message };
+        return;
+      }
+
+      default:
+        return;
+    }
+  };
+
+  const handleInitialize = (_params: InitializeRequest): InitializeResponse => {
+    recordDiag({ event: "initialize", method: methods.agent.initialize });
+    return {
+      protocolVersion: PROTOCOL_VERSION,
+      agentInfo: {
+        name: "nocturne",
+        title: "Nocturne",
+        version,
+      },
+      agentCapabilities: {
+        loadSession: false,
+        promptCapabilities: {
+          image: false,
+          audio: false,
+          embeddedContext: false,
+        },
+        mcpCapabilities: {
+          http: true,
+          sse: false,
+          acp: false,
+        },
+        sessionCapabilities: {
+          close: {},
+        },
+      },
+    };
+  };
+
+  const handleNewSession = async (
+    params: NewSessionRequest,
+    client: AgentContext,
+  ): Promise<NewSessionResponse> => {
+    if (closing) {
+      throw RequestError.invalidRequest(undefined, "ACP 连接正在关闭");
+    }
+    if (!isAbsolutePath(platform, params.cwd)) {
+      throw RequestError.invalidParams({ cwd: params.cwd }, `cwd 必须是绝对路径：${params.cwd}`);
+    }
+    if (params.additionalDirectories !== undefined && params.additionalDirectories.length > 0) {
+      throw RequestError.invalidParams(
+        { additionalDirectories: params.additionalDirectories },
+        "首版 ACP 不支持 additionalDirectories",
+      );
+    }
+
+    const stat = await platform.fs.stat(params.cwd).catch(() => undefined);
+    if (stat?.type !== "directory") {
+      throw RequestError.invalidParams(
+        { cwd: params.cwd },
+        `工作目录不存在或不是目录：${params.cwd}`,
+      );
+    }
+    const realCwd = await platform.resolveReal(params.cwd);
+    const translatedMcp = translateHostMcpServers(params.mcpServers);
+    const credentialsMap = translatedMcp?.credentialsMap ?? new Map<string, string>();
+
+    let resolvedModel: string | ModelRef | undefined;
+    try {
+      resolvedModel = await resolveSessionModel(realCwd);
+    } catch (err) {
+      credentialsMap.clear();
+      if (err instanceof RequestError) throw err;
+      if (err instanceof RuntimeCommandError) {
+        if (err.code === "invalid_model") {
+          throw formatModelConfigError(err.message);
+        }
+        if (err.code === "invalid_command") {
+          throw RequestError.invalidParams({ code: err.code }, err.message);
+        }
+        throw RequestError.internalError({ code: err.code }, err.message);
+      }
+      throw RequestError.internalError(undefined, err instanceof Error ? err.message : String(err));
+    }
+    if (resolvedModel === undefined) {
+      credentialsMap.clear();
+      throw formatModelConfigError();
+    }
+
+    let createdSession: RuntimeSession | undefined;
+    const creation = (async () => {
+      try {
+        createdSession = await runtime.createSession({
+          model: resolvedModel,
+          cwd: params.cwd,
+          workspaceRoot: realCwd,
+          interactive: true,
+          ...(options.permissionPreset !== undefined
+            ? { permissionPreset: options.permissionPreset }
+            : {}),
+          ...(translatedMcp !== undefined ? { sessionMcp: translatedMcp.injection } : {}),
+        });
+      } catch (err) {
+        credentialsMap.clear();
+        if (err instanceof RuntimeCommandError) {
+          if (err.code === "invalid_model") {
+            throw formatModelConfigError(err.message);
+          }
+          if (err.code === "invalid_command") {
+            throw RequestError.invalidParams({ code: err.code }, err.message);
+          }
+          throw RequestError.internalError({ code: err.code }, err.message);
+        }
+        throw RequestError.internalError(
+          undefined,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+
+      if (isServerClosing()) {
+        await createdSession.close().catch(() => undefined);
+        credentialsMap.clear();
+        throw RequestError.invalidRequest(undefined, "ACP 连接已关闭");
+      }
+
+      const session = createdSession;
+      const entry: ManagedSession = {
+        id: session.id,
+        cwd: params.cwd,
+        session,
+        unsubscribe: () => undefined,
+        credentialsMap,
+        client,
+        busy: false,
+        closing: false,
+        cancelRequested: false,
+        turnAbort: undefined,
+        turnPromise: undefined,
+        turnError: undefined,
+        notifyQueue: Promise.resolve(),
+        activeTools: new Map(),
+        streamedTextMessages: new Set(),
+        streamedReasoningMessages: new Set(),
+        pendingPermissions: new Map(),
+        pendingSubagentPermissions: new Map(),
+        enqueueUpdate: (update) => {
+          if (entry.closing || closing || activeConnection?.signal.aborted) return;
+          entry.notifyQueue = entry.notifyQueue
+            .then(() =>
+              entry.client.notify(methods.client.session.update, {
+                sessionId: entry.id,
+                update,
+              }),
+            )
+            .catch(() => undefined);
+        },
+        flushUpdates: () => entry.notifyQueue,
+      };
+      entry.unsubscribe = session.subscribe((event) => {
+        handleSessionEvent(entry, event);
+      });
+      sessions.set(session.id, entry);
+      recordDiag({ event: "session_new", sessionId: session.id });
+    })();
+
+    const tracked = creation.then(
+      () => undefined,
+      () => undefined,
+    );
+    inFlightCreations.add(tracked);
+    void tracked.finally(() => {
+      inFlightCreations.delete(tracked);
+    });
+
+    await creation;
+    if (createdSession === undefined) {
+      throw RequestError.internalError(undefined, "创建会话失败");
+    }
+    return { sessionId: createdSession.id };
+  };
+
+  const handlePrompt = async (
+    params: PromptRequest,
+    signal: AbortSignal,
+  ): Promise<PromptResponse> => {
+    const entry = sessions.get(params.sessionId);
+    if (entry === undefined) {
+      throw RequestError.resourceNotFound(params.sessionId);
+    }
+    if (entry.closing || closing) {
+      throw RequestError.invalidRequest({ sessionId: params.sessionId }, "会话已关闭");
+    }
+    if (entry.busy) {
+      throw RequestError.invalidRequest(
+        { code: "session_busy", sessionId: params.sessionId },
+        "当前会话仍在处理上一轮请求，请等待完成或先发送 session/cancel",
+      );
+    }
+
+    const promptText = extractPromptText(params.prompt);
+    entry.busy = true;
+    entry.cancelRequested = false;
+    entry.turnError = undefined;
+    entry.activeTools.clear();
+    entry.streamedTextMessages.clear();
+    entry.streamedReasoningMessages.clear();
+    entry.turnAbort = new AbortController();
+
+    const onRequestAbort = () => {
+      cancelEntry(entry);
+    };
+    signal.addEventListener("abort", onRequestAbort, { once: true });
+    if (signal.aborted) cancelEntry(entry);
+
+    const { promise: turnDone, resolve: resolveTurnDone } = Promise.withResolvers<undefined>();
+    entry.turnPromise = turnDone.then(() => undefined);
+
+    try {
+      recordDiag({ event: "prompt_start", sessionId: entry.id });
+      const endReason = await entry.session.submit({ text: promptText });
+      // 保证最终 prompt 响应一定跟在本轮最后一次 session/update 之后（ADR-0120 §2）
+      await entry.flushUpdates();
+      const stopReason = mapTurnEndReason(endReason, entry.cancelRequested, entry.turnError);
+      recordDiag({ event: "prompt_end", sessionId: entry.id, detail: stopReason });
+      return { stopReason };
+    } catch (err) {
+      await entry.flushUpdates();
+      if (err instanceof RequestError) throw err;
+      if (isEntryStopped(entry) || signal.aborted) {
+        return { stopReason: "cancelled" };
+      }
+      if (err instanceof RuntimeCommandError) {
+        if (err.code === "session_busy") {
+          throw RequestError.invalidRequest({ code: err.code }, err.message);
+        }
+        if (err.code === "invalid_model") {
+          throw formatModelConfigError(err.message);
+        }
+        throw RequestError.internalError({ code: err.code }, err.message);
+      }
+      throw RequestError.internalError(undefined, err instanceof Error ? err.message : String(err));
+    } finally {
+      signal.removeEventListener("abort", onRequestAbort);
+      entry.turnAbort.abort();
+      entry.turnAbort = undefined;
+      abortEntryPermissions(entry);
+      entry.activeTools.clear();
+      entry.streamedTextMessages.clear();
+      entry.streamedReasoningMessages.clear();
+      entry.busy = false;
+      entry.turnPromise = undefined;
+      resolveTurnDone(undefined);
+    }
+  };
+
+  const handleCancel = (sessionId: string): void => {
+    const entry = sessions.get(sessionId);
+    if (entry === undefined) return;
+    recordDiag({ event: "session_cancel", sessionId });
+    cancelEntry(entry);
+  };
+
+  const handleCloseSession = async (sessionId: string): Promise<Record<string, never>> => {
+    const entry = sessions.get(sessionId);
+    if (entry === undefined) {
+      throw RequestError.resourceNotFound(sessionId);
+    }
+    recordDiag({ event: "session_close", sessionId });
+    await closeEntry(entry);
+    return {};
+  };
+
+  const app = agent({ name: "nocturne" })
+    .onRequest(methods.agent.initialize, (ctx) => handleInitialize(ctx.params))
+    .onRequest(methods.agent.session.new, (ctx) => handleNewSession(ctx.params, ctx.client))
+    .onRequest(methods.agent.session.prompt, (ctx) => handlePrompt(ctx.params, ctx.signal))
+    .onRequest(methods.agent.session.close, (ctx) => handleCloseSession(ctx.params.sessionId))
+    .onNotification(methods.agent.session.cancel, (ctx) => {
+      handleCancel(ctx.params.sessionId);
+    });
+
+  return {
+    async serve(stream: Stream): Promise<void> {
+      if (closing) return;
+      const connection = app.connect(stream);
+      activeConnection = connection;
+      try {
+        await connection.closed;
+      } finally {
+        await closeAll();
+        if (activeConnection === connection) {
+          activeConnection = undefined;
+        }
+      }
+    },
+    close: closeAll,
+  };
+}
