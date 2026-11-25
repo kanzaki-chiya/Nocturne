@@ -1784,8 +1784,16 @@ export function useSidePanel({
       }
       if (event.key === "Escape") {
         // 浮层由按钮和 Esc 开关；别处已消费的 Esc（输入框的补全与中断、菜单、提示、搜索框、
-        // 终端）不算，所以输入框空闲时 Esc 也开关浮层。没有会话时按钮置灰，Esc 同样不开
-        if (event.defaultPrevented || event.isComposing || state.quickOpen || state.settingsOpen)
+        // 终端）不算，所以输入框空闲时 Esc 也开关浮层。没有会话时按钮置灰，Esc 同样不开。
+        // 模态对话框（.scrim）打开时 Esc 属于对话框：本监听注册早于对话框的冒泡监听，
+        // 看不到它稍后的 preventDefault，必须主动让位，否则一次 Esc 连浮层一起关掉
+        if (
+          event.defaultPrevented ||
+          event.isComposing ||
+          state.quickOpen ||
+          state.settingsOpen ||
+          document.querySelector(".scrim") !== null
+        )
           return;
         if (state.overview) act.setOverviewOpen(false);
         else if (state.hasSession) act.setOverviewOpen(true);

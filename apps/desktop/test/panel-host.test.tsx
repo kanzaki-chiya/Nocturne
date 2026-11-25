@@ -545,6 +545,36 @@ it("Esc 开关概览浮层：焦点在空闲输入框里也行；别处已处理
   expect(overview()).toBeNull();
 });
 
+it("模态对话框（.scrim）打开时 Esc 只关对话框、不开关概览浮层", () => {
+  const { prefs, host } = setup();
+  const sessions = [{ id: "a", mtimeMs: 1 }];
+  render(<Harness prefs={prefs} host={host} sessionId="a" sessions={sessions} />);
+  const overview = () => screen.queryByRole("dialog", { name: "会话概览" });
+  const field = screen.getByRole("textbox", { name: "输入框" });
+  field.focus();
+  act(() => {
+    fireEvent.keyDown(field, { key: "Escape" });
+  });
+  expect(overview()).not.toBeNull();
+  // 打开模态确认框：Esc 属于对话框，浮层保持打开不动
+  const dialog = document.createElement("div");
+  dialog.className = "scrim";
+  document.body.appendChild(dialog);
+  try {
+    act(() => {
+      fireEvent.keyDown(field, { key: "Escape" });
+    });
+    expect(overview()).not.toBeNull();
+  } finally {
+    dialog.remove();
+  }
+  // 对话框消失后 Esc 恢复开关浮层
+  act(() => {
+    fireEvent.keyDown(field, { key: "Escape" });
+  });
+  expect(overview()).toBeNull();
+});
+
 it("概览浮层：让位后对话区仍 ≥480px 才停靠，否则盖在对话上", () => {
   let bodyWidth = 1200;
   const rect = vi

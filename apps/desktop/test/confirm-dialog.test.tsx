@@ -184,55 +184,149 @@ it("Scrim 单独使用时同样恢复焦点", async () => {
   expect(document.activeElement).toBe(trigger);
 });
 
-it("卸载后以一致的 capture 移除窗口捕获监听（移除成功返回 effect 注册的同一回调）", async () => {
+it("卸载后窗口 keydown 监听正确移除（注册与移除成对、同一回调）", async () => {
   const added: unknown[] = [];
   const removed: unknown[] = [];
   const originalAdd = window.addEventListener;
   const originalRemove = window.removeEventListener;
   vi.spyOn(window, "addEventListener").mockImplementation(
     (type: string, listener: unknown, options?: unknown) => {
-      if (type === "keydown" && options === true) added.push(listener);
+      if (type === "keydown") added.push(listener);
       return originalAdd.call(window, type, listener as never, options as never);
     },
   );
   vi.spyOn(window, "removeEventListener").mockImplementation(
     (type: string, listener: unknown, options?: unknown) => {
-      if (type === "keydown" && options === true) removed.push(listener);
+      if (type === "keydown") removed.push(listener);
       return originalRemove.call(window, type, listener as never, options as never);
     },
   );
   render(<Fixture onConfirm={async () => undefined} />);
   await openDialog();
-  expect(added).toHaveLength(1);
-  // 点取消关闭并卸载对话框
+  expect(added.length).toBeGreaterThanOrEqual(1);
+  const baseline = removed.length;
+  // 点取消关闭并卸载对话框：共享监听在最后一个遮罩卸载时移除同一个回调
   fireEvent.click(screen.getByRole("button", { name: "取消" }));
   await flush();
   expect(screen.queryByRole("dialog", { name: "删除副本与分支？" })).toBeNull();
-  // 卸载后必须按 capture=true 移除同一个监听（历史上用 bubble 移除导致泄漏）
   await vi.waitFor(() => {
-    expect(removed).toContain(added[0]);
+    expect(removed.length).toBeGreaterThan(baseline);
   });
+  for (const listener of added) {
+    expect(removed).toContain(listener);
+  }
+  // 卸载后残留的栈条目不得再触发关闭
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  await flush();
+  expect(screen.queryByRole("dialog", { name: "删除副本与分支？" })).toBeNull();
 });
 
-it("一次 Esc 只关闭最上层的遮罩，外层不吃这次 Esc（嵌套弹层）", async () => {
+it("一次 Esc 只关闭最上层的遮罩，外层不吃这次 Esc（嵌套弹层同时挂载）", async () => {
   const outerClose = vi.fn();
   const innerClose = vi.fn();
   render(
     <Scrim onClose={outerClose}>
       <div className="outer-layer">
         <Scrim onClose={innerClose}>
-          <button type="button" aria-label="内层按钮">
-            内层
-          </button>
+          <input aria-label="内层输入" />
         </Scrim>
       </div>
     </Scrim>,
   );
   await flush();
-  fireEvent.keyDown(document.body, { key: "Escape" });
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "内层输入" }), { key: "Escape" });
   await flush();
   expect(innerClose).toHaveBeenCalledTimes(1);
   expect(outerClose).not.toHaveBeenCalled();
+});
+
+it("分两步打开的嵌套遮罩：Esc 发给内层控件只关闭内层一次，外层一次都不关", async () => {
+  // 真实时序：外层对话框已存在，用户操作后再打开内层（rerender 追加）。
+  // 外层监听若各自挂在窗口捕获阶段会先于内层执行，把这次 Esc 错关两层
+  const outerClose = vi.fn();
+  const innerClose = vi.fn();
+  function Nested({ innerOpen }: { innerOpen: boolean }) {
+    return (
+      <Scrim onClose={outerClose}>
+        <div className="outer-layer">
+          {innerOpen ? (
+            <Scrim onClose={innerClose}>
+              <input aria-label="内层输入" />
+            </Scrim>
+          ) : null}
+        </div>
+      </Scrim>
+    );
+  }
+  const view = render(<Nested innerOpen={false} />);
+  await flush();
+  view.rerender(<Nested innerOpen={true} />);
+  await flush();
+  const input = screen.getByRole("textbox", { name: "内层输入" });
+  fireEvent.keyDown(input, { key: "Escape" });
+  await flush();
+  expect(innerClose).toHaveBeenCalledTimes(1);
+  expect(outerClose).not.toHaveBeenCalled();
+});
+
+it("焦点在遮罩之外的控件上时，一次 Esc 仍只关闭最上层遮罩", async () => {
+  const outerClose = vi.fn();
+  const innerClose = vi.fn();
+  render(
+    <div>
+      <input aria-label="外部输入" />
+      <Scrim onClose={outerClose}>
+        <div className="outer-layer">
+          <Scrim onClose={innerClose}>
+            <input aria-label="内层输入" />
+          </Scrim>
+        </div>
+      </Scrim>
+    </div>,
+  );
+  await flush();
+  const outside = screen.getByRole("textbox", { name: "外部输入" });
+  outside.focus();
+  fireEvent.keyDown(outside, { key: "Escape" });
+  await flush();
+  expect(innerClose).toHaveBeenCalledTimes(1);
+  expect(outerClose).not.toHaveBeenCalled();
+});
+
+it("输入法组合期间（isComposing）发给遮罩内输入框的 Esc 不关闭对话框", async () => {
+  const onClose = vi.fn();
+  render(
+    <Scrim onClose={onClose}>
+      <input aria-label="edit" />
+    </Scrim>,
+  );
+  await flush();
+  const input = screen.getByRole("textbox", { name: "edit" });
+  fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+  await flush();
+  expect(onClose).not.toHaveBeenCalled();
+  // 组合结束后的普通 Esc 仍然生效，且只触发一次关闭（捕获与冒泡不重复处理）
+  fireEvent.keyDown(input, { key: "Escape" });
+  await flush();
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("Esc 已被目标控件消费（preventDefault）时不关闭对话框", async () => {
+  const onClose = vi.fn();
+  render(
+    <Scrim onClose={onClose}>
+      <input
+        aria-label="edit"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") e.preventDefault();
+        }}
+      />
+    </Scrim>,
+  );
+  await flush();
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "edit" }), { key: "Escape" });
+  await flush();
+  expect(onClose).not.toHaveBeenCalled();
 });
 
 it("Esc 已被上层监听 preventDefault 时，遮罩不再关闭（输入法/更上层弹层优先）", async () => {

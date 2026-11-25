@@ -1111,6 +1111,56 @@ function UnstoredKey({ value }: { value: NonNullable<LoginCompleted["unstoredKey
 
 /* ---------------- 确认对话框 ---------------- */
 
+/* Esc 关闭是模态语义而不是「恰好焦点在遮罩里」：要在整个窗口生效，
+   又必须尊重对话框内部控件与其他键盘处理器对事件的消费。捕获阶段的监听
+   先于目标执行，看不到输入法等控件稍后对 Esc 的 preventDefault；每个遮罩
+   各挂一个窗口监听则按注册顺序执行，分两步打开的嵌套弹层里外层先关。
+   所以全部遮罩共用一个窗口冒泡监听 + 模块级栈：冒泡阶段执行时目标控件与
+   更早注册的处理器（权限卡片、提问卡片的捕获监听）都已消化完事件，
+   未被消费的 Esc 只交给栈顶（最后打开）的遮罩，一次 Esc 只关最上层 */
+interface ScrimEntry {
+  el: HTMLDivElement | null;
+  close: () => void;
+}
+const scrimStack: ScrimEntry[] = [];
+let escListenerActive = false;
+
+function onScrimKeyDown(event: KeyboardEvent) {
+  if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+  // 「最上层」不能按入栈顺序判断：React 的 effect 子先于父执行，同时挂载的
+  // 嵌套遮罩外层反而后入栈。同一 z-index 下绘制顺序就是文档序（后代必在祖先
+  // 之后、后写的兄弟在前者之后），取仍在 DOM 中的条目里文档序最靠后的那个
+  let top: ScrimEntry | undefined;
+  for (const entry of scrimStack) {
+    // 卸载到 effect 清理之间的条目已不在 DOM：跳过（不能再关，也不能吃掉这次 Esc）
+    const el = entry.el;
+    if (el?.isConnected !== true) continue;
+    const topEl = top?.el;
+    if (top === undefined || topEl == null) {
+      top = entry;
+      continue;
+    }
+    if ((topEl.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) {
+      top = entry;
+    }
+  }
+  if (top === undefined) return;
+  event.preventDefault();
+  top.close();
+}
+
+function subscribeScrimEsc() {
+  if (escListenerActive) return;
+  escListenerActive = true;
+  window.addEventListener("keydown", onScrimKeyDown);
+}
+
+function unsubscribeScrimEsc() {
+  if (!escListenerActive) return;
+  escListenerActive = false;
+  window.removeEventListener("keydown", onScrimKeyDown);
+}
+
 export function Scrim({ onClose, children }: { onClose: () => void; children: ReactNode }) {
   // 关闭后把焦点还给打开对话框前聚焦的元素（如概览里的删除按钮）；元素已卸载则放弃。
   // 必须在首次渲染时捕获：对话框内的 autoFocus 在提交阶段就把焦点挪进对话框，
@@ -1120,8 +1170,8 @@ export function Scrim({ onClose, children }: { onClose: () => void; children: Re
     return active instanceof HTMLElement ? active : null;
   });
   const root = useRef<HTMLDivElement>(null);
-  // onClose 每次渲染都换引用；窗口监听只注册一次、经 ref 读最新回调，
-  // 避免 effect 反复重跑导致清理与新注册交错时残留重复监听
+  // onClose 每次渲染都换引用；栈条目只注册一次、经 ref 读最新回调，
+  // 避免 effect 反复重跑导致入栈出栈交错
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   // React 提交阶段会把焦点恢复给提交前聚焦的元素（触发器），覆盖按钮的 autoFocus，
@@ -1133,23 +1183,18 @@ export function Scrim({ onClose, children }: { onClose: () => void; children: Re
         "button, input, select, textarea, a[href], [tabindex]",
       )?.focus();
     }
-    // Esc 挂在窗口捕获阶段，注册顺序即优先级：权限卡片、提问卡片等更早注册的
-    // 捕获监听（Conversation.tsx）先执行，处理了会 preventDefault，这里就让位；
-    // 晚于对话框出现的层（概览、设置区返回、输入框弹层）反而排在后头， Esc 先关对话框。
-    // 焦点在对话框内时它在目标链上，本监听就会命中，遮罩上的合成 onKeyDown 只是
-    // 同一事件的重复保险；嵌套遮罩时后注册（内层）的先关，外层不吃这次 Esc。
-    // 已卸载遮罩的监听（卸载到被动清理之间，或清理遗漏）必须完全失活，
-    // 不能 preventDefault 或再触发关闭，否则吃掉之后打开的对话框的 Esc
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!el?.isConnected) return;
-      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
-      event.preventDefault();
-      onCloseRef.current();
+    const entry: ScrimEntry = {
+      el: el ?? null,
+      close: () => {
+        onCloseRef.current();
+      },
     };
-    window.addEventListener("keydown", onKeyDown, true);
+    scrimStack.push(entry);
+    subscribeScrimEsc();
     return () => {
-      // 注册与移除的 capture 必须一致，否则监听泄漏
-      window.removeEventListener("keydown", onKeyDown, true);
+      const index = scrimStack.indexOf(entry);
+      if (index !== -1) scrimStack.splice(index, 1);
+      if (scrimStack.length === 0) unsubscribeScrimEsc();
       if (returnFocusTo?.isConnected) returnFocusTo.focus();
     };
   }, [returnFocusTo]);
@@ -1159,13 +1204,6 @@ export function Scrim({ onClose, children }: { onClose: () => void; children: Re
       className="scrim"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
-      }}
-      onKeyDown={(e) => {
-        if (e.key !== "Escape") return;
-        // 窗口捕获监听（上方 effect）通常已先一步关闭并 preventDefault，这里是同一事件的
-        // 重复保险；不标记 defaultPrevented 的话同一次 Esc 会连带触发概览开关或设置区返回
-        e.preventDefault();
-        onClose();
       }}
     >
       {children}
