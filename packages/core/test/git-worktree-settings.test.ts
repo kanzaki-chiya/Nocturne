@@ -1198,4 +1198,375 @@ describe("工作树根目录、创建前 fetch、托管注册聚合、保留清�
       );
     },
   );
+
+  it(
+    "尊重 git worktree lock：锁定工作树在手动、自动与并发加锁清理中均保留目录、内容、分支与登记，解锁后可正常清理",
+    { timeout: 60_000 },
+    async () => {
+      const base = tempDir();
+      const home = path.join(base, "home");
+      const sessionsDir = path.join(base, "sessions");
+      const repo = initRepo(path.join(base, "proj-lock"));
+      mkdirSync(home, { recursive: true });
+      mkdirSync(sessionsDir, { recursive: true });
+
+      const platform = createPlatform();
+      const cfg = await loadConfig(platform, { nocturneHome: home, env: () => undefined });
+      await cfg.updateSettings({ "worktree.autoDelete": true, "worktree.keepCount": 1 });
+      const rt = await createRuntime({
+        cwd: repo,
+        sessionsDir,
+        config: cfg,
+        providers: [new FakeProvider({})],
+        subagent: { enabled: false },
+      });
+
+      const sLocked = await rt.createSession({
+        cwd: repo,
+        model: FAKE_MODEL,
+        branch: { name: "nocturne/locked-wt", create: true },
+      });
+      const wtLocked = sLocked.state().config.worktree?.current ?? "";
+      await sLocked.close();
+      writeFileSync(path.join(wtLocked, "keep.txt"), "precious-locked-content\n");
+
+      // 再建一个较新的干净工作树，使 wtLocked 处于自动清理候选位（keepCount=1）
+      const sNewer = await rt.createSession({
+        cwd: repo,
+        model: FAKE_MODEL,
+        branch: { name: "nocturne/newer-wt", create: true },
+      });
+      const wtNewer = sNewer.state().config.worktree?.current ?? "";
+      await sNewer.close();
+      await registerManagedWorktree(sessionsDir, {
+        kind: "session",
+        repository: repo,
+        worktreePath: wtNewer,
+        branch: "nocturne/newer-wt",
+        ownsBranch: true,
+        sessionId: sNewer.id,
+        lastUsedAt: Date.now() + 60_000,
+      });
+
+      // 使用 Git 原生 lock 锁定工作树
+      git(repo, "worktree", "lock", "--reason", "mounted-external-check", wtLocked);
+
+      const desc = await rt.describeManagedWorktrees();
+      const lockedItem = desc.worktrees.find((w) => w.branch === "nocturne/locked-wt");
+      if (lockedItem === undefined) throw new Error("expected locked worktree");
+
+      // 1) 手动清理必须尊重 Git 锁：保留目录、内容、分支引用与托管登记
+      const manualRes = await rt.deleteManagedWorktrees({ ids: [lockedItem.id] });
+      expect(manualRes.deleted).toHaveLength(0);
+      expect(manualRes.failed).toHaveLength(0);
+      expect(manualRes.skipped).toHaveLength(1);
+      expect(manualRes.skipped[0]?.status).toBe("skipped_protected");
+      expect(manualRes.skipped[0]?.error).toMatch(/Git 锁定.*mounted-external-check/);
+      expect(manualRes.skipped[0]?.error).toMatch(/git worktree unlock/);
+      expect(existsSync(wtLocked)).toBe(true);
+      expect(readFileSync(path.join(wtLocked, "keep.txt"), "utf8")).toBe(
+        "precious-locked-content\n",
+      );
+      expect(git(repo, "rev-parse", "--verify", "refs/heads/nocturne/locked-wt")).toBeTruthy();
+      expect(
+        (await rt.describeManagedWorktrees()).worktrees.some((w) => w.id === lockedItem.id),
+      ).toBe(true);
+
+      // 2) 自动清理也必须尊重 Git 锁：保留目录、内容、分支引用与托管登记
+      const autoRes = await rt.pruneManagedWorktrees();
+      expect(autoRes.deleted).toHaveLength(0);
+      expect(autoRes.failed).toHaveLength(0);
+      expect(autoRes.skipped).toHaveLength(1);
+      expect(autoRes.skipped[0]?.status).toBe("skipped_protected");
+      expect(existsSync(wtLocked)).toBe(true);
+      expect(readFileSync(path.join(wtLocked, "keep.txt"), "utf8")).toBe(
+        "precious-locked-content\n",
+      );
+      expect(git(repo, "rev-parse", "--verify", "refs/heads/nocturne/locked-wt")).toBeTruthy();
+
+      // 3) 模拟快照后、最终复核前瞬间被外部 git worktree lock 锁住：中止删除、清理过期快照并保留原工作树
+      git(repo, "worktree", "unlock", wtLocked);
+      let raceSnapDir: string | undefined;
+      const raceInspector: ManagedWorktreeInspector = {
+        isActive: () => false,
+        sessionInfo: () => ({ title: "Locked", exists: true }),
+        worktreeConfig: () => ({ subagentRoot: "", autoDelete: true, keepCount: 1 }),
+      };
+      const raceLockRes = await deleteManagedWorktrees(sessionsDir, raceInspector, {
+        ids: [lockedItem.id],
+        reason: "manual",
+        saveSnapshot: true,
+        beforeFinalRemoveCheck: ({ snapshot }) => {
+          raceSnapDir = snapshot?.snapshotDir;
+          git(repo, "worktree", "lock", "--reason", "race-lock", wtLocked);
+        },
+      });
+      expect(raceLockRes.deleted).toHaveLength(0);
+      expect(raceLockRes.skipped[0]?.status).toBe("skipped_protected");
+      expect(raceLockRes.skipped[0]?.error).toMatch(/race-lock/);
+      expect(existsSync(wtLocked)).toBe(true);
+      if (raceSnapDir !== undefined) {
+        expect(existsSync(raceSnapDir)).toBe(false);
+      }
+
+      // 4) 解锁后，清理顺利完成
+      git(repo, "worktree", "unlock", wtLocked);
+      const afterUnlock = await rt.deleteManagedWorktrees({ ids: [lockedItem.id] });
+      expect(afterUnlock.deleted).toHaveLength(1);
+      expect(existsSync(wtLocked)).toBe(false);
+    },
+  );
+
+  it(
+    "分支归属与原子删除：切到同 SHA 用户分支绝不误删用户分支；分支在删除前移动到新提交或被其他工作树检出时保留分支",
+    { timeout: 60_000 },
+    async () => {
+      const base = tempDir();
+      const sessionsDir = path.join(base, "sessions");
+      const repo = initRepo(path.join(base, "proj-branch-guard"));
+      mkdirSync(sessionsDir, { recursive: true });
+
+      const inspector: ManagedWorktreeInspector = {
+        isActive: () => false,
+        sessionInfo: () => ({ title: "Branch Guard", exists: true }),
+        worktreeConfig: () => ({ subagentRoot: "", autoDelete: false, keepCount: 15 }),
+      };
+
+      // 场景 1：Nocturne 创建分支 nocturne/owned-1，用户手动切到指向完全相同 SHA 的既有用户分支 user/existing
+      git(repo, "branch", "user/existing", "main");
+      const wt1 = path.join(base, "wt-switched");
+      git(repo, "worktree", "add", "-q", "-b", "nocturne/owned-1", wt1, "main");
+      const e1 = await registerManagedWorktree(sessionsDir, {
+        kind: "session",
+        repository: repo,
+        worktreePath: wt1,
+        branch: "nocturne/owned-1",
+        ownsBranch: true,
+        sessionId: "sess-b1",
+      });
+      // 用户在工作树内切到同 SHA 的用户分支
+      git(wt1, "checkout", "-q", "user/existing");
+      expect(git(wt1, "rev-parse", "HEAD")).toBe(
+        git(repo, "rev-parse", "refs/heads/nocturne/owned-1"),
+      );
+
+      const r1 = await deleteManagedWorktrees(sessionsDir, inspector, {
+        ids: [e1.id],
+        reason: "manual",
+      });
+      expect(r1.deleted).toHaveLength(1);
+      expect(r1.deleted[0]?.removedBranch).toBe(false);
+      expect(existsSync(wt1)).toBe(false);
+      // 用户分支 user/existing 与原 nocturne/owned-1 均不得被误删
+      expect(git(repo, "rev-parse", "--verify", "refs/heads/user/existing")).toBeTruthy();
+      expect(git(repo, "rev-parse", "--verify", "refs/heads/nocturne/owned-1")).toBeTruthy();
+
+      // 场景 2：SHA 检查后、删除自有分支前瞬间引用被移动到新提交 -> 原子 update-ref -d 拒绝删除，保留新提交
+      const wt2 = path.join(base, "wt-ref-race");
+      git(repo, "worktree", "add", "-q", "-b", "nocturne/owned-race", wt2, "main");
+      const e2 = await registerManagedWorktree(sessionsDir, {
+        kind: "session",
+        repository: repo,
+        worktreePath: wt2,
+        branch: "nocturne/owned-race",
+        ownsBranch: true,
+        sessionId: "sess-b2",
+      });
+      // 在主仓库再做一个新提交供竞态移动引用
+      writeFileSync(path.join(repo, "advance.txt"), "new-commit\n");
+      git(repo, "add", "advance.txt");
+      git(repo, "commit", "-qm", "advance main");
+      const newerSha = git(repo, "rev-parse", "HEAD");
+
+      const r2 = await deleteManagedWorktrees(sessionsDir, inspector, {
+        ids: [e2.id],
+        reason: "manual",
+        beforeBranchDelete: ({ branch }) => {
+          git(repo, "update-ref", `refs/heads/${branch}`, newerSha);
+        },
+      });
+      expect(r2.deleted).toHaveLength(1);
+      expect(r2.deleted[0]?.removedBranch).toBe(false);
+      expect(existsSync(wt2)).toBe(false);
+      expect(git(repo, "rev-parse", "--verify", "refs/heads/nocturne/owned-race")).toBe(newerSha);
+
+      // 场景 3：自有分支同时在另一工作树被检出 -> 尊重其他检出，不删该分支
+      const wt3 = path.join(base, "wt-shared-a");
+      const wt3Other = path.join(base, "wt-shared-b");
+      git(repo, "worktree", "add", "-q", "-b", "nocturne/owned-shared", wt3, "main");
+      git(repo, "worktree", "add", "-q", "--force", wt3Other, "nocturne/owned-shared");
+      const e3 = await registerManagedWorktree(sessionsDir, {
+        kind: "session",
+        repository: repo,
+        worktreePath: wt3,
+        branch: "nocturne/owned-shared",
+        ownsBranch: true,
+        sessionId: "sess-b3",
+      });
+      const r3 = await deleteManagedWorktrees(sessionsDir, inspector, {
+        ids: [e3.id],
+        reason: "manual",
+      });
+      expect(r3.deleted).toHaveLength(1);
+      expect(r3.deleted[0]?.removedBranch).toBe(false);
+      expect(existsSync(wt3)).toBe(false);
+      expect(existsSync(wt3Other)).toBe(true);
+      expect(git(repo, "rev-parse", "--verify", "refs/heads/nocturne/owned-shared")).toBeTruthy();
+      git(repo, "worktree", "remove", "--force", wt3Other);
+
+      // 场景 4：正常情况下（确实是创建时的自有分支、无其他检出、SHA 未移动）-> 原子删除分支成功
+      const wt4 = path.join(base, "wt-owned-clean");
+      git(repo, "worktree", "add", "-q", "-b", "nocturne/owned-clean", wt4, "main");
+      const e4 = await registerManagedWorktree(sessionsDir, {
+        kind: "session",
+        repository: repo,
+        worktreePath: wt4,
+        branch: "nocturne/owned-clean",
+        ownsBranch: true,
+        sessionId: "sess-b4",
+      });
+      const r4 = await deleteManagedWorktrees(sessionsDir, inspector, {
+        ids: [e4.id],
+        reason: "manual",
+      });
+      expect(r4.deleted).toHaveLength(1);
+      expect(r4.deleted[0]?.removedBranch).toBe(true);
+      expect(() => git(repo, "rev-parse", "--verify", "refs/heads/nocturne/owned-clean")).toThrow();
+    },
+  );
+
+  it(
+    "元数据清理归属证明：保留新会话与自定义路径旁同名用户 JSON，绝不按磁盘 metadataPath 删任意文件，仅删严格匹配的子代理受管元数据",
+    { timeout: 60_000 },
+    async () => {
+      const base = tempDir();
+      const sessionsDir = path.join(base, "sessions");
+      const repo = initRepo(path.join(base, "proj-meta-guard"));
+      mkdirSync(path.join(sessionsDir, "worktrees"), { recursive: true });
+
+      const inspector: ManagedWorktreeInspector = {
+        isActive: () => false,
+        sessionInfo: () => ({ title: "Meta Guard", exists: true }),
+        worktreeConfig: () => ({ subagentRoot: "", autoDelete: false, keepCount: 15 }),
+      };
+
+      // 1) 新会话自定义路径工作树：旁边存在同名普通用户 JSON 哨兵文件 -> 删除工作树后哨兵必须完好保留
+      const customRoot = path.join(base, "custom-session-root");
+      mkdirSync(customRoot, { recursive: true });
+      const sessWt = path.join(customRoot, "my-feature");
+      const sessSentinel = `${sessWt}.json`;
+      writeFileSync(sessSentinel, '{"user":"do-not-delete-session-sibling"}\n');
+      git(repo, "worktree", "add", "-q", "-b", "nocturne/sess-meta", sessWt, "main");
+      const eSess = await registerManagedWorktree(sessionsDir, {
+        kind: "session",
+        repository: repo,
+        worktreePath: sessWt,
+        branch: "nocturne/sess-meta",
+        ownsBranch: true,
+        sessionId: "sess-m1",
+      });
+      const rSess = await deleteManagedWorktrees(sessionsDir, inspector, {
+        ids: [eSess.id],
+        reason: "manual",
+      });
+      expect(rSess.deleted).toHaveLength(1);
+      expect(existsSync(sessWt)).toBe(false);
+      expect(existsSync(sessSentinel)).toBe(true);
+      expect(readFileSync(sessSentinel, "utf8")).toBe('{"user":"do-not-delete-session-sibling"}\n');
+
+      // 2) 子代理工作树：
+      //    (a) 自定义 subagentRoot 旁同名普通用户哨兵 `${subWt}.json` 必须保留；
+      //    (b) `<sessionsDir>/worktrees/<childId>.json` 中伪造的 `metadataPath` 指向外部哨兵文件，外部哨兵绝不得被删；
+      //    (c) `<sessionsDir>/worktrees/<childId>.json` 本身身份严格匹配，会被正常清理。
+      const customSubRoot = path.join(base, "custom-sub-root");
+      mkdirSync(customSubRoot, { recursive: true });
+      const subChildId = "child_verified_1";
+      const subWt = path.join(customSubRoot, subChildId);
+      const subSiblingSentinel = `${subWt}.json`;
+      const externalTargetSentinel = path.join(base, "external-victim-sentinel.json");
+      writeFileSync(subSiblingSentinel, '{"user":"keep-subagent-sibling"}\n');
+      writeFileSync(externalTargetSentinel, '{"user":"must-never-delete-via-metadataPath"}\n');
+      git(repo, "worktree", "add", "-q", "-b", "nocturne/sub-meta-1", subWt, "main");
+      const subMetaFile = path.join(sessionsDir, "worktrees", `${subChildId}.json`);
+      writeFileSync(
+        subMetaFile,
+        JSON.stringify(
+          {
+            childSessionId: subChildId,
+            parentSessionId: "sess-parent-1",
+            repository: repo,
+            worktree: subWt,
+            branch: "nocturne/sub-meta-1",
+            base: git(subWt, "rev-parse", "HEAD"),
+            snapshot: false,
+            cwd: subWt,
+            workspaceRoot: subWt,
+            task: "verify",
+            metadataPath: externalTargetSentinel,
+            createdAt: Date.now(),
+          },
+          null,
+          2,
+        ),
+      );
+      const eSub = await registerManagedWorktree(sessionsDir, {
+        kind: "subagent",
+        repository: repo,
+        worktreePath: subWt,
+        branch: "nocturne/sub-meta-1",
+        ownsBranch: true,
+        sessionId: "sess-parent-1",
+        childSessionId: subChildId,
+      });
+
+      const rSub = await deleteManagedWorktrees(sessionsDir, inspector, {
+        ids: [eSub.id],
+        reason: "manual",
+      });
+      expect(rSub.deleted).toHaveLength(1);
+      expect(existsSync(subWt)).toBe(false);
+      expect(existsSync(subSiblingSentinel)).toBe(true);
+      expect(existsSync(externalTargetSentinel)).toBe(true);
+      expect(readFileSync(externalTargetSentinel, "utf8")).toBe(
+        '{"user":"must-never-delete-via-metadataPath"}\n',
+      );
+      expect(existsSync(subMetaFile)).toBe(false);
+
+      // 3) 子代理受管目录下 `<childId>.json` 身份不匹配（如 parentSessionId/branch/worktree 不符或普通 JSON）-> 必须保留
+      const mismatchChildId = "child_mismatch_2";
+      const subWt2 = path.join(customSubRoot, mismatchChildId);
+      git(repo, "worktree", "add", "-q", "-b", "nocturne/sub-meta-2", subWt2, "main");
+      const mismatchMetaFile = path.join(sessionsDir, "worktrees", `${mismatchChildId}.json`);
+      writeFileSync(
+        mismatchMetaFile,
+        JSON.stringify({
+          childSessionId: mismatchChildId,
+          parentSessionId: "another-parent",
+          repository: repo,
+          worktree: subWt2,
+          branch: "nocturne/sub-meta-2",
+          base: git(subWt2, "rev-parse", "HEAD"),
+          snapshot: false,
+          cwd: subWt2,
+          workspaceRoot: subWt2,
+        }),
+      );
+      const eSub2 = await registerManagedWorktree(sessionsDir, {
+        kind: "subagent",
+        repository: repo,
+        worktreePath: subWt2,
+        branch: "nocturne/sub-meta-2",
+        ownsBranch: true,
+        sessionId: "sess-parent-2",
+        childSessionId: mismatchChildId,
+      });
+      const rSub2 = await deleteManagedWorktrees(sessionsDir, inspector, {
+        ids: [eSub2.id],
+        reason: "manual",
+      });
+      expect(rSub2.deleted).toHaveLength(1);
+      expect(existsSync(subWt2)).toBe(false);
+      expect(existsSync(mismatchMetaFile)).toBe(true);
+    },
+  );
 });

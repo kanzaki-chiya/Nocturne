@@ -169,7 +169,6 @@ interface LegacySubagentRecord {
   base?: string | undefined;
   applied?: boolean | undefined;
   changes?: { head?: string | undefined } | undefined;
-  metadataPath?: string | undefined;
   createdAt?: number | undefined;
 }
 
@@ -183,6 +182,18 @@ function pathKey(value: string): string {
 
 async function canonicalPath(value: string): Promise<string> {
   return realpath(value).catch(() => path.resolve(value));
+}
+
+async function canonicalPathPreservingMissingLeaf(value: string): Promise<string> {
+  try {
+    return await realpath(value);
+  } catch {
+    const resolved = path.resolve(value);
+    const parent = path.dirname(resolved);
+    if (parent === resolved) return resolved;
+    const realParent = await realpath(parent).catch(() => parent);
+    return path.join(realParent, path.basename(resolved));
+  }
 }
 
 function registryPath(sessionsDir: string): string {
@@ -369,6 +380,8 @@ async function readLegacySubagentRecords(
   for (const file of files) {
     if (!file.endsWith(".json") || file === "managed.json") continue;
     const metaPath = path.join(dir, file);
+    const st = await lstat(metaPath).catch(() => undefined);
+    if (st === undefined || st.isSymbolicLink() || !st.isFile()) continue;
     let parsed: LegacySubagentRecord;
     try {
       parsed = JSON.parse(await readFile(metaPath, "utf8")) as LegacySubagentRecord;
@@ -386,9 +399,74 @@ async function readLegacySubagentRecords(
     ) {
       continue;
     }
-    map.set(parsed.childSessionId, { ...parsed, metadataPath: parsed.metadataPath ?? metaPath });
+    map.set(parsed.childSessionId, {
+      childSessionId: parsed.childSessionId,
+      parentSessionId: parsed.parentSessionId,
+      repository: parsed.repository,
+      worktree: parsed.worktree,
+      branch: parsed.branch,
+      ...(typeof parsed.base === "string" ? { base: parsed.base } : {}),
+      ...(typeof parsed.applied === "boolean" ? { applied: parsed.applied } : {}),
+      ...(parsed.changes !== undefined ? { changes: parsed.changes } : {}),
+      ...(typeof parsed.createdAt === "number" ? { createdAt: parsed.createdAt } : {}),
+    });
   }
   return map;
+}
+
+/**
+ * 严格核验并清理子代理受管元数据 JSON：
+ * - 仅针对 kind === "subagent" 且含合法 childSessionId 的条目，新会话工作树绝不删除任何旁边 JSON；
+ * - 唯一允许路径为 `<sessionsDir>/worktrees/<childSessionId>.json`，绝不信任磁盘 JSON 自声明的 metadataPath，也不盲删 `${wtReal}.json`；
+ * - 必须是普通文件（拒绝符号链接），且 JSON 内部身份字段（childSessionId/parentSessionId/worktree/repository/branch 与结构特征）与本条登记完全匹配才删除。
+ */
+async function removeVerifiedSubagentMetadata(
+  sessionsDir: string,
+  entry: Pick<ManagedWorktreeRegistryEntry, "kind" | "childSessionId" | "sessionId" | "branch">,
+  wtReal: string,
+  mainRepoReal: string,
+): Promise<boolean> {
+  if (entry.kind !== "subagent") return false;
+  if (entry.childSessionId === undefined || !/^[A-Za-z0-9_-]+$/.test(entry.childSessionId)) {
+    return false;
+  }
+  const managedDir = path.resolve(sessionsDir, "worktrees");
+  const metaPath = path.resolve(managedDir, `${entry.childSessionId}.json`);
+  if (pathKey(path.dirname(metaPath)) !== pathKey(managedDir)) {
+    return false;
+  }
+  const st = await lstat(metaPath).catch(() => undefined);
+  if (st === undefined || st.isSymbolicLink() || !st.isFile()) {
+    return false;
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(metaPath, "utf8"));
+  } catch {
+    return false;
+  }
+  if (typeof raw !== "object" || raw === null) return false;
+  const rec = raw as Record<string, unknown>;
+  if (
+    rec.childSessionId !== entry.childSessionId ||
+    rec.parentSessionId !== entry.sessionId ||
+    rec.branch !== entry.branch ||
+    typeof rec.worktree !== "string" ||
+    typeof rec.repository !== "string" ||
+    typeof rec.base !== "string" ||
+    typeof rec.cwd !== "string" ||
+    typeof rec.workspaceRoot !== "string" ||
+    typeof rec.snapshot !== "boolean"
+  ) {
+    return false;
+  }
+  const metaWorktreeReal = await canonicalPathPreservingMissingLeaf(rec.worktree);
+  const metaRepoReal = await canonicalPathPreservingMissingLeaf(rec.repository);
+  if (pathKey(metaWorktreeReal) !== pathKey(wtReal)) return false;
+  if (pathKey(metaRepoReal) !== pathKey(mainRepoReal)) return false;
+
+  await rm(metaPath, { force: true });
+  return true;
 }
 
 /** 登记托管工作树（幂等更新，保留既有 pinned 标记）。 */
@@ -521,6 +599,14 @@ interface GitWorktreeListEntry {
   path: string;
   head?: string | undefined;
   branch?: string | undefined;
+  locked?: boolean | undefined;
+  lockReason?: string | undefined;
+  prunable?: boolean | undefined;
+}
+
+function formatGitLockedMessage(lockReason?: string): string {
+  const suffix = lockReason !== undefined && lockReason !== "" ? `（${lockReason}）` : "";
+  return `工作树已被 Git 锁定${suffix}，已跳过删除并保留目录、引用与托管登记；如需清理请先执行 git worktree unlock`;
 }
 
 async function parseRepoWorktreeList(
@@ -548,6 +634,13 @@ async function parseRepoWorktreeList(
       current.head = token.slice("HEAD ".length);
     } else if (token.startsWith("branch refs/heads/") && current !== undefined) {
       current.branch = token.slice("branch refs/heads/".length);
+    } else if (token === "locked" && current !== undefined) {
+      current.locked = true;
+    } else if (token.startsWith("locked ") && current !== undefined) {
+      current.locked = true;
+      current.lockReason = token.slice("locked ".length);
+    } else if ((token === "prunable" || token.startsWith("prunable ")) && current !== undefined) {
+      current.prunable = true;
     }
   }
   if (current !== undefined) {
@@ -1601,6 +1694,9 @@ export async function deleteManagedWorktrees(
           snapshot?: PlatformWorktreeRecoverySnapshot | undefined;
         }) => Promise<void> | void)
       | undefined;
+    /** 仅用于确定性竞争测试：在工作树移除后、原子删除自有分支引用前触发回调 */
+    beforeBranchDelete?:
+      ((ctx: { id: string; branch: string; headSha: string }) => Promise<void> | void) | undefined;
   },
 ): Promise<PlatformWorktreeCleanupResult> {
   const result: PlatformWorktreeCleanupResult = { deleted: [], skipped: [], failed: [] };
@@ -1646,6 +1742,15 @@ export async function deleteManagedWorktrees(
 
         const wtMap = await parseRepoWorktreeList(mainRepoReal).catch(() => null);
         const wtListed = wtMap?.get(pathKey(wtReal));
+        if (wtListed?.locked === true) {
+          return {
+            id,
+            branch: wtListed.branch ?? entry.branch,
+            path: wtReal,
+            status: "skipped_protected",
+            error: formatGitLockedMessage(wtListed.lockReason),
+          };
+        }
         if (wtListed === undefined || !existsSync(wtReal)) {
           // 目录与 git 登记均已不存在：同步清理陈旧注册项
           await unregisterManagedWorktree(sessionsDir, id);
@@ -1784,6 +1889,16 @@ export async function deleteManagedWorktrees(
         }
         const recheckWtMap = await parseRepoWorktreeList(mainRepoReal).catch(() => null);
         const recheckListed = recheckWtMap?.get(pathKey(wtReal));
+        if (recheckListed?.locked === true) {
+          await discardPendingSnapshot();
+          return {
+            id,
+            branch: live.branch,
+            path: wtReal,
+            status: "skipped_protected",
+            error: formatGitLockedMessage(recheckListed.lockReason),
+          };
+        }
         if (recheckListed === undefined || !existsSync(wtReal)) {
           await discardPendingSnapshot();
           await unregisterManagedWorktree(sessionsDir, id);
@@ -1852,39 +1967,111 @@ export async function deleteManagedWorktrees(
           };
         }
 
+        // 执行移除：仅通过 Git 自身移除工作树，绝不回退到 rm(wtReal) + prune 绕过 Git 保护
         try {
-          try {
-            await gitExec(mainRepoReal, ["worktree", "remove", "--force", wtReal]);
-          } catch {
-            await rm(wtReal, { recursive: true, force: true });
-            await gitExec(mainRepoReal, ["worktree", "prune"]);
+          await gitExec(mainRepoReal, ["worktree", "remove", "--force", wtReal]);
+        } catch (removeCause) {
+          const gitErr = removeCause instanceof Error ? removeCause.message : String(removeCause);
+          const dirStillExists = existsSync(wtReal);
+          const afterList = await parseRepoWorktreeList(mainRepoReal).catch(() => null);
+          const afterEntry = afterList?.get(pathKey(wtReal));
+
+          if (afterEntry?.locked === true) {
+            if (dirStillExists) await discardPendingSnapshot();
+            return {
+              id,
+              branch: live.branch,
+              path: wtReal,
+              status: "skipped_protected",
+              error: formatGitLockedMessage(afterEntry.lockReason),
+            };
           }
+
+          if (dirStillExists) {
+            // Git 拒绝移除且目录仍在：完整保留目录、分支引用、元数据与托管登记
+            await discardPendingSnapshot();
+            return {
+              id,
+              branch: live.branch,
+              path: wtReal,
+              status: "failed",
+              error: `Git 拒绝移除工作树，已保留目录、分支引用与托管登记：${gitErr}`,
+            };
+          }
+
+          // 目录已被 Git 自身移除：仅按实况协调记录，绝不执行破坏性递归删除或强删分支
+          if (afterEntry === undefined || afterEntry.prunable === true) {
+            await removeVerifiedSubagentMetadata(
+              sessionsDir,
+              latestEntry,
+              wtReal,
+              mainRepoReal,
+            ).catch(() => undefined);
+            await unregisterManagedWorktree(sessionsDir, id);
+            return {
+              id,
+              branch: live.branch,
+              path: wtReal,
+              status: "failed",
+              ...(snapshot !== undefined ? { snapshot } : {}),
+              error: `工作树目录已被 Git 移除，已同步清理托管登记并保留分支引用，但 Git 返回错误：${gitErr}`,
+            };
+          }
+
+          return {
+            id,
+            branch: live.branch,
+            path: wtReal,
+            status: "failed",
+            ...(snapshot !== undefined ? { snapshot } : {}),
+            error: `移除工作树未完全完成，已保留托管登记与分支引用：${gitErr}`,
+          };
+        }
+
+        try {
+          // 仅当当前检出的分支确为 Nocturne 创建登记的自有分支、未被其他工作树检出、且 SHA 未移动时原子删除
           let removedBranch = false;
-          if (latestEntry.ownsBranch && live.branch && !captured.detached) {
-            const branchRef = `refs/heads/${live.branch}`;
-            const currentBranchSha = (
-              await gitExec(mainRepoReal, ["rev-parse", "--verify", branchRef]).catch(() => "")
+          const ownedBranch = latestEntry.branch;
+          if (
+            latestEntry.ownsBranch &&
+            ownedBranch !== "" &&
+            !captured.detached &&
+            captured.branch === ownedBranch
+          ) {
+            if (input.beforeBranchDelete !== undefined) {
+              await input.beforeBranchDelete({
+                id,
+                branch: ownedBranch,
+                headSha: captured.headSha,
+              });
+            }
+            const branchRef = `refs/heads/${ownedBranch}`;
+            const remainingWorktrees = await parseRepoWorktreeList(mainRepoReal).catch(() => null);
+            const checkedOutElsewhere =
+              remainingWorktrees === null ||
+              [...remainingWorktrees.values()].some((wt) => wt.branch === ownedBranch);
+            const mainHeadSym = (
+              await gitExec(mainRepoReal, ["symbolic-ref", "-q", "HEAD"]).catch(() => "")
             ).trim();
-            if (currentBranchSha === captured.headSha) {
+            if (!checkedOutElsewhere && mainHeadSym !== branchRef) {
               try {
-                await gitExec(mainRepoReal, ["branch", "-D", live.branch]);
+                // 使用 git update-ref -d <ref> <oldSha> 原子 CAS 删除，彻底消除检查后引用移动竞态
+                await gitExec(mainRepoReal, ["update-ref", "-d", branchRef, captured.headSha]);
                 removedBranch = true;
-              } catch (cause) {
-                const refOut = await gitExec(mainRepoReal, [
-                  "for-each-ref",
-                  "--format=%(refname)",
-                  branchRef,
-                ]).catch(() => {
-                  throw cause;
-                });
-                if (refOut.trim() !== "") throw cause;
+              } catch {
+                // 引用已移动（含新提交）或已被外部删除：绝不回退 branch -D，安全保留
+                removedBranch = false;
               }
             }
           }
-          if (legacy?.metadataPath) {
-            await rm(legacy.metadataPath, { force: true }).catch(() => undefined);
-          }
-          await rm(`${wtReal}.json`, { force: true }).catch(() => undefined);
+
+          // 仅清理严格核验归属的子代理受管元数据，绝不盲删 `${wtReal}.json` 或信任磁盘 metadataPath
+          await removeVerifiedSubagentMetadata(
+            sessionsDir,
+            latestEntry,
+            wtReal,
+            mainRepoReal,
+          ).catch(() => undefined);
           await unregisterManagedWorktree(sessionsDir, id);
           return {
             id,
