@@ -30,6 +30,7 @@ nctrn setup                  # 服务商配置向导（TTY 打开服务商页，
 nctrn rpc --stdio            # RPC 服务端：stdin/stdout 上的 JSON-RPC（ADR-0044，v0.5）
 nctrn rpc --stdio --agent-pipe # 同上，并监听本机外部 agent 管道（桌面端后台使用，ADR-0074）
 nctrn mcp [--name <label>]   # 对外 MCP 服务器桥（stdio，连接桌面端后台驱动会话，ADR-0074）
+nctrn acp                    # ACP Agent 服务端（stdio，供 Paseo 等外部宿主调用，ADR-0120）
 ```
 
 | 参数 | 说明 |
@@ -256,14 +257,14 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 - **目录**：`apps/cli/`，包名 `@nocturne/cli`，`bin: { nctrn: dist/main.js }`；`tsdown` 构建 ESM。
 - **第三方运行时依赖：零**（npm registry 依赖；workspace 包 `@nocturne/mcp`、`@nocturne/acp`、`@nocturne/tui` 除外——MCP/ACP 装配点在 CLI，`--tui` 惰性加载 TUI，见下）。参数解析用 `util.parseArgs`，行输入用 `node:readline`，颜色用 `util.styleText`。非 Node 内置的新依赖需要理由，并在本文登记。该约定按包生效：`apps/tui` 经 [ADR-0010](../decisions/ADR-0010-tui-rendering.md) 单独批准终端依赖，不影响本包。
 - **MCP 装配**：`createRuntime` 时构造 `createMcpConnector(platform)`（`@nocturne/mcp`）注入 `RuntimeOptions.mcp`；`--debug*` 参数映射到 `RuntimeOptions.debug`。TUI 路径（`nctrn --tui`）由 CLI 完成装配后把 `Session` 交给 `runTui`，MCP/Hook/诊断对 TUI 透明。
-- **ACP 装配**：三个 main Runtime 创建路径及 `nctrn rpc --stdio` 均注入无状态 `createAcpConnector(platform)`；配置不固化在 connector，Core 每次运行传入当前 Turn 的条目快照，热更新机制见 [subagent.md](../architecture/subagent.md#17-外部-agentacp)。
+- **ACP 装配**：三个 main Runtime 创建路径及 `nctrn rpc --stdio`、`nctrn acp` 均注入无状态 `createAcpConnector(platform)`；配置不固化在 connector，Core 每次运行传入当前 Turn 的条目快照，热更新机制见 [subagent.md](../architecture/subagent.md#17-外部-agentacp)。`nctrn acp`（`apps/cli/src/acp.ts`）另通过 `@nocturne/acp/agent` 暴露 ACP Agent 服务端（stdio NDJSON，stdout 仅写协议帧、诊断走 stderr），按宿主 `cwd` 与会话级 `mcpServers` 装配独立 Core 会话，协议与能力契约见 [ADR-0120](../decisions/ADR-0120-acp-agent-stdio.md)。
 - **依赖方向**（dependency-cruiser 固化）：
   - 规则 `no-deep-import-from-outside-core` 的语义收紧为：`apps/` 解析到 `packages/core/src/` 的 import 只允许命中 `index.ts` 或 `protocol/index.ts`——即只有 `@nocturne/core` 包入口与 `@nocturne/core/protocol` 两个入口可用，任何内部路径（包括 `protocol/` 下的散文件）一律禁止。
   - 根 `depcheck` 脚本扫描 `packages apps`；CLI→TUI 的两种允许边及命令表零依赖约束见 [modules.md](../architecture/modules.md) 第 1 节。逐行路径只加载纯命令表，不加载 Ink。
   - 解析方式：`tsconfig.base.json` 的 `paths` 把 `@nocturne/core` 映射到 `packages/core/src/index.ts`、`@nocturne/core/*` 到 `packages/core/src/*`，使 depcheck 与 typecheck 在源码层工作；运行期经 pnpm workspace 链接解析到 `dist`。
 - **测试分层**：
   - `apps/cli/test/*.test.ts`：离线单测——参数解析、渲染映射、配置收集、命令分发（注入假会话，不需要 `dist`；vitest 用 `resolve.alias` 把 `@nocturne/core` 指到 core 源码）。
-  - `apps/cli/test/rpc.e2e.test.ts`：`nctrn rpc --stdio` 端到端——启动真实子进程，模型是测试内的本地假 SSE 服务（不访问网络）；子进程跑构建产物，所以 `beforeAll` 先执行一次 `pnpm build`（几秒），避免用过期 `dist` 给出假通过。
+  - `apps/cli/test/rpc.e2e.test.ts` 与 `apps/cli/test/acp-stdio.test.ts`：`nctrn rpc --stdio` 与 `nctrn acp` 端到端——启动真实子进程，模型是测试内的本地假 SSE 服务（不访问网络）；子进程跑构建产物，所以 `beforeAll` 先执行一次 `pnpm build`（几秒），避免用过期 `dist` 给出假通过。
   - `apps/cli/test/*.smoke.ts`：真实服务验收（fixture 仓库 + 非交互 `nctrn --yes -p`），只在设置 `NOCTURNE_SMOKE_*` 时运行；根 `test:smoke` 先 `pnpm build` 再跑各包冒烟。
   - 涉及写文件与 shell 的测试一律在 `tmpdir` 下新建的临时目录中执行，不得触碰仓库与用户目录。
 - **dev 运行**：`pnpm build` 后 `node apps/cli/dist/main.js`；不改写 Node 的 `.ts` 直跑假设。
@@ -272,7 +273,7 @@ CLI 不再自己拼装 Provider 配置：启动时调用 Core `config` 模块的
 
 | 退出码 | 场景 |
 |---|---|
-| 0 | Turn 以 `done` 结束；`--help` / `--version` / `--sessions` / `trust` / `untrust` 正常输出；`rpc --stdio` 在客户端断开或 `shutdown` 后完成清理退出 |
+| 0 | Turn 以 `done` 结束；`--help` / `--version` / `--sessions` / `trust` / `untrust` 正常输出；`rpc --stdio` 与 `acp` 在客户端断开、关闭或终止信号后完成清理退出 |
 | 1 | Turn 非 `done` 结束：`error`、`max_steps`、`truncated`、`refused`；会话进入 `failed` |
 | 2 | 用法或配置错误：未知参数、缺 `baseURL`/凭据/模型、模型未配置；恢复失败：会话不存在、被锁占用、日志损坏或版本过高、跨目录恢复被非交互模式拒绝 |
 | 130 | 被中断（SIGINT → `aborted`） |

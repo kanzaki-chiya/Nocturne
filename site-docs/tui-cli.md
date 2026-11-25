@@ -42,6 +42,7 @@
 | `nctrn grants` | 查看当前目录（或 `--workspace <dir>`）的项目级授权 |
 | `nctrn grants revoke` | 撤销指定编号或 `--all` 全部项目级授权 |
 | `nctrn mcp` | 启动对外 MCP 服务器桥（`stdio`，可加 `--name <label>`） |
+| `nctrn acp` | 启动 ACP Agent 服务端（`stdio`，无需打开桌面端即可接入 Paseo 等外部宿主） |
 | `nctrn rpc --stdio` | 启动 JSON-RPC 服务端（供桌面端等进程外客户端调用） |
 
 ## 单次非交互执行（`-p` / `--print`）

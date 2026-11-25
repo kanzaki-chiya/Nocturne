@@ -64,6 +64,7 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 - **凭据**：只有 `mcp.json` 的 `env` / `headers` 允许 `{ stored: true }`。启动前从注入的 CredentialStore 取 `mcp/<serverId>/<name>`（请求头名转小写）；缺失时 failed 并警告 `mcp_secret_missing`，不包含值。`none` 后端拒绝保存 stored；删除条目、移除 stored 或切换类型同步删除旧凭据。密钥不进入合并配置、事件、诊断或错误。
 - **信任**：项目配置的 `mcp` 段是**可执行内容**——未信任时整段忽略（不是收紧语义；规则可以只收紧，但"启动哪个进程"没有收紧方向），并随 `project_config_untrusted` 警告一并提示。`nctrn trust` 后生效。用户级配置始终可信。
 - 合并产物进入 `ResolvedConfig.mcpServers`（`origin: "app" | "user" | "project"`），由 `forWorkspace` 按工作区与信任状态输出。相对 cwd 按会话工作区解析。
+- **会话级宿主注入（[ADR-0120](../decisions/ADR-0120-acp-agent-stdio.md) §3）**：`nctrn acp` 等进程内宿主入口可通过 `CreateSessionOptions.sessionMcp` 按会话动态注入 `origin: "host"` 的 stdio 或 Streamable HTTP MCP 服务器。其环境值与请求头仅保存在该会话的进程内 `hostCredentials` 中（不回退用户凭据库、不写盘、不授予项目额外信任），在 `reconcile` 期间保留，并与本地工具经过同一权限层；同名冲突或初始启动失败时立即报错并回收已分配连接。
 
 ## 4. 服务器生命周期
 
@@ -146,7 +147,7 @@ HTTP 的启动是连接 → initialize → tools/list，受启动超时约束；
 | `content[].type = "image"` | 通用、受预算地解码并映射到 `ToolResult.attachments`（origin=mcp，不按工具名特殊处理）：单张原始文件不超过 5MB、每边不超过 8000px、每次最多4张且合计8MB；验证 MIME/文件头与 base64，拒绝畸形/过量数据。为保持电脑操控与浏览器截图的像素坐标对齐，MCP 图片仍按原规则处理，不做 [ADR-0090](../decisions/ADR-0090-image-downscale-tiles.md) 的自动缩小与切段。`modelContent` 保留简短占位（含 mime、尺寸、字节数），`output.content` 只保留元数据。后续沿现有附件通道落盘、进模型能力分支与客户端展示 |
 | `content[].type = "resource"` | 带 `text` 的按文本拼接（前缀标注 `[resource <uri>]`）；带 `blob` 的记占位 `[resource <uri> (<mimeType>, <N> bytes)]` |
 | `content[].type = "audio"` | 占位 `[audio <mimeType>, <N> bytes]` |
-| `structuredContent` | 进 `ToolResult.output.structured`（受 `output` 独立上限约束）；SDK 按工具 `outputSchema` 校验，校验器选项与 SDK 默认一致，非标准 format 只记诊断日志（`mcp.event` 的 warning），不打印到终端 |
+| `structuredContent` | 进 `ToolResult.output.structured`（受 `output` 独立上限约束）；当 `content` 无可传回文本时亦序列化进 `modelContent` 供模型消费（同走凭据脱敏与结果裁剪）；SDK 按工具 `outputSchema` 校验，校验器选项与 SDK 默认一致，非标准 format 只记诊断日志（`mcp.event` 的 warning），不打印到终端 |
 | `isError: true` | `status: "error"`，`error.code = "mcp_error"`，`modelContent` 为拼接出的错误文本 |
 | 传输错误 / 服务器不可用 | `error.code = "mcp_unavailable"`（崩溃、连接断开、重连失败或 HTTP 重连冷却中；冷却时说明剩余时间） |
 | 插件按需启动后工具已不存在 | `error.code = "mcp_tool_missing"`（缓存命中的插件服务器在首次调用启动并拉取最新 `tools/list` 后发现该工具已移除；见第 11 节与 [ADR-0100](../decisions/ADR-0100-native-plugins.md)） |

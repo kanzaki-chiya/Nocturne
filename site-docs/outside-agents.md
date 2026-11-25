@@ -38,3 +38,32 @@
 
 - **启动前审批**：委派外部 Agent 属于 `subagent` 权限类别（目标为 `external:<name>`），由于外部进程开启后将使用其自身的工具链直接读写文件或执行命令，Nocturne 在全部权限预设下默认均会先询问你（`ask`），批准后才会启动进程。
 - **Worktree 隔离改动**：主会话委派时若传入 `isolation: "worktree"`，外部 Agent 会在独立的 Git worktree 目录中工作；任务完成后，主会话可调用 `apply_subagent_changes`（「并回子代理改动」）将外部 Agent 的代码修改合入主会话当前工作树（见 [子代理](subagents.md) 与 [切换工作树](context.md#切换工作树)）。
+
+## 在外部宿主（如 Paseo）中运行 Nocturne（`nctrn acp`）
+
+除了由 Nocturne 调用外部 Agent，你也可以反过来让支持 ACP 的多 Agent 宿主（例如 [Paseo](https://paseo.sh/docs/custom-providers)）直接启动 Nocturne 接单，无需打开 Nocturne 桌面端：
+
+1. 安装 `nctrn` CLI 并确认 `nctrn` 在宿主的 `PATH` 中可执行。
+2. 先运行 `nctrn setup` 配置好服务商、凭据与默认模型（模型与权限规则沿用本机 Nocturne 配置）。
+3. 在 Paseo 的 `~/.paseo/config.json` 中登记自定义 ACP provider：
+
+```json
+{
+  "agents": {
+    "providers": {
+      "nocturne": {
+        "extends": "acp",
+        "label": "Nocturne",
+        "command": ["nctrn", "acp"]
+      }
+    }
+  }
+}
+```
+
+接入后的行为约定：
+
+- **工作目录与工作树**：每个 ACP 会话直接在宿主分配的绝对 `cwd`（包括宿主创建的工作树）中工作，Nocturne 不会替宿主创建或删除工作树。
+- **权限审批**：Nocturne 权限层判定为 `ask` 的操作会转发到宿主界面进行一次性批准或拒绝；已有拒绝规则与项目可信度继续生效，宿主拒绝、取消或断开连接时待审操作不会执行。
+- **宿主 MCP 工具注入**：宿主按会话注入的 stdio / Streamable HTTP MCP 工具（例如 Paseo 编排工具）仅在对应会话内生效，凭据按会话内存隔离且不写入本地 MCP 配置；注入工具同样经过 Nocturne 权限层审批。
+- **当前范围**：首版支持文本多轮对话、流式输出、工具状态卡片、运行中取消与会话级宿主 MCP；跨进程 `session/load`、附件输入与会话内动态切换模型不在首版范围。
