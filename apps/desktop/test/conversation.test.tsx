@@ -3744,17 +3744,29 @@ describe("回答内文件引用（U-09）", () => {
     expect(items.some((item) => item.textContent?.includes("Nocturne 面板"))).toBe(false);
   });
 
-  it("右键菜单：打开、资源管理器、检测到的编辑器、复制绝对与相对路径", async () => {
+  it("右键菜单：Windows 五项顺序、打开方式二级菜单、复制相对与绝对路径及在资源管理器中显示", async () => {
     const view = createSessionView();
     view.entries = [assistant({ text: "看 `src/a.ts:12`" })];
-    const fileLinks = hooks();
+    const fileLinks = hooks({
+      listFileApps: vi.fn(async () => ({
+        apps: [{ id: "app-vscode", name: "Visual Studio Code", isDefault: true }],
+        launchesCode: false,
+        failed: false,
+        editorIcons: {},
+      })),
+      openFileWithApp: vi.fn(async () => undefined),
+      openFileWithDialog: vi.fn(async () => undefined),
+    });
     mount(view, { fileLinks, resolveFilesImpl: async (paths: string[]) => inside(paths) });
     const link = await screen.findByRole("button", { name: "src/a.ts:12" });
     fireEvent.contextMenu(link);
     let menu = await screen.findByRole("menu");
-    expect(within(menu).queryByRole("menuitem", { name: "Cursor" })).toBeNull();
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "VS Code" }));
-    expect(fileLinks.openInEditor).toHaveBeenCalledWith("vscode", "Z:/project/src/a.ts", 12);
+    fireEvent.keyDown(within(menu).getByRole("menuitem", { name: "打开方式" }), {
+      key: "ArrowRight",
+    });
+    const sub = await screen.findByRole("menu", { name: "打开方式" });
+    fireEvent.click(within(sub).getByRole("menuitem", { name: "Visual Studio Code" }));
+    expect(fileLinks.openFileWithApp).toHaveBeenCalledWith("Z:/project/src/a.ts", "app-vscode", 12);
     fireEvent.contextMenu(link);
     menu = await screen.findByRole("menu");
     fireEvent.click(within(menu).getByRole("menuitem", { name: "复制相对路径" }));
@@ -3765,7 +3777,7 @@ describe("回答内文件引用（U-09）", () => {
     expect(fileLinks.copy).toHaveBeenCalledWith("Z:/project/src/a.ts");
     fireEvent.contextMenu(link);
     menu = await screen.findByRole("menu");
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "资源管理器" }));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "在资源管理器中显示" }));
     expect(fileLinks.reveal).toHaveBeenCalledWith("Z:/project/src/a.ts");
     expect(fileLinks.open).not.toHaveBeenCalled();
   });
@@ -3869,7 +3881,7 @@ describe("回答内文件引用（U-09）", () => {
     expect(fileLinks.copy).toHaveBeenCalledWith("C:/Windows/exec.exe");
     fireEvent.click(link);
     fireEvent.click(
-      within(await screen.findByRole("menu")).getByRole("menuitem", { name: "资源管理器" }),
+      within(await screen.findByRole("menu")).getByRole("menuitem", { name: "在资源管理器中显示" }),
     );
     expect(fileLinks.reveal).toHaveBeenCalledWith("C:/Windows/exec.exe");
     expect(fileLinks.open).not.toHaveBeenCalled();
