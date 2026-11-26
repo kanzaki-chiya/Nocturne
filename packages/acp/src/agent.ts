@@ -1704,12 +1704,61 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     inFlightCreations.add(tracked);
     let resumed: RuntimeSession | undefined;
     try {
+      // 资格校验放进 Core 的锁内回调（ResumeSessionOptions.validate）：在装配宿主 MCP、
+      // 绑定工具或投递历史之前执行，且与最终恢复读取的是同一份会话状态（无读改竞态）。
+      // 校验抛错时 Core 关闭会话、释放锁，宿主工具从未绑定。
+      // 校验失败用带 acpLoadRejection 标记的错误把拒绝原因传出锁外，再映射为协议错误。
+      const validate = async (state: ReturnType<RuntimeSession["state"]>): Promise<void> => {
+        const reject = (kind: "foreign" | "workspace_mismatch", detail?: string): never => {
+          const err = new Error(kind) as Error & { acpLoadRejection?: string; detail?: string };
+          err.acpLoadRejection = kind;
+          if (detail !== undefined) err.detail = detail;
+          throw err;
+        };
+        const meta = state.meta;
+        // 归属校验：只接受 ACP 创建的会话（session/new 写入的 client 标记）
+        if (meta.client?.kind !== "agent" || meta.client.name !== "acp") {
+          reject("foreign");
+        }
+        // 子会话（subagent）不是可交互会话，拒绝
+        if (meta.parent !== undefined) {
+          reject("foreign");
+        }
+        // 工作区校验：请求 cwd 必须匹配会话当前执行目录（worktree 切换后取 current）。
+        // 用平台真实路径语义比较（paths.equals 按平台大小写规则 canonicalize），
+        // 不做跨平台一律小写化/反斜杠替换——POSIX 上大小写或反斜杠不同的是独立目录。
+        const currentExec = state.config.worktree?.current ?? meta.cwd;
+        // realpath 失败（目标已被删除/不可读）时拒绝恢复，不靠未验证的字符串匹配继续。
+        const realExec = await platform.resolveReal(currentExec).catch((err: unknown): never => {
+          return reject(
+            "workspace_mismatch",
+            `无法解析会话工作目录：${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+        if (!platform.paths.equals(realCwd, realExec)) {
+          reject("workspace_mismatch", `工作区不匹配：会话属于 ${currentExec}`);
+        }
+      };
       try {
         resumed = await runtime.resumeSession(sessionId, {
           ...(translatedMcp !== undefined ? { sessionMcp: translatedMcp.injection } : {}),
+          validate,
         });
       } catch (err) {
         credentialsMap.clear();
+        const rejection = (err as { acpLoadRejection?: string } | undefined)?.acpLoadRejection;
+        if (rejection === "foreign") {
+          recordDiag({ event: "session_load_rejected_foreign", sessionId });
+          throw RequestError.resourceNotFound(sessionId);
+        }
+        if (rejection === "workspace_mismatch") {
+          const detail = (err as { detail?: string } | undefined)?.detail;
+          recordDiag({ event: "session_load_rejected_cwd", sessionId, detail });
+          throw RequestError.invalidParams(
+            { code: "workspace_mismatch", sessionId },
+            detail ?? "工作区不匹配",
+          );
+        }
         if (err instanceof RuntimeCommandError) {
           throw RequestError.internalError({ code: err.code }, err.message);
         }
@@ -1733,40 +1782,6 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         await resumed.close().catch(() => undefined);
         credentialsMap.clear();
         throw RequestError.invalidRequest(undefined, "ACP 连接已关闭");
-      }
-
-      // 归属校验：只接受 ACP 创建的会话（session/new 写入的 client 标记）
-      const meta = resumed.state().meta;
-      if (meta.client?.kind !== "agent" || meta.client.name !== "acp") {
-        await resumed.close().catch(() => undefined);
-        credentialsMap.clear();
-        recordDiag({ event: "session_load_rejected_foreign", sessionId });
-        throw RequestError.resourceNotFound(sessionId);
-      }
-      // 子会话（subagent）不是可交互会话，拒绝
-      if (meta.parent !== undefined) {
-        await resumed.close().catch(() => undefined);
-        credentialsMap.clear();
-        throw RequestError.resourceNotFound(sessionId);
-      }
-      // 工作区校验：请求 cwd 必须匹配会话当前执行目录（worktree 切换后取 current）
-      const config = resumed.state().config;
-      const currentExec = config.worktree?.current ?? meta.cwd;
-      const realExec = await platform.resolveReal(currentExec).catch(() => currentExec);
-      const normReq = realCwd.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-      const normExec = realExec.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-      if (normReq !== normExec) {
-        await resumed.close().catch(() => undefined);
-        credentialsMap.clear();
-        recordDiag({
-          event: "session_load_rejected_cwd",
-          sessionId,
-          detail: `${normReq} != ${normExec}`,
-        });
-        throw RequestError.invalidParams(
-          { code: "workspace_mismatch", sessionId },
-          `工作区不匹配：会话属于 ${currentExec}`,
-        );
       }
 
       const entry = adoptSession(resumed, params.cwd, realCwd, credentialsMap, client);

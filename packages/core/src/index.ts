@@ -910,6 +910,14 @@ export interface ResumeSessionOptions {
   force?: boolean | undefined;
   /** 仅本会话有效的宿主注入 MCP 服务器（ADR-0120 §3、ADR-0127 第二阶段；进程内使用，RPC 不暴露） */
   sessionMcp?: SessionMcpInjection | undefined;
+  /**
+   * 恢复资格校验（ADR-0127 第二阶段；进程内使用，RPC 不暴露）。
+   * 在取得会话锁、读取持久化状态之后，装配宿主 MCP、绑定工具或投递任何历史之前调用；
+   * 校验抛错则关闭会话、释放锁，不向宿主绑定任何工具。校验与恢复在同一把锁内，
+   * 读取到的 `state()` 即最终恢复所用的同一份会话状态（无读改竞态）。
+   * 用于按宿主归属/工作区决定是否允许恢复，ACP `session/load` 经此拒绝外来会话。
+   */
+  validate?: ((state: SessionState) => void | Promise<void>) | undefined;
 }
 
 export interface Runtime {
@@ -8408,6 +8416,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
       const session = await store.load(id, { force: resumeOpts?.force });
       try {
+        // 资格校验（ADR-0127 第二阶段）：锁已持有、状态已读取，但尚未装配宿主 MCP、
+        // 绑定工具或投递历史。校验抛错走下方 catch 关闭会话释放锁，不绑定任何宿主工具。
+        if (resumeOpts?.validate !== undefined) {
+          await resumeOpts.validate(session.state());
+        }
         return await wrapSession(
           session,
           { modelOverride: resumeOpts?.model },

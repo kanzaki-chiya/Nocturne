@@ -1558,6 +1558,135 @@ describe("session/load 跨进程恢复（ADR-0127 第二阶段）", () => {
     ).rejects.toMatchObject({ code: -32600 });
   });
 
+  it("外来会话/工作区不匹配拒绝前：不绑定宿主工具、不投递历史通知", async () => {
+    // 外来会话（无 ACP 标记）与 cwd 不匹配两类拒绝都要验证——它们此前在 resumeSession
+    // 装配完宿主 MCP 之后才检查，会误启动借来会话的宿主工具并可能投递历史。
+    const pidFile = path.join(tempRoot, "host-mcp.pid");
+    const hostMcp = [
+      {
+        name: "probe",
+        command: process.execPath,
+        args: [
+          "-e",
+          'require("fs").writeFileSync(process.env.NOCTURNE_TEST_PID_FILE,String(process.pid));setInterval(()=>{},1000)',
+        ],
+        env: [{ name: "NOCTURNE_TEST_PID_FILE", value: pidFile }],
+      },
+    ];
+
+    // 1) 外来会话：新建一个无 ACP 标记的会话，注入宿主 MCP 去 load
+    const provider = new FakeProvider({ id: "fake", scripts: [textScript("x")] });
+    const rt = await createRuntime({
+      cwd: workspaceA,
+      providers: [provider],
+      interactive: true,
+      sessionsDir: path.join(tempRoot, "sessions"),
+    });
+    const foreign = await rt.createSession({
+      model: "fake/fake-1",
+      cwd: workspaceA,
+      workspaceRoot: workspaceA,
+    });
+    const foreignId = foreign.id;
+    await foreign.close();
+
+    const h = await startHarness();
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    await expect(
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId: foreignId,
+        cwd: workspaceA,
+        mcpServers: hostMcp,
+      }),
+    ).rejects.toMatchObject({ code: -32002 });
+    // 拒绝前未启动任何宿主 stdio MCP（无 PID 文件），未投递历史回放
+    expect(await fs.stat(pidFile).catch(() => undefined)).toBeUndefined();
+    expect(h.updates.length).toBe(0);
+    await rt.close();
+
+    // 2) 工作区不匹配：合法 ACP 会话用错误 cwd 去 load
+    const pidFile2 = path.join(tempRoot, "host-mcp2.pid");
+    const hostMcp2 = [
+      {
+        name: "probe",
+        command: process.execPath,
+        args: [
+          "-e",
+          'require("fs").writeFileSync(process.env.NOCTURNE_TEST_PID_FILE,String(process.pid));setInterval(()=>{},1000)',
+        ],
+        env: [{ name: "NOCTURNE_TEST_PID_FILE", value: pidFile2 }],
+      },
+    ];
+    const sessionId = await initAndCreate(h, workspaceA, "guard base");
+    await h.conn.agent.request(methods.agent.session.close, { sessionId });
+    const updatesBeforeMismatch = h.updates.length;
+    await expect(
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId,
+        cwd: workspaceB,
+        mcpServers: hostMcp2,
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    expect(await fs.stat(pidFile2).catch(() => undefined)).toBeUndefined();
+    // 没有为这次失败的 load 投递任何回放帧
+    expect(h.updates.length).toBe(updatesBeforeMismatch);
+  });
+
+  it("资格校验失败后，同一会话的合法 load 仍可恢复", async () => {
+    // 先做一次会因 cwd 不匹配而失败的 load，确认失败后合法请求仍能正常恢复——
+    // 校验失败必须完整释放锁，不留下占用。
+    const h = await startHarness();
+    const sessionId = await initAndCreate(h, workspaceA, "retry after reject");
+    await h.conn.agent.request(methods.agent.session.close, { sessionId });
+
+    await expect(
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId,
+        cwd: workspaceB,
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    // 合法 cwd 的 load 应成功（锁已正确释放）
+    const res = await h.conn.agent.request(methods.agent.session.load, {
+      sessionId,
+      cwd: workspaceA,
+      mcpServers: [],
+    });
+    expect((res as { configOptions?: unknown }).configOptions).toBeDefined();
+  });
+
+  it("realpath 会话工作目录失败时拒绝恢复（workspace_mismatch），不靠字符串匹配继续", async () => {
+    // 原实现在 resolveReal 失败时 catch 后用未验证的 currentExec 继续做字符串比较，
+    // 可能在目标已被删除/不可读时错误放行。修复后：realpath 失败即拒绝。
+    const h = await startHarness();
+    const sessionId = await initAndCreate(h, workspaceA, "realpath fail base");
+    await h.conn.agent.request(methods.agent.session.close, { sessionId });
+
+    // 包装 platform：对会话工作目录的 resolveReal 注入失败
+    const failRealpathHarness = await startHarness({
+      wrapPlatform: (base) => ({
+        ...base,
+        resolveReal: async (p) => {
+          if (p === workspaceA) throw new Error("injected realpath failure");
+          return base.resolveReal(p);
+        },
+      }),
+    });
+    await failRealpathHarness.conn.agent.request(methods.agent.initialize, {
+      protocolVersion: PROTOCOL_VERSION,
+    });
+    // 请求 cwd 与会话 cwd 都是 workspaceA——若靠字符串匹配会错误放行；realpath 失败必须拒绝
+    await expect(
+      failRealpathHarness.conn.agent.request(methods.agent.session.load, {
+        sessionId,
+        cwd: workspaceA,
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    expect(failRealpathHarness.updates.length).toBe(0);
+  });
+
   it("session/new 流程不受 loadSession 影响（旧宿主兼容）", async () => {
     const h = await startHarness({
       handler: async () => textScript("ok"),
