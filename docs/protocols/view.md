@@ -392,6 +392,8 @@ function allPendingPermissions(
 
 `SessionView.pages` 的每项形状为 `SessionPage`（`{ page, title, display, origin?, versions }`，其中 `title` 为最新一版标题，`display` 为有效版本第一版的显示方式，`origin` 为页面来源 `{ sessionId, page }`，用于跨会话项目页面库合并同源副本，`versions` 每项为 `{ version, file, title, seq }`，定义于 `packages/core/src/protocol/pages.ts`）。`origin` 在派生时计算：本会话新建页面的来源为自身；分叉复制的页面沿用源会话对应页面来源；经 `render_html` 跨会话接着改（`inline.from`）生成的页面沿用被指页面来源（[ADR-0114](../decisions/ADR-0114-project-page-library.md) §3）。`inline` 不含 `page` 字段的旧会话附件各自投影为单版本、`display: "inline"` 的页面，页面 id 为 `legacy-<file>`，不与新建页面 `page-<n>` 冲突（[ADR-0109](../decisions/ADR-0109-page-versions.md)）。
 
+`SessionView.artifacts`（[ADR-0125](../decisions/ADR-0125-open-artifact-replaces-cadenza.md)）由成功 `tool.completed.artifact` 按有效事件派生，每项为 `SessionArtifact`（`{ url, id, title, type, summary?, seq, updatedAt }`，仅保存稳定 `open-artifact://artifact/<id>` 标识，不含本机回环地址；删除事件 `removed: true` 会将其移出，对话回退时同步重建）。`UserEntry.openArtifactWake` 保留所有者评论唤醒的来源快照供界面展示来源作品与锚点位置。
+
 回退目标只取非插话的 `message.user`（`steer !== true`）：回退到一条插话会把 Turn 截成半截（[ADR-0070](../decisions/ADR-0070-steer-and-queue-input.md) §7）。`rewindTargets()` 不列插话，`rewind` / `forkSession` 指向插话一律返回 `invalid_command`。
 
 ## 待发输入（预览状态）

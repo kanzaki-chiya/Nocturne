@@ -98,7 +98,7 @@ nocturne/
 
 ## 2. 包边界
 
-- `packages/core`、`packages/mcp`、`packages/acp`、`packages/rpc`、`packages/remote`、`apps/cli`、`apps/tui`、`apps/desktop`、`apps/android`、`apps/relay` 是十个 workspace 包；Core 不依赖客户端、MCP 或 ACP SDK。remote 不依赖任何项目内包；relay 运行时只依赖 remote 与 ws，Core/RPC 仅开发测试依赖（方向见 [modules.md](../architecture/modules.md)）。当前桌面端边界仍只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`。
+- `packages/core`、`packages/mcp`、`packages/acp`、`packages/mcp-server`、`packages/open-artifact`、`packages/rpc`、`packages/remote`、`apps/cli`、`apps/tui`、`apps/desktop`、`apps/android`、`apps/relay` 是 workspace 包；Core 不依赖客户端、MCP、ACP 或 Open Artifact SDK。remote 不依赖任何项目内包；relay 运行时只依赖 remote 与 ws，Core/RPC 仅开发测试依赖（方向见 [modules.md](../architecture/modules.md)）。当前桌面端边界仍只能引 `@nocturne/rpc/client` 与 `@nocturne/core/protocol`。
 - Core 内部的模块边界用目录加静态依赖检查维护，不再拆成十几个包。
 - `protocol` 以子路径导出（`@nocturne/core/protocol`），客户端可以只导入类型，为将来独立成包提前划好界线。
 

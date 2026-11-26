@@ -86,6 +86,7 @@ git diff | nctrn -p "审查这段改动" --preset auto-edit -y
 | `/plan` | 计划模式：切到 `read-only` 产出实施计划；支持 `approve`、`cancel` |
 | `/fugue` | 多代理攻坚：拆解任务并用后台子代理并行调查与实现 |
 | `/ensemble` | 合奏协作：带任务时建立常驻成员与共享留言板；`/ensemble board` 打开留言板，`/ensemble end` 结束 |
+| `/artifact` | Open Artifact 作品：带需求创建或修改作品；`/artifact list` 列出当前项目作品，`/artifact open [url]` 在本机浏览器打开 |
 | `/suite` | 组曲：列出或按名称/ID 打开未归档组曲；指挥会话内 `/suite overview` 打开全屏总览页（仅 TUI） |
 | `/grants` | 查看会话与项目授权，或用 `/grants revoke` 撤销 |
 | `/mcp` | 查看 MCP 服务器连接状态与工具数 |

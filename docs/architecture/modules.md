@@ -278,6 +278,10 @@ Phase 4 增补的客户端共享入口（已验收，[apps/tui.md](../apps/tui.m
 
 `@nocturne/mcp-server` 是对外 MCP 服务器桥：把本机桌面端后台的会话能力暴露为 `nocturne_*` MCP 工具，供 Claude Code、Codex 等外部 agent 调用。只依赖 `@nocturne/rpc/client`、`@nocturne/remote`、`@nocturne/core/protocol` 与 `@modelcontextprotocol/sdk`；不依赖 Core 运行时，由 `apps/cli` 的 `nctrn mcp` 子命令入口调用。详见 [outside-agents.md](../apps/outside-agents.md) 与 [ADR-0074](../decisions/ADR-0074-mcp-server-for-outside-agents.md)。
 
+### packages/open-artifact（独立于 Core 的包，[ADR-0125](../decisions/ADR-0125-open-artifact-replaces-cadenza.md)）
+
+`@nocturne/open-artifact` 封装上游 `@open-artifact/harness-kit`、`@open-artifact/protocol` 与随包交付的 `@open-artifact/cli` 运行时：按 Core 定义的 `OpenArtifactConnector` 接口提供 `Artifact` / `ArtifactData` / `ArtifactComments` 工具、按需发现或启动本地 daemon、会话权限/状态同步、文件写入通知（`agent.wrote`）、评论唤醒投递与去重、短期编辑器视图票据及精确来源列表。只依赖 `@nocturne/core` 公开入口与上游 SDK（depcheck `open-artifact-deps` 强制）；Core 不依赖该包，由 `apps/cli` 装配后经 `RuntimeOptions.openArtifact` 注入。
+
 ## 4. 客户端
 
 ### apps/relay（独立中继服务）
