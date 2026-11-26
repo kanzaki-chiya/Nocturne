@@ -570,6 +570,10 @@
   text-decoration-color: transparent;
   text-underline-offset: 3px;
 }
+.conversation-markdown .file-ref-text-prose {
+  font-family: inherit;
+  font-size: inherit;
+}
 .conversation-markdown .file-ref-glyph {
   display: inline-block;
   margin-right: var(--space-1);

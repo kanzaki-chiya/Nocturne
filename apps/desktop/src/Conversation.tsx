@@ -164,6 +164,11 @@ import {
   hasWindowsFileRefMenuCapabilities,
   registerFileRefMenuCloser,
 } from "./FileRefMenu";
+import {
+  collectMarkdownFileRefPaths,
+  markdownLinkPlainText,
+  parseMarkdownFileLinkTarget,
+} from "./markdown-file-links";
 import type { FileAppList } from "./host";
 import { InputLabel } from "./InputLabel";
 import { skillCommandLength, skillLabel, workModeLabel } from "./input-labels";
@@ -171,7 +176,6 @@ import { grantKind } from "./GrantsPage";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { operationForSubjectKind } from "./notify";
 import { displayPath } from "./paths";
-import { isNetworkPath } from "./side-panel";
 import { elapsedText, type SubagentLink } from "./subagent-panel";
 import { EnsembleAvatar } from "./EnsembleAvatar";
 import {
@@ -507,7 +511,8 @@ export interface ResolvedCodeRef {
 }
 
 const FileLinksContext = createContext<{
-  lookup: (codeText: string) => ResolvedCodeRef | undefined;
+  lookupCode: (codeText: string) => ResolvedCodeRef | undefined;
+  lookupLink: (href: string) => ResolvedCodeRef | undefined;
   hooks: FileLinkHooks;
 } | null>(null);
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
@@ -649,6 +654,7 @@ function markdownNodes(
   openUrl: OpenUrl,
   mentions?: readonly string[],
   highlight?: string,
+  inLink = false,
 ): ReactNode[] {
   return tokens.map((token, index) => {
     const key = index;
@@ -660,7 +666,7 @@ function markdownNodes(
         return <Fragment key={key}>{token.raw}</Fragment>;
       case "heading": {
         const heading = token as Tokens.Heading;
-        const content = markdownNodes(heading.tokens, openUrl, mentions, highlight);
+        const content = markdownNodes(heading.tokens, openUrl, mentions, highlight, inLink);
         switch (heading.depth) {
           case 1:
             return <h1 key={key}>{content}</h1>;
@@ -679,7 +685,13 @@ function markdownNodes(
       case "paragraph":
         return (
           <p key={key}>
-            {markdownNodes((token as Tokens.Paragraph).tokens, openUrl, mentions, highlight)}
+            {markdownNodes(
+              (token as Tokens.Paragraph).tokens,
+              openUrl,
+              mentions,
+              highlight,
+              inLink,
+            )}
           </p>
         );
       case "text": {
@@ -687,7 +699,7 @@ function markdownNodes(
         return (
           <Fragment key={key}>
             {node.tokens
-              ? markdownNodes(node.tokens, openUrl, mentions, highlight)
+              ? markdownNodes(node.tokens, openUrl, mentions, highlight, inLink)
               : renderEnsembleTextNode(node.text, mentions, highlight)}
           </Fragment>
         );
@@ -697,23 +709,25 @@ function markdownNodes(
       case "strong":
         return (
           <strong key={key}>
-            {markdownNodes((token as Tokens.Strong).tokens, openUrl, mentions, highlight)}
+            {markdownNodes((token as Tokens.Strong).tokens, openUrl, mentions, highlight, inLink)}
           </strong>
         );
       case "em":
         return (
           <em key={key}>
-            {markdownNodes((token as Tokens.Em).tokens, openUrl, mentions, highlight)}
+            {markdownNodes((token as Tokens.Em).tokens, openUrl, mentions, highlight, inLink)}
           </em>
         );
       case "del":
         return (
           <del key={key}>
-            {markdownNodes((token as Tokens.Del).tokens, openUrl, mentions, highlight)}
+            {markdownNodes((token as Tokens.Del).tokens, openUrl, mentions, highlight, inLink)}
           </del>
         );
-      case "codespan":
-        return <CodeRef key={key} text={(token as Tokens.Codespan).text} />;
+      case "codespan": {
+        const codeText = (token as Tokens.Codespan).text;
+        return inLink ? <code key={key}>{codeText}</code> : <CodeRef key={key} text={codeText} />;
+      }
       case "code": {
         const code = token as Tokens.Code;
         return (
@@ -729,7 +743,13 @@ function markdownNodes(
       case "blockquote":
         return (
           <blockquote key={key}>
-            {markdownNodes((token as Tokens.Blockquote).tokens, openUrl, mentions, highlight)}
+            {markdownNodes(
+              (token as Tokens.Blockquote).tokens,
+              openUrl,
+              mentions,
+              highlight,
+              inLink,
+            )}
           </blockquote>
         );
       case "hr":
@@ -738,21 +758,30 @@ function markdownNodes(
         return <br key={key} />;
       case "link": {
         const link = token as Tokens.Link;
-        const content = markdownNodes(link.tokens, openUrl, mentions, highlight);
-        return isAllowedExternalUrl(link.href) ? (
-          <a
+        const content = markdownNodes(link.tokens, openUrl, mentions, highlight, true);
+        if (isAllowedExternalUrl(link.href)) {
+          return (
+            <a
+              key={key}
+              href={link.href}
+              title={link.title ?? undefined}
+              onClick={(event) => {
+                event.preventDefault();
+                openUrl(link.href);
+              }}
+            >
+              {content}
+            </a>
+          );
+        }
+        return (
+          <MarkdownFileLink
             key={key}
             href={link.href}
-            title={link.title ?? undefined}
-            onClick={(event) => {
-              event.preventDefault();
-              openUrl(link.href);
-            }}
+            menuLabel={markdownLinkPlainText(link.tokens, link.text || link.href)}
           >
             {content}
-          </a>
-        ) : (
-          <span key={key}>{content}</span>
+          </MarkdownFileLink>
         );
       }
       case "image": {
@@ -775,7 +804,7 @@ function markdownNodes(
                 onChange={() => undefined}
               />
             ) : null}
-            {markdownNodes(item.tokens, openUrl, mentions, highlight)}
+            {markdownNodes(item.tokens, openUrl, mentions, highlight, inLink)}
           </li>
         ));
         return list.ordered ? (
@@ -800,7 +829,7 @@ function markdownNodes(
                       className={cell.align === "right" ? "r" : undefined}
                       style={{ textAlign: cell.align ?? "left" }}
                     >
-                      {markdownNodes(cell.tokens, openUrl, mentions, highlight)}
+                      {markdownNodes(cell.tokens, openUrl, mentions, highlight, inLink)}
                     </th>
                   ))}
                 </tr>
@@ -821,7 +850,7 @@ function markdownNodes(
                         }
                         style={cell.align ? { textAlign: cell.align } : undefined}
                       >
-                        {markdownNodes(cell.tokens, openUrl, mentions, highlight)}
+                        {markdownNodes(cell.tokens, openUrl, mentions, highlight, inLink)}
                       </td>
                     ))}
                   </tr>
@@ -855,6 +884,7 @@ export function Markdown({
   highlight?: string | undefined;
   quoteSourceSeq?: string | undefined;
 }) {
+  const tokens = useMemo(() => marked.lexer(markdown, MARKED_OPTIONS), [markdown]);
   const [refs, setRefs] = useState<Map<string, ResolvedCodeRef> | null>(null);
   useEffect(() => {
     if (session === undefined || fileLinks === undefined) {
@@ -862,32 +892,8 @@ export function Markdown({
       return;
     }
     let alive = true;
-    // 收集本消息 codespan 里的候选路径，一次批量 resolveFiles。网络路径不链接化，
-    // 也不送去判断存在性（ADR-0060 修订 2026-10-18；Core 侧同样拦截）
-    const paths: string[] = [];
-    const seen = new Set<string>();
-    const collect = (tokens: readonly Token[]) => {
-      for (const token of tokens) {
-        if (token.type === "codespan") {
-          const split = splitCodeRef((token as Tokens.Codespan).text);
-          if (split !== undefined && !seen.has(split.path) && !isNetworkPath(split.path)) {
-            seen.add(split.path);
-            paths.push(split.path);
-          }
-        }
-        const inner = (token as { tokens?: readonly Token[] }).tokens;
-        if (inner !== undefined) collect(inner);
-        if (token.type === "table") {
-          for (const row of (token as Tokens.Table).rows) {
-            for (const cell of row) collect(cell.tokens);
-          }
-        }
-        if (token.type === "list") {
-          for (const item of (token as Tokens.List).items) collect(item.tokens);
-        }
-      }
-    };
-    collect(marked.lexer(markdown, MARKED_OPTIONS));
+    // 收集本消息行内代码与本地文件链接里的去重候选路径，一次批量 resolveFiles（U-09 / ADR-0129）
+    const paths = collectMarkdownFileRefPaths(tokens);
     if (paths.length === 0) {
       setRefs(new Map());
       return;
@@ -899,7 +905,7 @@ export function Markdown({
         const table = new Map<string, ResolvedCodeRef>();
         for (const resolution of resolutions) {
           const split = splitCodeRef(resolution.input);
-          // 原文查表：CodeRef 用 codespan 全文（含行号）查，这里按路径回填
+          // 原文查表：CodeRef 与 MarkdownFileLink 按规范化后的路径回填
           table.set(resolution.input, {
             path: resolution.input,
             ...(split?.line !== undefined ? { line: split.line } : {}),
@@ -921,53 +927,61 @@ export function Markdown({
     return () => {
       alive = false;
     };
-  }, [session, fileLinks, markdown]);
+  }, [session, fileLinks, tokens]);
   const lookup = useMemo(() => {
     if (refs === null || fileLinks === undefined) return null;
+    const resolveTarget = (
+      target: { path: string; line?: number; endLine?: number } | undefined,
+    ): ResolvedCodeRef | undefined => {
+      if (target === undefined) return undefined;
+      const hit = refs.get(target.path);
+      if (hit?.exists !== true) return undefined;
+      return {
+        ...hit,
+        ...(target.line !== undefined ? { line: target.line } : {}),
+        ...(target.endLine !== undefined ? { endLine: target.endLine } : {}),
+      };
+    };
     return {
       hooks: fileLinks,
-      lookup: (codeText: string): ResolvedCodeRef | undefined => {
-        const split = splitCodeRef(codeText);
-        if (split === undefined) return undefined;
-        const hit = refs.get(split.path);
-        if (hit?.exists !== true) return undefined;
-        return {
-          ...hit,
-          ...(split.line !== undefined ? { line: split.line } : {}),
-          ...(split.endLine !== undefined ? { endLine: split.endLine } : {}),
-        };
-      },
+      lookupCode: (codeText: string): ResolvedCodeRef | undefined =>
+        resolveTarget(splitCodeRef(codeText)),
+      lookupLink: (href: string): ResolvedCodeRef | undefined =>
+        resolveTarget(parseMarkdownFileLinkTarget(href)),
     };
   }, [refs, fileLinks]);
   return (
     <div className="conversation-markdown" data-quote-source-seq={quoteSourceSeq}>
       <FileLinksContext.Provider value={lookup}>
-        {markdownNodes(marked.lexer(markdown, MARKED_OPTIONS), openUrl, mentions, highlight)}
+        {markdownNodes(tokens, openUrl, mentions, highlight)}
       </FileLinksContext.Provider>
     </div>
   );
 }
 
 /**
- * 行内代码的文件引用（U-09）：存在的文件渲染成「类型图标 + 路径」链接。
- * 工作区内：左键按"默认打开方式"设置打开（目录交给系统），右键开菜单
- * （打开、资源管理器、检测到的编辑器、复制绝对/相对路径）。工作区外的文件：
- * 「默认打开方式」是面板或编辑器时左键同样打开，菜单多一项「打开」；是系统默认时
- * 左右键都只开菜单（资源管理器与复制绝对路径）。工作区外的目录只开菜单。
- * 不存在、网络路径 → 普通行内代码。
+ * 文件引用的交互与右键菜单（U-09 / ADR-0124 / ADR-0129）：行内代码与带标题的本地
+ * Markdown 链接共用同一打开策略、键盘激活与菜单边界，仅显示内容与字体样式不同。
  */
-function CodeRef({ text }: { text: string }) {
-  const context = useContext(FileLinksContext);
+function FileRefAction({
+  hit,
+  hooks,
+  menuLabel,
+  textClassName,
+  children,
+}: {
+  hit: ResolvedCodeRef;
+  hooks: FileLinkHooks;
+  menuLabel: string;
+  textClassName: string;
+  children: ReactNode;
+}) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const closeMenu = useCallback(() => {
     setAnchor(null);
   }, []);
   useEffect(() => registerFileRefMenuCloser(closeMenu), [closeMenu]);
-  if (context === null) return <code>{text}</code>;
-  const hit = context.lookup(text);
-  if (hit === undefined) return <code>{text}</code>;
-  const { hooks } = context;
   const canOpen = hit.withinWorkspace || (!hit.isDirectory && hooks.outsideOpenable());
   const editors = hooks.editors();
   const run = (action: () => Promise<void>) => {
@@ -1016,13 +1030,13 @@ function CodeRef({ text }: { text: string }) {
         }}
       >
         <FileGlyph directory={hit.isDirectory} />
-        <span className="file-ref-text">{text}</span>
+        <span className={textClassName}>{children}</span>
       </span>
       {anchor !== null &&
         (isWindows() && hasWindowsFileRefMenuCapabilities(hooks) ? (
           <FileRefMenu
-          anchor={anchor}
-          label={text}
+            anchor={anchor}
+            label={menuLabel}
             hit={hit}
             canOpen={canOpen}
             hooks={hooks}
@@ -1030,69 +1044,69 @@ function CodeRef({ text }: { text: string }) {
             onClose={closeMenu}
           />
         ) : (
-          <Menu anchor={anchor} label={text} onClose={closeMenu}>
-          {canOpen && (
-            <>
-              <MenuItem
-                label="打开"
-                onSelect={() => {
-                  run(openDefault);
-                }}
-              />
-              {preview && (
+          <Menu anchor={anchor} label={menuLabel} onClose={closeMenu}>
+            {canOpen && (
+              <>
                 <MenuItem
-                  label="查看源码"
+                  label="打开"
                   onSelect={() => {
-                    run(() => viewSource(hit.absolutePath, hit.line));
+                    run(openDefault);
                   }}
                 />
-              )}
-              <MenuSeparator />
-            </>
-          )}
-          <MenuItem
-            icon={<MenuGlyph kind="folder" />}
+                {preview && (
+                  <MenuItem
+                    label="查看源码"
+                    onSelect={() => {
+                      run(() => viewSource(hit.absolutePath, hit.line));
+                    }}
+                  />
+                )}
+                <MenuSeparator />
+              </>
+            )}
+            <MenuItem
+              icon={<MenuGlyph kind="folder" />}
               label={isMacOS() ? "访达" : "资源管理器"}
-            onSelect={() => {
-              run(() => hooks.reveal(hit.absolutePath));
-            }}
-          />
-          {hit.withinWorkspace && !hit.isDirectory && editors.vscode && (
-            <MenuItem
-              icon={<MenuGlyph kind="editor" />}
-              label="VS Code"
               onSelect={() => {
-                run(() => hooks.openInEditor("vscode", hit.absolutePath, hit.line));
+                run(() => hooks.reveal(hit.absolutePath));
               }}
             />
-          )}
-          {hit.withinWorkspace && !hit.isDirectory && editors.cursor && (
-            <MenuItem
-              icon={<MenuGlyph kind="editor" />}
-              label="Cursor"
-              onSelect={() => {
-                run(() => hooks.openInEditor("cursor", hit.absolutePath, hit.line));
-              }}
-            />
-          )}
-          <MenuSeparator />
-          <MenuItem
-            icon={<MenuGlyph kind="copy" />}
-            label="复制绝对路径"
-            onSelect={() => {
-              run(() => hooks.copy(hit.absolutePath));
-            }}
-          />
-          {relative !== undefined && (
+            {hit.withinWorkspace && !hit.isDirectory && editors.vscode && (
+              <MenuItem
+                icon={<MenuGlyph kind="editor" />}
+                label="VS Code"
+                onSelect={() => {
+                  run(() => hooks.openInEditor("vscode", hit.absolutePath, hit.line));
+                }}
+              />
+            )}
+            {hit.withinWorkspace && !hit.isDirectory && editors.cursor && (
+              <MenuItem
+                icon={<MenuGlyph kind="editor" />}
+                label="Cursor"
+                onSelect={() => {
+                  run(() => hooks.openInEditor("cursor", hit.absolutePath, hit.line));
+                }}
+              />
+            )}
+            <MenuSeparator />
             <MenuItem
               icon={<MenuGlyph kind="copy" />}
-              label="复制相对路径"
+              label="复制绝对路径"
               onSelect={() => {
-                run(() => hooks.copy(relative));
+                run(() => hooks.copy(hit.absolutePath));
               }}
             />
-          )}
-        </Menu>
+            {relative !== undefined && (
+              <MenuItem
+                icon={<MenuGlyph kind="copy" />}
+                label="复制相对路径"
+                onSelect={() => {
+                  run(() => hooks.copy(relative));
+                }}
+              />
+            )}
+          </Menu>
         ))}
       {error !== null && (
         <span className="file-ref-error" role="alert">
@@ -1100,6 +1114,51 @@ function CodeRef({ text }: { text: string }) {
         </span>
       )}
     </>
+  );
+}
+
+/**
+ * 行内代码的文件引用（U-09）：存在的文件渲染成「类型图标 + 路径」链接；
+ * 不存在、网络路径或无文件打开能力时保持普通行内代码。
+ */
+function CodeRef({ text }: { text: string }) {
+  const context = useContext(FileLinksContext);
+  if (context === null) return <code>{text}</code>;
+  const hit = context.lookupCode(text);
+  if (hit === undefined) return <code>{text}</code>;
+  return (
+    <FileRefAction hit={hit} hooks={context.hooks} menuLabel={text} textClassName="file-ref-text">
+      {text}
+    </FileRefAction>
+  );
+}
+
+/**
+ * 带标题的 Markdown 本地文件链接（ADR-0129）：存在的文件渲染成可点击的文件引用并保留原标题格式；
+ * 缺失、未放行目标或不支持本地打开的客户端保留普通可读标题。
+ */
+function MarkdownFileLink({
+  href,
+  menuLabel,
+  children,
+}: {
+  href: string;
+  menuLabel: string;
+  children: ReactNode;
+}) {
+  const context = useContext(FileLinksContext);
+  if (context === null) return <span>{children}</span>;
+  const hit = context.lookupLink(href);
+  if (hit === undefined) return <span>{children}</span>;
+  return (
+    <FileRefAction
+      hit={hit}
+      hooks={context.hooks}
+      menuLabel={menuLabel}
+      textClassName="file-ref-text file-ref-text-prose"
+    >
+      {children}
+    </FileRefAction>
   );
 }
 
