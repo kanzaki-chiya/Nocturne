@@ -388,7 +388,9 @@ export interface AskUserRequest {
 
 /**
  * ToolContext.askUser 的返回（ADR-0032 §3）：answered 包含逐题回答或拒绝
- * 提问；unavailable 表示当前环境不可提问（非交互——不发 question.requested）。
+ * 提问；unavailable 表示当前环境不可提问（非交互——不发 question.requested）；
+ * suspended 表示宿主把等待中的提问挂起交还（ADR-0127 第三阶段：文本宿主
+ * 已把问题展示给用户，当前轮按 handoff_suspended 收尾，下一轮由用户作答后继续）。
  * 中断与超时不经返回值表达：实现按 signal 拒绝返回的 Promise，
  * 由执行器统一结算为 cancelled / timeout。
  */
@@ -401,7 +403,8 @@ export type AskUserReply =
         references?: string;
       })[];
     }
-  | { kind: "unavailable" };
+  | { kind: "unavailable" }
+  | { kind: "suspended" };
 
 /**
  * 提问请求的路由（ADR-0032 §3）：等待中的请求与会话命令
@@ -422,6 +425,15 @@ export interface QuestionBroker {
    * "invalid_reply" 且请求保持等待；未知或已结算返回 "unknown_request"。
    */
   respond(requestId: string, reply: QuestionReply): "ok" | "invalid_reply" | "unknown_request";
+  /**
+   * 宿主挂起（ADR-0127 第三阶段）：把等待中的请求结算为 `{ kind: "suspended" }`，
+   * 使 ask_user 以 `handoff_suspended` 收尾。只有文本宿主展示问题后正常交还控制
+   * 时使用；用户明确拒绝走 `respond`（`declined: true`），取消/断连仍由 signal 中断。
+   * 未知或已结算返回 "unknown_request"。
+   */
+  suspend(requestId: string): "ok" | "unknown_request";
+  /** 测试用：当前等待中的 requestId 集（不保证顺序） */
+  pendingKeys(): IterableIterator<string>;
   /** 会话关闭：取消全部等待中的请求（ask 返回的 Promise 拒绝） */
   cancelAll(): void;
 }

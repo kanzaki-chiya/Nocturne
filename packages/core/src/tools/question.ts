@@ -166,6 +166,16 @@ export function createQuestionBroker(options: QuestionBrokerOptions = {}): Quest
       return "ok";
     },
 
+    suspend(requestId) {
+      if (!pending.has(requestId)) return "unknown_request";
+      settle(requestId)?.resolve({ kind: "suspended" });
+      return "ok";
+    },
+
+    pendingKeys() {
+      return pending.keys();
+    },
+
     cancelAll() {
       for (const requestId of [...pending.keys()]) {
         settle(requestId)?.reject(new Error("会话关闭，等待中的提问被取消"));

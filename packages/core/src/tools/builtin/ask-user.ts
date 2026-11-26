@@ -26,6 +26,8 @@ const NOT_INTERACTIVE_MESSAGE =
   "当前为非交互模式，无法向用户提问；请按最合理的默认继续，并在最终回复中说明所做的假设";
 const DECLINED_MESSAGE =
   "对用户拒绝回答的问题，请按你的判断继续，不要就同一问题再次提问，并在回复中说明所做的假设。";
+const HANDOFF_SUSPENDED_MESSAGE =
+  "宿主已把问题展示给用户并交还控制，当前轮按挂起结束。不要就同一问题再次提问，也不要按假设执行依赖该选择的动作；等用户在下一轮给出答复后继续。";
 
 /** tool.completed.output 的形状（ADR-0032 §2） */
 interface AskUserOutput {
@@ -219,6 +221,13 @@ export const askUserTool: ToolDefinition<{ questions: unknown }, AskUserOutput> 
     if (ctx.askUser === undefined) return notInteractive;
     const reply = await ctx.askUser({ questions });
     if (reply.kind === "unavailable") return notInteractive;
+    if (reply.kind === "suspended") {
+      return {
+        status: "error",
+        modelContent: HANDOFF_SUSPENDED_MESSAGE,
+        error: { code: "handoff_suspended", message: HANDOFF_SUSPENDED_MESSAGE },
+      };
+    }
     const answers: AskUserOutput["answers"] = questions.map((q, i) => {
       const a = reply.answers[i];
       if (a !== undefined && "declined" in a) return { question: q.question, declined: true };

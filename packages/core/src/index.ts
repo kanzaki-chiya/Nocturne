@@ -803,6 +803,14 @@ export interface RuntimeSession {
    */
   respondQuestion(requestId: string, reply: QuestionReply): Promise<void>;
   /**
+   * 宿主挂起等待中的提问（ADR-0127 第三阶段）：把请求结算为 handoff_suspended，
+   * 当前 Turn 继续按工具结果推进，宿主在下一轮用普通文本把用户答案带回。
+   * 仅用于宿主不能结构化提问、但已把问题完整展示给用户的场景；
+   * 用户明确拒绝走 respondQuestion 的 declined，取消/断连走 interrupt。
+   * 没有匹配的等待中请求时以 unknown_request 拒绝。
+   */
+  questionSuspend(requestId: string): Promise<void>;
+  /**
    * 切换模型（events.md 第 7 节）：会话空闲时生效，写入
    * session.config_changed；未知 provider/model 拒绝 invalid_model。
    */
@@ -6079,6 +6087,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (outcome === "invalid_reply") {
           return Promise.reject(new RuntimeCommandError("invalid_reply", "回复与待回答问题不匹配"));
         }
+        return Promise.reject(new RuntimeCommandError("unknown_request", "没有等待中的提问请求"));
+      },
+      questionSuspend(requestId) {
+        const outcome = questions.suspend(requestId);
+        if (outcome === "ok") return Promise.resolve();
         return Promise.reject(new RuntimeCommandError("unknown_request", "没有等待中的提问请求"));
       },
       async submit(input) {

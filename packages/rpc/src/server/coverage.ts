@@ -126,6 +126,8 @@ export const SESSION_NOT_MAPPED = {
   warnings: "打开时的警告随 SessionOpened 返回",
   recovery: "打开时的恢复修复汇总随 SessionOpened 返回",
   durableEvents: "持久事件由 session.subscribe 的回放推送（afterSeq 之后的全部）",
+  questionSuspend:
+    "进程内宿主交还（ADR-0127 第三阶段）：仅供 ACP agent 进程内文本宿主路径使用——桌面/远程客户端在交互界面里能直接答题，不需要把提问挂起。如未来远程宿主需要此能力，再按 RPC 协议扩展并写入 protocols/rpc.md。",
 } as const satisfies Partial<Record<keyof RuntimeSession, string>>;
 
 export const SESSION_METHODS: Record<
