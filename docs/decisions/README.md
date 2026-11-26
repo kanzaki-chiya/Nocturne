@@ -131,6 +131,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0121](ADR-0121-managed-worktree-retention.md) | 托管工作树的保留、清理与恢复 | 提议（补记 0.67.0 实现） |
 | [ADR-0122](ADR-0122-project-memory-browser.md) | 设置页按项目浏览与删除记忆（其他项目摘要在总览返回、项目子页、删除位置与焦点规则） | 已接受 |
 | [ADR-0123](ADR-0123-desktop-manual-compaction-feedback.md) | 桌面会话中的手动压缩反馈（提交 `/compact` 即刻清草稿与就地秒表计时、保护新草稿、合入摘要回执、停止/失败收束与按会话归属） | 已接受 |
+| [ADR-0124](ADR-0124-file-reference-context-menu.md) | Windows 桌面会话文件引用右键菜单（五项顺序、「打开方式 ›」前三推荐应用与原生 `SHOpenWithDialog` 选择器、目录与工作区外及可执行保护） | 已接受 |
 | [ADR-0127](ADR-0127-acp-capability-roadmap.md) | ACP 能力分期：派单选模型与思考档位、跨进程恢复、宿主提问、附件与进度、外部 agent 续派 | 已接受 |
 | [ADR-0131](ADR-0131-ensemble-overview-board.md) | 合奏概览、常驻搜索与留言筛选（指挥维护的目标/检查点/工作线/任务、`ensemble_overview` 增量工具、留言板常驻搜索与来自/发给筛选） | 已接受 |
 
