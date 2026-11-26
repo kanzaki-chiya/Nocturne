@@ -340,11 +340,13 @@ function spawnAcpCli(options: {
   modelsConfig?: Record<string, unknown>;
   userMcpJson?: Record<string, unknown>;
   extraArgs?: string[];
+  /** 复用已有的隔离 home（A/B 进程共享同一 NOCTURNE_HOME 的跨进程恢复测试） */
+  isoHome?: string;
   onPermission?: (
     req: AcpPermissionRequest,
   ) => Promise<"allow_once" | "reject_once" | "cancel" | "hang">;
 }): SpawnedAcp {
-  const isoHome = makeTempDir("nctrn-acp-iso-");
+  const isoHome = options.isoHome ?? makeTempDir("nctrn-acp-iso-");
   const nocturneHome = path.join(isoHome, "nocturne-home");
   const codexHome = path.join(isoHome, "codex-home");
   const claudeDir = path.join(isoHome, "claude-dir");
@@ -624,7 +626,7 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
       };
     }>("initialize", { protocolVersion: 1 });
     expect(initUnconf.protocolVersion).toBe(1);
-    expect(initUnconf.agentCapabilities.loadSession).toBe(false);
+    expect(initUnconf.agentCapabilities.loadSession).toBe(true);
     expect(initUnconf.agentCapabilities.mcpCapabilities).toMatchObject({
       http: true,
       sse: false,
@@ -1494,5 +1496,152 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
     child.closeStdin();
     expect((await child.exit).code).toBe(0);
     assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
+  }, 60_000);
+});
+
+describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () => {
+  it("进程 A 建会话跑工具轮后退出，进程 B 恢复同 ID：历史恰一份、模型记得决定、新审批走新连接", async () => {
+    const ws = makeTempDir("nctrn-acp-ab-");
+    const isoHome = makeTempDir("nctrn-acp-abhome-");
+    const marker = "AB-MARKER-QUASAR-42";
+
+    // ══ 进程 A：建会话，一轮带工具调用的对话，正常退出 ══
+    const childA = spawnAcpCli({ isoHome });
+    providerHandler = (req) => {
+      const user = latestUserText(req);
+      const toolOut = latestToolMessage(req);
+      if (toolOut !== undefined) {
+        return { textParts: [`the decision is ${marker}`] };
+      }
+      if (user.includes("remember")) {
+        return {
+          toolCalls: [
+            { id: "call_read_a", name: "read", arguments: { path: "note.txt" } },
+          ],
+        };
+      }
+      return { textParts: ["a-turn-done"] };
+    };
+    // 工作区里放一份可读文件，read 工具才有结果
+    writeFileSync(path.join(ws, "note.txt"), "synthetic decision log");
+
+    await childA.request("initialize", { protocolVersion: 1 });
+    expect(
+      (await childA.request<{ agentCapabilities: { loadSession: boolean } }>("initialize", {
+        protocolVersion: 1,
+      })).agentCapabilities.loadSession,
+    ).toBe(true);
+
+    const created = await childA.request<{ sessionId: string; configOptions?: unknown }>(
+      "session/new",
+      { cwd: ws, mcpServers: [] },
+    );
+    const sessionId = created.sessionId;
+
+    expect(
+      await childA.request("session/prompt", {
+        sessionId,
+        prompt: [{ type: "text", text: "remember this" }],
+      }),
+    ).toEqual({ stopReason: "end_turn" });
+
+    // 确认工具实际执行过（read 不产生权限请求——read 在默认预设下是只读 allow? 但
+    // 至少应观察到 tool_call 更新帧）
+    const toolFramesA = childA.updates.filter(
+      (u) => u.update.sessionUpdate === "tool_call" || u.update.sessionUpdate === "tool_call_update",
+    );
+    expect(toolFramesA.length).toBeGreaterThan(0);
+
+    // A 进程退出（正常 EOF——模拟宿主关闭旧 CLI）
+    childA.closeStdin();
+    expect((await childA.exit).code).toBe(0);
+    assertAllStdoutLinesValidJsonRpc(childA.stdoutLines);
+    // 锁文件已释放
+    expect(findLockFiles(path.join(childA.nocturneHome, "sessions"))).toEqual([]);
+
+    // ══ 进程 B：同一 NOCTURNE_HOME，加载同一 sessionId ══
+    const childB = spawnAcpCli({ isoHome });
+    const capturedRequests: RecordedProviderRequest[] = [];
+    providerHandler = (req) => {
+      capturedRequests.push(req);
+      return { textParts: ["b-turn-done"] };
+    };
+    await childB.request("initialize", { protocolVersion: 1 });
+
+    // ══ 错误 cwd 拒绝（在成功恢复之前验证——此时会话未被本连接管理）══
+    const otherWs = makeTempDir("nctrn-acp-abother-");
+    await expect(
+      childB.request("session/load", { sessionId, cwd: otherWs, mcpServers: [] }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    const loadRes = await childB.request<{ configOptions?: unknown }>("session/load", {
+      sessionId,
+      cwd: ws,
+      mcpServers: [],
+    });
+    expect(loadRes.configOptions).toBeDefined();
+
+    // 历史回放帧：恰一份用户消息、助手决定、终态工具行
+    const replay = childB.updates;
+    const userChunks = replay.filter((u) => u.update.sessionUpdate === "user_message_chunk");
+    expect(userChunks.length).toBe(1);
+    expect(
+      (userChunks[0]?.update as { content?: { text?: string } }).content?.text ?? "",
+    ).toContain("remember this");
+
+    const agentText = replay
+      .filter((u) => u.update.sessionUpdate === "agent_message_chunk")
+      .map((u) => (u.update as { content?: { text?: string } }).content?.text ?? "")
+      .join("");
+    expect(agentText).toContain(marker);
+
+    const replayTools = replay.filter((u) => u.update.sessionUpdate === "tool_call");
+    expect(replayTools.length).toBeGreaterThan(0);
+    for (const t of replayTools) {
+      expect(["completed", "failed"]).toContain((t.update as { status?: string }).status);
+    }
+    // 回放不含权限请求
+    expect(childB.permissions.length).toBe(0);
+
+    // ══ 新轮：模型上下文含历史决定（恰一份）══
+    expect(
+      await childB.request("session/prompt", {
+        sessionId,
+        prompt: [{ type: "text", text: "what was decided?" }],
+      }),
+    ).toEqual({ stopReason: "end_turn" });
+
+    const joined = capturedRequests.map((r) => r.rawBody).join("\n");
+    const occurrences = joined.split(marker).length - 1;
+    expect(occurrences).toBe(1);
+
+    // ══ 重复 load（已在管）拒绝 ══
+    await expect(
+      childB.request("session/load", { sessionId, cwd: ws, mcpServers: [] }),
+    ).rejects.toMatchObject({ code: -32600 });
+
+    childB.closeStdin();
+    expect((await childB.exit).code).toBe(0);
+    assertAllStdoutLinesValidJsonRpc(childB.stdoutLines);
+    expect(findLockFiles(path.join(childB.nocturneHome, "sessions"))).toEqual([]);
+  }, 90_000);
+
+  it("非 ACP 会话与不存在 ID 在真实进程间拒绝恢复", async () => {
+    const ws = makeTempDir("nctrn-acp-abneg-");
+    const isoHome = makeTempDir("nctrn-acp-abneghome-");
+    const child = spawnAcpCli({ isoHome });
+    providerHandler = () => ({ textParts: ["noop"] });
+    await child.request("initialize", { protocolVersion: 1 });
+
+    await expect(
+      child.request("session/load", {
+        sessionId: "202601010000-deadbeef",
+        cwd: ws,
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32002 });
+
+    child.closeStdin();
+    expect((await child.exit).code).toBe(0);
   }, 60_000);
 });
