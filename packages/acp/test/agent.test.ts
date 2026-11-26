@@ -7,6 +7,8 @@ import {
   methods,
   PROTOCOL_VERSION,
   type RequestPermissionRequest,
+  type SessionConfigOption,
+  type SessionConfigSelectOption,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
 import {
@@ -57,6 +59,23 @@ function textScript(text: string): FakeScript {
     { type: "text_delta", text },
     { type: "finish", reason: "stop" },
   ];
+}
+
+function requireConfigOption(
+  options: readonly SessionConfigOption[],
+  id: string,
+): SessionConfigOption & { type: "select" } {
+  const opt = options.find((o) => o.id === id);
+  if (opt === undefined || opt.type === "boolean") {
+    throw new Error(`config option ${id} missing or not a select`);
+  }
+  return opt as SessionConfigOption & { type: "select" };
+}
+
+function selectValues(opt: SessionConfigOption & { type: "select" }): string[] {
+  return (opt.options as readonly (SessionConfigSelectOption | { group: string })[])
+    .filter((o): o is SessionConfigSelectOption => "value" in o)
+    .map((o) => o.value);
 }
 
 function createPairStreams() {
@@ -925,32 +944,29 @@ describe("session/new configOptions 与 session/set_config_option（ADR-0127 第
     const res = await newSession(h, workspaceA);
 
     expect(res.configOptions).toBeDefined();
-    const modelOpt = res.configOptions?.find((o: { id: string }) => o.id === "model");
+    const modelOpt = requireConfigOption(res.configOptions ?? [], "model");
     expect(modelOpt).toMatchObject({
       type: "select",
       category: "model",
       currentValue: "fake/fake-1",
     });
-    const values = modelOpt.options.map((o: { value: string }) => o.value);
+    const values = selectValues(modelOpt);
     // 完整 provider/model ID，含多段斜杠保留；不可用模型不列出
     expect(values).toContain("fake/fake-1");
     expect(values).toContain("fake/org/deep-model");
     expect(values).not.toContain("fake/broken-model");
-    const deep = modelOpt.options.find((o: { value: string }) => o.value === "fake/org/deep-model");
-    expect(deep.name).toBe("fake/Deep Model");
+    const deep = (modelOpt.options as readonly SessionConfigSelectOption[]).find(
+      (o) => o.value === "fake/org/deep-model",
+    );
+    expect(deep?.name).toBe("fake/Deep Model");
 
-    const effortOpt = res.configOptions?.find((o: { id: string }) => o.id === "thought_level");
+    const effortOpt = requireConfigOption(res.configOptions ?? [], "thought_level");
     expect(effortOpt).toMatchObject({
       type: "select",
       category: "thought_level",
       currentValue: "off",
     });
-    expect(effortOpt.options.map((o: { value: string }) => o.value)).toEqual([
-      "off",
-      "minimal",
-      "low",
-      "high",
-    ]);
+    expect(selectValues(effortOpt)).toEqual(["off", "minimal", "low", "high"]);
   });
 
   it("无可调档位的模型不出 thought_level 配置项，但 model 选择器仍在", async () => {
@@ -971,9 +987,9 @@ describe("session/new configOptions 与 session/set_config_option（ADR-0127 第
     });
     await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
     const res = await newSession(h, workspaceA);
-    const modelOpt = res.configOptions?.find((o: { id: string }) => o.id === "model");
+    const modelOpt = requireConfigOption(res.configOptions ?? [], "model");
     expect(modelOpt.currentValue).toBe("fake/outside-model");
-    expect(modelOpt.options.map((o: { value: string }) => o.value)).toContain("fake/outside-model");
+    expect(selectValues(modelOpt)).toContain("fake/outside-model");
   });
 
   it("set_config_option 切换模型后刷新档位并回报完整配置；prompt 用新模型", async () => {
@@ -992,10 +1008,13 @@ describe("session/new configOptions 与 session/set_config_option（ADR-0127 第
       configId: "model",
       value: "fake/fake-2",
     });
-    const modelOpt = res.configOptions.find((o) => o.id === "model");
-    expect(modelOpt.currentValue).toBe("fake/fake-2");
-    const effortOpt = res.configOptions.find((o) => o.id === "thought_level");
-    expect(effortOpt.options.map((o) => o.value)).toEqual(["off", "high", "xhigh", "max"]);
+    expect(requireConfigOption(res.configOptions, "model").currentValue).toBe("fake/fake-2");
+    expect(selectValues(requireConfigOption(res.configOptions, "thought_level"))).toEqual([
+      "off",
+      "high",
+      "xhigh",
+      "max",
+    ]);
 
     // 切档后立即生效于下一轮
     const eff = await h.conn.agent.request(methods.agent.session.setConfigOption, {
@@ -1003,7 +1022,7 @@ describe("session/new configOptions 与 session/set_config_option（ADR-0127 第
       configId: "thought_level",
       value: "xhigh",
     });
-    expect(eff.configOptions.find((o) => o.id === "thought_level").currentValue).toBe("xhigh");
+    expect(requireConfigOption(eff.configOptions, "thought_level").currentValue).toBe("xhigh");
 
     // config_option_update 通知随每次变更发出
     await flushMicrotasks();
@@ -1091,8 +1110,8 @@ describe("session/new configOptions 与 session/set_config_option（ADR-0127 第
       configId: "thought_level",
       value: "low",
     });
-    expect(verify.configOptions.find((o) => o.id === "model").currentValue).toBe("fake/fake-1");
-    expect(verify.configOptions.find((o) => o.id === "thought_level").currentValue).toBe("low");
+    expect(requireConfigOption(verify.configOptions, "model").currentValue).toBe("fake/fake-1");
+    expect(requireConfigOption(verify.configOptions, "thought_level").currentValue).toBe("low");
   });
 
   it("忙时切换模型失败且保留原配置；空闲时切档位成功", async () => {
@@ -1136,7 +1155,7 @@ describe("session/new configOptions 与 session/set_config_option（ADR-0127 第
       value: "high",
     });
     // current 已更新为下一轮意图；effective（本 Turn 快照）不暴露在选择器上
-    expect(effRes.configOptions.find((o) => o.id === "thought_level").currentValue).toBe("high");
+    expect(requireConfigOption(effRes.configOptions, "thought_level").currentValue).toBe("high");
 
     release.resolve(undefined);
     await turn;
@@ -1147,10 +1166,10 @@ describe("session/new configOptions 与 session/set_config_option（ADR-0127 第
       configId: "model",
       value: "fake/fake-2",
     });
-    expect(post.configOptions.find((o) => o.id === "model").currentValue).toBe("fake/fake-2");
+    expect(requireConfigOption(post.configOptions, "model").currentValue).toBe("fake/fake-2");
     // 换模型后档位集合刷新为 fake-2 的档位；原 "high" 意图在新模型可用集合内得以保留
-    const effort = post.configOptions.find((o) => o.id === "thought_level");
-    expect(effort.options.map((o) => o.value)).toEqual(["off", "high", "max"]);
+    const effort = requireConfigOption(post.configOptions, "thought_level");
+    expect(selectValues(effort)).toEqual(["off", "high", "max"]);
     expect(effort.currentValue).toBe("high");
   });
 
@@ -1188,7 +1207,7 @@ describe("session/new configOptions 与 session/set_config_option（ADR-0127 第
       configId: "thought_level",
       value: "low",
     });
-    expect(verifyB.configOptions.find((o) => o.id === "model").currentValue).toBe("fake/fake-1");
+    expect(requireConfigOption(verifyB.configOptions, "model").currentValue).toBe("fake/fake-1");
 
     // A 的更新全部带 A 的 sessionId
     const aModelUpdates = h.updates.filter(
