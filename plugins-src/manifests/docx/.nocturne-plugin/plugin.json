@@ -1,6 +1,6 @@
 {
   "name": "docx",
-  "version": "0.67.0",
+  "version": "0.68.0",
   "description": "创建、读取、编辑、转换与按页预览 Word 文档。",
   "skills": "./skills",
   "agents": "./agents",

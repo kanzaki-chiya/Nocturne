@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/acp",
-  "version": "0.67.0",
+  "version": "0.68.0",
   "description": "Nocturne ACP 客户端连接器与 Agent 服务端（ADR-0049、ADR-0120）",
   "license": "GPL-3.0-only",
   "private": true,
