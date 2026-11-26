@@ -130,6 +130,8 @@ import {
   type WorkModeName,
   type PendingPermission,
   type ImageAttachment,
+  type AssistantEntry,
+  type LiveAssistant,
   type LiveTool,
   type PendingQuestion,
   type PermissionOption,
@@ -242,9 +244,15 @@ import {
 } from "./turn-rail";
 import { TurnRail } from "./TurnRail";
 import { goalCheckFailedItems, goalCheckUnavailableReason, isGoalUnverified } from "./goal-check";
+import {
+  isClosedCodeFence,
+  lexMarkdownBlocks,
+  MARKED_OPTIONS,
+  type MarkdownBlock,
+} from "./streaming-markdown";
 import "./conversation.css";
 
-export { toolMeta };
+export { isClosedCodeFence, toolMeta };
 
 /**
  * 只读观察（ADR-0060 第 4 轮）：子代理视图只有身份和读图能力，没有任何命令入口。
@@ -531,13 +539,6 @@ const inputOf = (entry: ToolEntry): Record<string, unknown> | undefined => {
 };
 
 /**
- * 文件引用收集与渲染共用的解析选项（两处 token 流必须一致）。
- * `breaks` 让段落内的单个换行按聊天惯例显示为换行，而不是被
- * CommonMark 软换行折叠成空格；多出的 br token 由 markdownNodes 渲染。
- */
-const MARKED_OPTIONS = { gfm: true, breaks: true } as const;
-
-/**
  * 表格短格（源文本不超过 10 个半角宽，全角算 2）：整格不换行，窄屏不再逐字折开。
  * 只抬高这一列的最小宽度，不改它的自然宽度，宽窗口下列宽分配与原来一样。
  */
@@ -589,18 +590,6 @@ function renderEnsembleTextNode(
       <Fragment key={index}>{renderHighlightFragment(part.value, highlight, index)}</Fragment>
     ),
   );
-}
-
-/** 判断 marked 产出的代码块围栏是否已闭合；缩进块和未闭合围栏在流式输出时不启动解析。 */
-export function isClosedCodeFence(code: Tokens.Code): boolean {
-  if (code.codeBlockStyle === "indented") return false;
-  const open = /^ {0,3}(`{3,}|~{3,})[^\n]*\r?\n([\s\S]*)$/.exec(code.raw);
-  if (open?.[1] === undefined || open[2] === undefined) return false;
-  const fence = open[1];
-  const body = open[2].replace(/\r?\n$/, "");
-  const lastNewline = body.lastIndexOf("\n");
-  const lastLine = lastNewline < 0 ? body : body.slice(lastNewline + 1);
-  return new RegExp(`^ {0,3}${fence}[~` + "`" + `]* *$`).test(lastLine);
 }
 
 const WRAP_CODE_LANGUAGES = new Set(["", "markdown", "md", "text", "txt", "plaintext"]);
@@ -872,6 +861,42 @@ function markdownNodes(
   });
 }
 
+function sameMentions(
+  prev: readonly string[] | undefined,
+  next: readonly string[] | undefined,
+): boolean {
+  if (prev === next) return true;
+  if (prev === undefined || next === undefined) return false;
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i += 1) {
+    if (prev[i] !== next[i]) return false;
+  }
+  return true;
+}
+
+const MemoMarkdownBlock = memo(
+  function MarkdownBlockView({
+    block,
+    openUrl,
+    mentions,
+    highlight,
+  }: {
+    block: MarkdownBlock;
+    openUrl: OpenUrl;
+    mentions: readonly string[] | undefined;
+    highlight: string | undefined;
+  }) {
+    return <>{markdownNodes([block.token], openUrl, mentions, highlight)}</>;
+  },
+  (prev, next) =>
+    prev.block.type === next.block.type &&
+    prev.block.sig === next.block.sig &&
+    prev.block.linksKey === next.block.linksKey &&
+    prev.openUrl === next.openUrl &&
+    prev.highlight === next.highlight &&
+    sameMentions(prev.mentions, next.mentions),
+);
+
 export function Markdown({
   text: markdown,
   openUrl,
@@ -880,6 +905,7 @@ export function Markdown({
   mentions,
   highlight,
   quoteSourceSeq,
+  streaming = false,
 }: {
   text: string;
   openUrl: OpenUrl;
@@ -889,7 +915,14 @@ export function Markdown({
   /** 大小写不敏感的命中高亮（合奏留言板搜索，ADR-0131 §7） */
   highlight?: string | undefined;
   quoteSourceSeq?: string | undefined;
+  streaming?: boolean | undefined;
 }) {
+  const openUrlRef = useRef(openUrl);
+  openUrlRef.current = openUrl;
+  const stableOpenUrl = useCallback<OpenUrl>((url) => {
+    openUrlRef.current(url);
+  }, []);
+  const blocks = useMemo(() => lexMarkdownBlocks(markdown, streaming), [markdown, streaming]);
   const tokens = useMemo(() => marked.lexer(markdown, MARKED_OPTIONS), [markdown]);
   const [refs, setRefs] = useState<Map<string, ResolvedCodeRef> | null>(null);
   useEffect(() => {
@@ -959,7 +992,15 @@ export function Markdown({
   return (
     <div className="conversation-markdown" data-quote-source-seq={quoteSourceSeq}>
       <FileLinksContext.Provider value={lookup}>
-        {markdownNodes(tokens, openUrl, mentions, highlight)}
+        {blocks.map((block) => (
+          <MemoMarkdownBlock
+            key={block.key}
+            block={block}
+            openUrl={stableOpenUrl}
+            mentions={mentions}
+            highlight={highlight}
+          />
+        ))}
       </FileLinksContext.Provider>
     </div>
   );
@@ -3764,6 +3805,27 @@ function ToolRow({
 }
 
 /**
+ * 实时流式助手回复：合成与正式 AssistantEntry 同形且共用 key（`a:<messageId>`）的条目，
+ * 交由 EntryView 渲染，使 message.assistant 到达交接时 React 原地复用 DOM 节点与选区（ADR-0128）。
+ */
+function liveAssistantEntry(assistant: LiveAssistant): AssistantEntry {
+  return {
+    kind: "assistant",
+    key: `a:${assistant.messageId}`,
+    turnId: assistant.turnId ?? "",
+    messageId: assistant.messageId,
+    seq: 0,
+    time: "",
+    text: assistant.text,
+    reasoning: assistant.reasoning,
+    toolCalls: [],
+    model: { provider: "", model: "" },
+    usage: undefined,
+    finishReason: "stop",
+  };
+}
+
+/**
  * 参数仍在流式接收的工具调用：合成只含 name/input 的 ToolEntry，交给 ToolRow 渲染。
  * inputText 能整体解析为 JSON 才作为 input；半截 JSON 不进参数位，也不进 title。
  */
@@ -4077,6 +4139,7 @@ function EntryView({
   showReplyActions,
   onApprovePlan,
   changesCard,
+  streaming = false,
   preparing = false,
   queued = false,
   waitingCallId,
@@ -4112,6 +4175,8 @@ function EntryView({
   showReplyActions: boolean;
   onApprovePlan?: (() => void) | undefined;
   changesCard: ReactNode;
+  /** 实时流式助手回复：与正式 AssistantEntry 共用组件树与 key，交接时不卸载重挂（ADR-0128） */
+  streaming?: boolean;
   /** 实时工具行（参数尚在流式接收或排队等待执行）以合成 ToolEntry 走同一条渲染路径 */
   preparing?: boolean;
   queued?: boolean;
@@ -4304,6 +4369,7 @@ function EntryView({
       );
     case "assistant":
       if (
+        !streaming &&
         entry.reasoning === "" &&
         parts.get(entry.messageId)?.at(-1) === undefined &&
         entry.text.trim() === "" &&
@@ -4316,19 +4382,20 @@ function EntryView({
       return (
         <article
           className={`a${searchHit ? " search-hit" : ""}${quoteFlash && quoteFlashMode === "message" ? " quote-flash" : ""}`}
-          data-session-seq={entry.seq}
+          data-session-seq={streaming ? undefined : entry.seq}
           data-quote-flash={quoteFlash ? (quoteFlashMode ?? "message") : undefined}
-          aria-label="助手消息"
+          aria-label={streaming ? "助手实时回复" : "助手消息"}
         >
           <Think messageId={entry.messageId} text={entry.reasoning} parts={parts} now={now} />
           <Markdown
             text={entry.text}
             openUrl={openUrl}
-            session={isLiveSession(session) ? session : undefined}
-            fileLinks={fileLinks}
-            quoteSourceSeq={quotable ? String(entry.seq) : undefined}
+            streaming={streaming}
+            session={streaming ? undefined : isLiveSession(session) ? session : undefined}
+            fileLinks={streaming ? undefined : fileLinks}
+            quoteSourceSeq={!streaming && quotable ? String(entry.seq) : undefined}
           />
-          {entry.finishReason === "aborted" ? (
+          {!streaming && entry.finishReason === "aborted" ? (
             <p className="conversation-review">回复已中断</p>
           ) : null}
           {changesCard}
@@ -5859,9 +5926,21 @@ function ConversationContent({
   );
   const entryKeysListRef = useRef(entryKeysList);
   entryKeysListRef.current = entryKeysList;
+  const liveAssistants = view.live.assistants.filter(
+    (assistant) => !entryKeys.has(`a:${assistant.messageId}`),
+  );
+  const liveAssistantKeys = liveAssistants.map((assistant) => `a:${assistant.messageId}`);
+  const liveAssistantKeysRef = useRef(liveAssistantKeys);
+  liveAssistantKeysRef.current = liveAssistantKeys;
   const measuredHeightsRef = useRef<Map<string, number>>(new Map());
   const pinnedKeysRef = useRef<Set<string>>(new Set());
-  const itemNodesRef = useRef<Map<number, HTMLDivElement>>(new Map());
+  // 虚拟列表下记录曾处于实时流式的助手条目键：交接进 view.entries 时保持挂载不退回 spacer，
+  // 避免用户停在上方阅读或选中文字时正文消失或选区丢失（ADR-0128）。
+  const handoffPinnedKeysRef = useRef<Set<string>>(new Set());
+  for (const key of liveAssistantKeys) {
+    handoffPinnedKeysRef.current.add(key);
+  }
+  const itemNodesByKeyRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const anchorRef = useRef<{ key: string; topInViewport: number } | null>(null);
   const offsets = useMemo(
     () =>
@@ -5904,28 +5983,27 @@ function ConversationContent({
       return;
     }
     const scrollTopRect = scrollEl.getBoundingClientRect().top;
-    let best: { index: number; key: string; topInViewport: number } | null = null;
-    for (const [index, node] of itemNodesRef.current) {
-      const key = entryKeysListRef.current[index];
-      if (key === undefined) continue;
-      const rect = node.getBoundingClientRect();
-      if (rect.height <= 0) continue;
-      if (rect.bottom > scrollTopRect + 1) {
-        if (best === null || index < best.index) {
-          best = { index, key, topInViewport: rect.top - scrollTopRect };
+    const findFirstVisible = (keys: readonly string[]) => {
+      for (const key of keys) {
+        const node = itemNodesByKeyRef.current.get(key);
+        if (node === undefined) continue;
+        const rect = node.getBoundingClientRect();
+        if (rect.height <= 0) continue;
+        if (rect.bottom > scrollTopRect + 1) {
+          return { key, topInViewport: rect.top - scrollTopRect };
         }
       }
-    }
-    anchorRef.current = best !== null ? { key: best.key, topInViewport: best.topInViewport } : null;
+      return null;
+    };
+    anchorRef.current =
+      findFirstVisible(entryKeysListRef.current) ?? findFirstVisible(liveAssistantKeysRef.current);
   }, []);
 
   const restoreAnchor = useCallback(() => {
     const scrollEl = scroll.current;
     const anchor = anchorRef.current;
     if (!scrollEl || anchor === null || follow.current) return;
-    const index = entryKeysListRef.current.indexOf(anchor.key);
-    if (index < 0) return;
-    const node = itemNodesRef.current.get(index);
+    const node = itemNodesByKeyRef.current.get(anchor.key);
     if (!node) return;
     const rect = node.getBoundingClientRect();
     if (rect.height <= 0) return;
@@ -5938,9 +6016,7 @@ function ConversationContent({
   }, []);
 
   const measureMountedItems = useCallback(() => {
-    for (const [index, node] of itemNodesRef.current) {
-      const key = entryKeysListRef.current[index];
-      if (key === undefined) continue;
+    for (const [key, node] of itemNodesByKeyRef.current) {
       const height = node.getBoundingClientRect().height;
       if (height > 0) {
         measuredHeightsRef.current.set(key, height);
@@ -6621,6 +6697,11 @@ function ConversationContent({
       if (!virtualize) return;
       if (nextFollowing) {
         anchorRef.current = null;
+        for (const key of handoffPinnedKeysRef.current) {
+          if (!liveAssistantKeysRef.current.includes(key)) {
+            handoffPinnedKeysRef.current.delete(key);
+          }
+        }
         return;
       }
       captureAnchor();
@@ -6637,6 +6718,27 @@ function ConversationContent({
         viewportHeight: element.clientHeight,
         followBottom: false,
       });
+      // 已完成交接的实时回复在用户主动滚离窗口且无选区时释放固定，避免长会话积累常驻节点
+      if (handoffPinnedKeysRef.current.size > 0) {
+        const selection = typeof window !== "undefined" ? window.getSelection() : null;
+        const range =
+          selection !== null && !selection.isCollapsed && selection.rangeCount > 0
+            ? selection.getRangeAt(0)
+            : null;
+        for (const key of handoffPinnedKeysRef.current) {
+          if (liveAssistantKeysRef.current.includes(key)) continue;
+          const idx = entryKeysListRef.current.indexOf(key);
+          if (idx >= next.start && idx <= next.end) continue;
+          const node = itemNodesByKeyRef.current.get(key);
+          const hasSelection =
+            node !== undefined &&
+            range !== null &&
+            (node.contains(range.startContainer) || node.contains(range.endContainer));
+          if (!hasSelection) {
+            handoffPinnedKeysRef.current.delete(key);
+          }
+        }
+      }
       const prev = virtualRangeRef.current;
       if (next.start !== prev.start || next.end !== prev.end) {
         setVirtualRange(next);
@@ -6923,6 +7025,30 @@ function ConversationContent({
                 </>
               );
 
+              const renderLiveAssistantBlock = (entry: AssistantEntry) => (
+                <>
+                  <EntryView
+                    entry={entry}
+                    openUrl={openUrl}
+                    cwd={cwd}
+                    parts={parts}
+                    now={now}
+                    images={images}
+                    session={session}
+                    busy={busy}
+                    repliesAfter={0}
+                    onResubmit={onResubmit}
+                    fileLinks={fileLinks}
+                    showReplyActions={false}
+                    changesCard={null}
+                    streaming
+                  />
+                  {false}
+                  {[]}
+                  {null}
+                </>
+              );
+
               const renderEntries = () => {
                 if (!virtualize) {
                   return view.entries.map((entry, entryIndex) => (
@@ -6947,10 +7073,14 @@ function ConversationContent({
                   }
                 }
                 const pinnedIndices: number[] = [];
-                if (pinnedKeysRef.current.size > 0) {
+                if (pinnedKeysRef.current.size > 0 || handoffPinnedKeysRef.current.size > 0) {
                   for (let i = 0; i < entryKeysList.length; i += 1) {
                     const itemKey = entryKeysList[i];
-                    if (itemKey !== undefined && pinnedKeysRef.current.has(itemKey)) {
+                    if (
+                      itemKey !== undefined &&
+                      (pinnedKeysRef.current.has(itemKey) ||
+                        handoffPinnedKeysRef.current.has(itemKey))
+                    ) {
                       pinnedIndices.push(i);
                     }
                   }
@@ -6969,34 +7099,53 @@ function ConversationContent({
                 });
                 return (
                   <div className="conversation-virtual-list">
-                    {segments.map((segment) => {
-                      if (segment.kind === "spacer") {
+                    {[
+                      ...segments.map((segment) => {
+                        if (segment.kind === "spacer") {
+                          return (
+                            <div
+                              key={segment.key}
+                              className="conversation-virtual-spacer"
+                              aria-hidden="true"
+                              style={{ height: `${String(segment.height)}px` }}
+                            />
+                          );
+                        }
+                        const entry = view.entries[segment.index];
+                        if (entry === undefined) return null;
+                        const key = entryKeysList[segment.index] ?? entry.key;
                         return (
                           <div
-                            key={segment.key}
-                            className="conversation-virtual-spacer"
-                            aria-hidden="true"
-                            style={{ height: `${String(segment.height)}px` }}
-                          />
+                            key={key}
+                            className="conversation-virtual-item"
+                            data-virtual-index={segment.index}
+                            ref={(node) => {
+                              if (node !== null) itemNodesByKeyRef.current.set(key, node);
+                              else itemNodesByKeyRef.current.delete(key);
+                            }}
+                          >
+                            {renderEntryBlock(entry, segment.index)}
+                          </div>
                         );
-                      }
-                      const entry = view.entries[segment.index];
-                      if (entry === undefined) return null;
-                      const key = entryKeysList[segment.index] ?? entry.key;
-                      return (
-                        <div
-                          key={key}
-                          className="conversation-virtual-item"
-                          data-virtual-index={segment.index}
-                          ref={(node) => {
-                            if (node !== null) itemNodesRef.current.set(segment.index, node);
-                            else itemNodesRef.current.delete(segment.index);
-                          }}
-                        >
-                          {renderEntryBlock(entry, segment.index)}
-                        </div>
-                      );
-                    })}
+                      }),
+                      // 虚拟列表下将实时助手放在同一个子数组中、共用 key a:<messageId> 与包裹节点：
+                      // 交接为正式条目时 React 原地复用 DOM，不卸载重挂、不丢选区（ADR-0128）。
+                      ...liveAssistants.map((assistant) => {
+                        const entry = liveAssistantEntry(assistant);
+                        return (
+                          <div
+                            key={entry.key}
+                            className="conversation-virtual-item"
+                            ref={(node) => {
+                              if (node !== null) itemNodesByKeyRef.current.set(entry.key, node);
+                              else itemNodesByKeyRef.current.delete(entry.key);
+                            }}
+                          >
+                            {renderLiveAssistantBlock(entry)}
+                          </div>
+                        );
+                      }),
+                    ]}
                   </div>
                 );
               };
@@ -7039,21 +7188,16 @@ function ConversationContent({
                         />
                       </Fragment>
                     )),
-                    ...view.live.assistants.map((assistant) => (
-                      <article
-                        className="a"
-                        key={`assistant:${assistant.messageId}`}
-                        aria-label="助手实时回复"
-                      >
-                        <Think
-                          messageId={assistant.messageId}
-                          text={assistant.reasoning}
-                          parts={parts}
-                          now={now}
-                        />
-                        <Markdown text={assistant.text} openUrl={openUrl} />
-                      </article>
-                    )),
+                    // 非虚拟列表下与正式条目同在这一个数组、共用 key a:<messageId> 与同一组件树：
+                    // message.assistant 到达时 React 原地复用节点，不卸载重挂（ADR-0128）。
+                    ...(virtualize
+                      ? []
+                      : liveAssistants.map((assistant) => {
+                          const entry = liveAssistantEntry(assistant);
+                          return (
+                            <Fragment key={entry.key}>{renderLiveAssistantBlock(entry)}</Fragment>
+                          );
+                        })),
                     // 实时工具行与正式条目同在这一个数组、同用 key t:<callId>、同一组件树：
                     // reducer 提升条目时 React 只移动节点，不卸载重挂。
                     ...view.live.tools
