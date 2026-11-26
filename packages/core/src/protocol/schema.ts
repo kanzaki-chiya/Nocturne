@@ -442,6 +442,7 @@ const payloadSchemas = {
             }),
           )
           .optional(),
+        dedupeKey: z.string().optional(),
       })
       .optional(),
     // ADR-0116：引用回复片段；兼容扩展，旧版本按普通用户消息读取

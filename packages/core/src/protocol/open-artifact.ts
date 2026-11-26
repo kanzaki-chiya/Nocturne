@@ -85,6 +85,8 @@ export interface OpenArtifactWakeSnapshot {
   fromName?: string | undefined;
   summary: string;
   threads?: OpenArtifactWakeThread[] | undefined;
+  /** 稳定投递去重键（持久落盘以便跨 Runtime 重建防重复投递，不含回环端口） */
+  dedupeKey?: string | undefined;
 }
 
 /** 本机编辑器视图打开结果（仅限本机客户端使用，绝不发往远程设备） */

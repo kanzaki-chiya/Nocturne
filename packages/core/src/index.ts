@@ -1692,7 +1692,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     deliverOpenArtifactWake?(
       text: string,
       snapshot: OpenArtifactWakeSnapshot,
-    ): OpenArtifactWakeResult;
+    ): OpenArtifactWakeResult & { deduplicated?: boolean | undefined };
     /** Open Artifact 非所有者评论/系统通知：以通知展示，不作为用户轮次 */
     emitOpenArtifactNotice?(summary: string): void;
   }
@@ -4733,7 +4733,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
       if (input.pageComments !== undefined) {
         throw new RuntimeCommandError("invalid_command", "旧面板页面已转为只读，不能提交页面评论");
-        }
+      }
       const combinedAttachmentInputs = [...(input.attachments ?? [])];
       const attachmentError = validateAttachmentInputs(combinedAttachmentInputs);
       if (attachmentError) throw new RuntimeCommandError("invalid_command", attachmentError);
@@ -5972,6 +5972,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       deliverOpenArtifactWake: (text, snapshot) => {
         if (closing || session.health !== "ok") return { status: "failed" };
         if (meta.parent !== undefined || isSuiteCoordinator) return { status: "failed" };
+        const dedupeKey = snapshot.dedupeKey;
+        if (dedupeKey !== undefined && dedupeKey !== "") {
+          const alreadyQueued = pendingInputStore
+            .snapshot()
+            .items.some((item) => item.openArtifactWake?.dedupeKey === dedupeKey);
+          if (alreadyQueued) {
+            return { status: "delivered", deduplicated: true };
+          }
+          const alreadyPersisted = session
+            .durableEvents()
+            .some(
+              (ev) =>
+                ev.type === "message.user" && ev.payload.openArtifactWake?.dedupeKey === dedupeKey,
+            );
+          if (alreadyPersisted) {
+            return { status: "delivered", deduplicated: true };
+          }
+        }
         const visibleText = snapshot.summary.trim() !== "" ? snapshot.summary.trim() : text;
         const prepared: PreparedInput = {
           content: [{ type: "text", text: visibleText }],
@@ -9298,6 +9316,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           ...(wake.threads !== undefined && wake.threads.length > 0
             ? { threads: wake.threads }
             : {}),
+          ...(wake.dedupeKey !== "" ? { dedupeKey: wake.dedupeKey } : {}),
         };
 
         const deliverToOpen = (
@@ -9308,12 +9327,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           const result = hooks.deliverOpenArtifactWake(wake.text, snapshot);
           if (result.status !== "failed") {
             recordDeliveredWake(wake.dedupeKey);
+            if (result.deduplicated === true) {
+              return {
+                status: "delivered",
+                ...(result.session !== undefined ? { session: result.session } : {}),
+              };
+            }
             notifySessionsChanged();
             return resumed && result.status === "delivered"
-              ? { status: "resumed", ...(result.session ? { session: result.session } : {}) }
-              : result;
+              ? {
+                  status: "resumed",
+                  ...(result.session !== undefined ? { session: result.session } : {}),
+                }
+              : {
+                  status: result.status,
+                  ...(result.session !== undefined ? { session: result.session } : {}),
+                };
           }
-          return result;
+          return { status: "failed" };
         };
 
         const existing = openSessions.get(targetSessionId);
@@ -9339,7 +9370,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         wakeOpenedSessions.set(targetSessionId, resumedSession);
         const result = deliverToOpen(reopened, true);
-        if (result.status === "failed") {
+        if (result.status === "failed" || resumedSession.isIdle()) {
           if (wakeOpenedSessions.get(targetSessionId) === resumedSession) {
             wakeOpenedSessions.delete(targetSessionId);
             await resumedSession.close().catch(() => undefined);
@@ -9359,9 +9390,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             });
         };
         const unsubIdle = resumedSession.onIdle(releaseIfUnclaimed);
-        if (resumedSession.isIdle()) {
-          releaseIfUnclaimed();
-        }
         return result;
       },
     });

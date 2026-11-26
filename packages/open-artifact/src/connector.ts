@@ -84,12 +84,13 @@ function wakeDedupeKey(params: WakeDeliverParams): string {
   hash.update(
     JSON.stringify({
       session: params.session ?? null,
-      artifactId: params.artifactId,
+      artifactId: params.artifactId || params.source.artifactId,
       reason: params.source.reason,
       from: params.source.from,
       threads: params.source.threads,
       requests: params.source.requests,
-      text: params.text,
+      task: params.source.task ?? null,
+      text: sanitizeWakeText(params.text),
     }),
   );
   return hash.digest("hex");
@@ -105,11 +106,54 @@ function toAttachParams(access: OpenArtifactSessionAccess): AttachParams {
   };
 }
 
+function extractCommentThreadFromWakeText(
+  text: string,
+): { id: string; where?: string; text: string } | undefined {
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line.startsWith("> {")) continue;
+    try {
+      const parsed = JSON.parse(line.slice(2)) as {
+        comment?: {
+          id?: unknown;
+          where?: unknown;
+          messages?: { from?: unknown; text?: unknown }[];
+        };
+      };
+      const comment = parsed.comment;
+      if (comment === undefined || typeof comment.id !== "string" || comment.id.trim() === "") {
+        continue;
+      }
+      const msgs = Array.isArray(comment.messages) ? comment.messages : [];
+      let userMsg = "";
+      for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        const candidate = msgs[i];
+        if (typeof candidate?.text === "string" && candidate.text.trim() !== "") {
+          userMsg = candidate.text.trim();
+          if (candidate.from === "user") break;
+        }
+      }
+      const where =
+        typeof comment.where === "string" && comment.where.trim() !== ""
+          ? comment.where.trim()
+          : undefined;
+      return {
+        id: comment.id.trim(),
+        ...(where !== undefined ? { where } : {}),
+        text: userMsg,
+      };
+    } catch {
+      // ignore non-JSON blockquote lines
+    }
+  }
+  return undefined;
+}
+
 function toWakeDelivery(params: WakeDeliverParams): OpenArtifactWakeDelivery {
   const from = params.source.from;
   const fromKind = from.kind;
   const fromName = from.kind === "collaborator" ? from.name : undefined;
-  const threads =
+  let threads =
     params.source.threads.length > 0
       ? params.source.threads.map((t) => ({
           id: t.id,
@@ -117,6 +161,16 @@ function toWakeDelivery(params: WakeDeliverParams): OpenArtifactWakeDelivery {
           text: t.text,
         }))
       : undefined;
+  let summary = params.source.summary;
+  if (threads === undefined) {
+    const extracted = extractCommentThreadFromWakeText(params.text);
+    if (extracted !== undefined) {
+      threads = [extracted];
+      if (extracted.text !== "") {
+        summary = extracted.text;
+      }
+    }
+  }
   return {
     sessionId: params.session ?? null,
     workspace: params.workspace ?? null,
@@ -127,7 +181,7 @@ function toWakeDelivery(params: WakeDeliverParams): OpenArtifactWakeDelivery {
     reason: params.source.reason,
     fromKind,
     ...(fromName !== undefined ? { fromName } : {}),
-    summary: params.source.summary,
+    summary,
     ...(threads !== undefined ? { threads } : {}),
     dedupeKey: wakeDedupeKey(params),
   };

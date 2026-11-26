@@ -6,6 +6,8 @@ import {
   createRuntime,
   FakeProvider,
   parseWorkModeSlash,
+  replaySessionView,
+  userEntryText,
   type OpenArtifactConnector,
   type OpenArtifactHostEvent,
   type OpenArtifactSessionAccess,
@@ -289,6 +291,150 @@ describe("Core Runtime Open Artifact integration (ADR-0125)", () => {
     } finally {
       await runtime.close();
       expect(stub.closed).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("跨 Runtime 重建后按持久 dedupeKey 阻止同一 wake 重复投递，同时允许相同正文的独立新评论", async () => {
+    const cwd = makeTmp("nct-oa-dedupe-ws-");
+    const home = makeTmp("nct-oa-dedupe-home-");
+    const sessionsDir = path.join(home, "sessions");
+
+    const waitForIdle = (s: { isIdle(): boolean; onIdle(cb: () => void): () => void }) =>
+      s.isIdle()
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            const unsub = s.onIdle(() => {
+              unsub();
+              resolve();
+            });
+          });
+
+    let turnCount = 0;
+    const makeProvider = () =>
+      new FakeProvider({
+        handler: () => {
+          turnCount++;
+          return [
+            { type: "text_delta", text: `reply-${turnCount}` },
+            { type: "finish", reason: "stop" },
+          ];
+        },
+      });
+
+    // 1. Runtime #1：收到评论唤醒并完成持久落盘（模拟 ACK 在网络层丢失）
+    const stub1 = makeStubConnector();
+    const runtime1 = await createRuntime({
+      cwd,
+      workspaceRoot: cwd,
+      sessionsDir,
+      providers: [makeProvider()],
+      openArtifact: stub1.connector,
+      interactive: false,
+    });
+    let sessionId: string;
+    const wakeComment1: OpenArtifactWakeDelivery = {
+      sessionId: "",
+      workspace: cwd,
+      artifactUrl: "open-artifact://artifact/design-1",
+      artifactId: "design-1",
+      title: "双方案设计",
+      text: "把详情页副标题改成蓝色",
+      reason: "comment",
+      fromKind: "owner",
+      summary: "把详情页副标题改成蓝色",
+      threads: [
+        { id: "th-100", where: "Detail · #detail-subtitle", text: "把详情页副标题改成蓝色" },
+      ],
+      dedupeKey: "dedupe-key-thread-100",
+    };
+    try {
+      const session1 = await runtime1.createSession({
+        model: "fake/fake-model",
+        permissionPreset: "auto-edit",
+      });
+      sessionId = session1.id;
+      wakeComment1.sessionId = sessionId;
+
+      const firstDelivery = await stub1.triggerWake(wakeComment1);
+      expect(firstDelivery.status).toBe("delivered");
+      await waitForIdle(session1);
+      expect(turnCount).toBe(1);
+
+      const persisted1 = session1
+        .durableEvents()
+        .flatMap((ev) =>
+          ev.type === "message.user" && ev.payload.openArtifactWake !== undefined
+            ? [ev.payload.openArtifactWake]
+            : [],
+        );
+      expect(persisted1).toHaveLength(1);
+      expect(persisted1[0]?.dedupeKey).toBe("dedupe-key-thread-100");
+      // 确认 userEntryText 剥离附带给模型的上下文块，仅显示干净用户评论
+      const view1 = replaySessionView(session1.durableEvents());
+      const wakeUserEntry = view1.entries.find(
+        (e) => e.kind === "user" && e.openArtifactWake !== undefined,
+      );
+      expect(wakeUserEntry?.kind).toBe("user");
+      if (wakeUserEntry?.kind === "user") {
+        expect(userEntryText(wakeUserEntry)).toBe("把详情页副标题改成蓝色");
+      }
+      await session1.close();
+    } finally {
+      await runtime1.close();
+    }
+
+    // 2. 重建 Runtime #2（内存去重表完全清空）：daemon 补投同一条评论（会话未打开 + 已打开两种状态）
+    const stub2 = makeStubConnector();
+    const runtime2 = await createRuntime({
+      cwd,
+      workspaceRoot: cwd,
+      sessionsDir,
+      providers: [makeProvider()],
+      openArtifact: stub2.connector,
+      interactive: false,
+    });
+    try {
+      // 会话未在内存中打开时补投：从磁盘恢复检查到持久 dedupeKey，静默 ACK 且不产生新 Turn，也不残留会话锁
+      const redeliverClosed = await stub2.triggerWake(wakeComment1);
+      expect(redeliverClosed.status).toBe("delivered");
+      expect(turnCount).toBe(1);
+
+      // 确认临时恢复的会话已释放锁，客户端可正常 resumeSession
+      const session2 = await runtime2.resumeSession(sessionId);
+      // 会话已打开状态下再次补投同一 dedupeKey：同样不产生新 Turn
+      const redeliverOpen = await stub2.triggerWake(wakeComment1);
+      expect(redeliverOpen.status).toBe("delivered");
+      await waitForIdle(session2);
+      expect(turnCount).toBe(1);
+
+      // 3. 发送第二条正文完全相同但来自独立新评论（不同 thread.id / dedupeKey）的 wake：必须正常投递并开启第 2 轮
+      const wakeComment2: OpenArtifactWakeDelivery = {
+        ...wakeComment1,
+        threads: [
+          { id: "th-101", where: "Detail · #detail-subtitle", text: "把详情页副标题改成蓝色" },
+        ],
+        dedupeKey: "dedupe-key-thread-101",
+      };
+      const secondDelivery = await stub2.triggerWake(wakeComment2);
+      expect(secondDelivery.status).toBe("delivered");
+      await waitForIdle(session2);
+      expect(turnCount).toBe(2);
+
+      const wakeMessages = session2
+        .durableEvents()
+        .flatMap((ev) =>
+          ev.type === "message.user" && ev.payload.openArtifactWake !== undefined
+            ? [ev.payload.openArtifactWake]
+            : [],
+        );
+      expect(wakeMessages).toHaveLength(2);
+      expect(wakeMessages.map((w) => w.dedupeKey)).toEqual([
+        "dedupe-key-thread-100",
+        "dedupe-key-thread-101",
+      ]);
+      await session2.close();
+    } finally {
+      await runtime2.close();
     }
   });
 });

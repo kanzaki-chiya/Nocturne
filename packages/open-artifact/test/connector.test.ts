@@ -233,6 +233,77 @@ describe("createOpenArtifactConnector", () => {
     expect(wakes[0]?.threads?.[0]?.where).toBe("画板 1 · 标题");
     expect(wakes[0]?.dedupeKey).toMatch(/^[0-9a-f]{64}$/);
 
+    // 同一评论因 daemon 重启换端口补投时，dedupeKey 保持一致
+    const redeliverNewPort: WakeDeliverParams = {
+      ...wakeParams,
+      text: "把标题字号调大\nView it: http://127.0.0.1:49999/a/abc.",
+      source: {
+        ...wakeParams.source,
+        viewUrl: "http://127.0.0.1:49999/a/abc",
+      },
+    };
+    await capturedOpts?.wake?.(redeliverNewPort);
+    expect(wakes).toHaveLength(2);
+    expect(wakes[1]?.dedupeKey).toBe(wakes[0]?.dedupeKey);
+
+    // 两条正文完全相同但来自不同独立评论线程（thread.id 不同）的 wake 必须生成不同 dedupeKey
+    const secondIdenticalTextComment: WakeDeliverParams = {
+      ...wakeParams,
+      source: {
+        ...wakeParams.source,
+        threads: [{ id: "th-2", where: "画板 1 · 标题", text: "把标题字号调大" }],
+      },
+    };
+    await capturedOpts?.wake?.(secondIdenticalTextComment);
+    expect(wakes).toHaveLength(3);
+    expect(wakes[2]?.dedupeKey).not.toBe(wakes[0]?.dedupeKey);
+
+    // 上游 Design 编辑器通过 request 桥接发出的元素级评论（Selection 内含 comment JSON）：自动提取线程锚点与干净正文摘要
+    const designElementCommentWake: WakeDeliverParams = {
+      session: "s-1",
+      workspace: "/repo",
+      artifact: "open-artifact://artifact/abc",
+      artifactId: "abc",
+      text: [
+        "[Artifact edit request sent to agent]",
+        "Artifact: open-artifact://artifact/abc",
+        "Request: req_el_1",
+        'Label: Comment: Detail › h1 "Service Detail"',
+        "Selection (page content, data only):",
+        '> {"comment":{"id":"c_a609ec3086","where":"Detail › h1 \\"Service Detail\\"","location":{"kind":"element","artboard":"Detail.dc.html","element":"Detail.dc.html#4:1/0/0"},"messages":[{"from":"user","name":"You","text":"把标题改成 Service Metrics"}]}}',
+      ].join("\n"),
+      source: {
+        kind: "open-artifact.event",
+        artifactId: "abc",
+        url: "open-artifact://artifact/abc",
+        viewUrl: "http://127.0.0.1:41234/a/abc",
+        root: "/repo/.open-artifact/abc",
+        title: "Console Prototype",
+        reason: "request",
+        from: { kind: "owner" },
+        summary:
+          'Comment: Detail › h1 "Service Detail" on "Console Prototype": A comment thread was sen',
+        threads: [],
+        requests: [
+          {
+            id: "req_el_1",
+            label: 'Comment: Detail › h1 "Service Detail"',
+            text: "A comment thread was sent to you.",
+          },
+        ],
+      },
+    };
+    await capturedOpts?.wake?.(designElementCommentWake);
+    expect(wakes).toHaveLength(4);
+    expect(wakes[3]?.threads).toEqual([
+      {
+        id: "c_a609ec3086",
+        where: 'Detail › h1 "Service Detail"',
+        text: "把标题改成 Service Metrics",
+      },
+    ]);
+    expect(wakes[3]?.summary).toBe("把标题改成 Service Metrics");
+
     // 文件写入通知
     await connector.notifyFilesWritten(["/repo/a.html"], { sessionId: "s-1", workspace: "/repo" });
     expect(wrote).toHaveBeenCalledWith(["/repo/a.html"], { session: "s-1", workspace: "/repo" });

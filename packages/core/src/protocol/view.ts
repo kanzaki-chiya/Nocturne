@@ -206,13 +206,22 @@ export interface UserEntry {
  * 提交时 Core 在 `content` 最前面放置引用回复文本块（`quotes` 非空时一块，ADR-0116），
  * 并在末尾按顺序追加给模型看的快照块（`src/index.ts` 的 submit 路径，经 `runTurn` 落盘）：
  * 每个非图片 `@` 引用一块（`resolveFileRefs`）、技能正文一块、委派指令一块、文件引用一块、
- * 执行方式说明一块、页面评论一块。这里按条数切掉首部引用块与末尾快照块，再拼接剩下的 text 块。
+ * 执行方式说明一块、页面评论一块、Open Artifact 评论唤醒附带给模型的上下文块（当与可见摘要不同时追加一块）。
+ * 这里按条数切掉首部引用块与末尾快照块，再拼接剩下的 text 块。
  * 以后新增快照种类或改变前后追加数量，必须同步改这里。
  */
 export function userEntryText(
   entry: Pick<
     UserEntry,
-    "content" | "quotes" | "fileRefs" | "skill" | "delegate" | "files" | "workMode" | "pageComments"
+    | "content"
+    | "quotes"
+    | "fileRefs"
+    | "skill"
+    | "delegate"
+    | "files"
+    | "workMode"
+    | "pageComments"
+    | "openArtifactWake"
   >,
 ): string {
   const start = entry.quotes?.length ? 1 : 0;
@@ -222,7 +231,8 @@ export function userEntryText(
     (entry.delegate ? 1 : 0) +
     (entry.files?.length ? 1 : 0) +
     (entry.workMode ? 1 : 0) +
-    (entry.pageComments ? 1 : 0);
+    (entry.pageComments ? 1 : 0) +
+    (entry.openArtifactWake && entry.content.length > start + 1 ? 1 : 0);
   const end =
     snapshots === 0 ? entry.content.length : Math.max(start, entry.content.length - snapshots);
   const content = entry.content.slice(start, end);
