@@ -144,7 +144,16 @@ export function PendingInputs({
         const unwrappedEnsemble = unwrapEnsemblePostText(item.text);
         const isEnsemblePost = unwrappedEnsemble !== item.text;
         const commentLabel =
-          item.pageComments === undefined ? undefined : pageCommentsLabel(item.pageComments);
+          item.pageComments !== undefined
+            ? pageCommentsLabel(item.pageComments)
+            : item.openArtifactWake !== undefined
+              ? (() => {
+                  const wake = item.openArtifactWake;
+                  const where = wake.threads?.find((t) => t.where)?.where;
+                  const base = wake.title || wake.artifactId;
+                  return where ? `${base} › ${where}` : base;
+                })()
+              : undefined;
         const firstQuoteLine = item.quotes?.[0]?.text
           .split("\n")
           .find((line) => line.trim() !== "")

@@ -37,7 +37,7 @@ import {
   type SaveFileFn,
   type ViewerImageItem,
 } from "./ImageViewer";
-import { InlinePage, PageEntryRow } from "./InlinePage";
+import { ArtifactEntryRow, InlinePage, PageEntryRow } from "./InlinePage";
 import "./grants.css";
 import "./code-colors.css";
 import { diffRows } from "./code-lines";
@@ -375,6 +375,12 @@ export interface ConversationProps {
   onOpenPage?: ((page: string, version?: number) => void) | undefined;
   /** 当前右侧面板正在显示的页面与版本号（仅桌面端传入，供入口行高亮选中态） */
   activePage?: { page: string; version: number } | undefined;
+  /** 点击 Open Artifact 作品卡在右侧受限编辑器打开（仅桌面端传入；移动端不传入，显示桌面打开提示） */
+  onOpenArtifact?:
+    | ((url: string, meta?: { title?: string | undefined; type?: string | undefined }) => void)
+    | undefined;
+  /** 当前右侧面板正在显示的 Open Artifact 稳定 URL（仅桌面端传入，供作品卡高亮选中态） */
+  activeArtifactUrl?: string | undefined;
   /** 启用消息列表虚拟化（仅手机网页开启，桌面端保持整段渲染） */
   virtualize?: boolean | undefined;
   /** 启用会话内搜索（Ctrl+F，仅桌面端主窗口开启） */
@@ -1209,6 +1215,10 @@ interface PageRowContextValue {
   remote?: boolean | undefined;
   onOpenPage?: ((page: string, version?: number) => void) | undefined;
   activePage?: { page: string; version: number } | undefined;
+  onOpenArtifact?:
+    | ((url: string, meta?: { title?: string | undefined; type?: string | undefined }) => void)
+    | undefined;
+  activeArtifactUrl?: string | undefined;
 }
 const PageRowContext = createContext<PageRowContextValue | null>(null);
 
@@ -2410,6 +2420,21 @@ function UserMessage({
                     <Icon name="chat_1" size={ICON_SM} />
                     <span className="page-comment-chip-text">
                       {pageCommentsLabel(entry.pageComments)}
+                    </span>
+                  </span>
+                </div>
+              )}
+              {entry.openArtifactWake !== undefined && (
+                <div className="u-page-comments">
+                  <span className="page-comment-chip">
+                    <Icon name="chat_1" size={ICON_SM} />
+                    <span className="page-comment-chip-text">
+                      {(() => {
+                        const wake = entry.openArtifactWake;
+                        const where = wake.threads?.find((t) => t.where)?.where;
+                        const base = wake.title || wake.artifactId;
+                        return where ? `${base} › ${where}` : base;
+                      })()}
                     </span>
                   </span>
                 </div>
@@ -3910,6 +3935,30 @@ function ToolEntryView({
   }
   // 未读文件即写（not_read）的已结束工具行不显示；执行中照常渲染，出结果后该行消失。
   if (isNotReadToolFailure(entry)) return null;
+  const completedArtifact = !preparing ? entry.result?.artifact : undefined;
+  if (completedArtifact !== undefined) {
+    const onOpenArtifact = pageRow?.onOpenArtifact;
+    const openInPanel =
+      onOpenArtifact !== undefined && pageRow?.remote !== true
+        ? () => {
+            onOpenArtifact(completedArtifact.url, {
+              title: completedArtifact.title,
+              type: completedArtifact.type,
+            });
+          }
+        : undefined;
+    return (
+      <ArtifactEntryRow
+        artifact={completedArtifact}
+        active={pageRow?.activeArtifactUrl === completedArtifact.url}
+        remote={pageRow?.remote}
+        onOpenInPanel={openInPanel}
+        searchHit={searchHit}
+        sessionSeq={entry.seq}
+        completedSeq={entry.completedSeq}
+      />
+    );
+  }
   const inlineFiles = !preparing ? inlineFilesOfTool(entry) : [];
   if (inlineFiles.length > 0) {
     return (
@@ -7178,8 +7227,12 @@ export function Conversation(props: ConversationProps | ReadOnlyConversationProp
   const onOpenEnsemble = "onOpenEnsemble" in props ? props.onOpenEnsemble : undefined;
   const onOpenPage = "onOpenPage" in props ? props.onOpenPage : undefined;
   const activePage = "activePage" in props ? props.activePage : undefined;
+  const onOpenArtifact = "onOpenArtifact" in props ? props.onOpenArtifact : undefined;
+  const activeArtifactUrl = "activeArtifactUrl" in props ? props.activeArtifactUrl : undefined;
   const pageRow: PageRowContextValue | null =
-    readOnly === undefined ? { onOpenPage, activePage, remote: props.remote } : null;
+    readOnly === undefined
+      ? { onOpenPage, activePage, onOpenArtifact, activeArtifactUrl, remote: props.remote }
+      : { remote: props.remote };
   const ensembleRow: EnsembleRowContextValue | null =
     readOnly === undefined && onOpenEnsemble !== undefined
       ? {

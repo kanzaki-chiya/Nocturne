@@ -222,6 +222,31 @@ export interface AgentBrowserStatus {
   restartRequired: boolean;
 }
 
+export type ArtifactViewMessage =
+  | { kind: "loading"; loading: boolean }
+  | { kind: "title"; title: string }
+  | { kind: "newWindow"; url: string }
+  | { kind: "blocked"; url: string; reason: string; message: string }
+  | { kind: "download"; state: "started" | "finished" | "failed"; name: string };
+
+/**
+ * Open Artifact 受限隔离编辑器子 WebView（ADR-0125）：
+ * 仅加载 daemon 声明的精确来源，不向作品暴露任何 Tauri 权限。
+ */
+export interface ArtifactViewHost {
+  create: (
+    embedUrl: string,
+    allowedOrigins: string[],
+    bounds: BrowserBounds | null,
+    onMessage: (message: ArtifactViewMessage) => void,
+  ) => Promise<number>;
+  navigate: (id: number, embedUrl: string, allowedOrigins: string[]) => Promise<void>;
+  setOrigins: (id: number, allowedOrigins: string[]) => Promise<void>;
+  layout: (id: number, bounds: BrowserBounds | null) => Promise<void>;
+  capture: (id: number) => Promise<Uint8Array>;
+  destroy: (id: number) => Promise<void>;
+}
+
 /**
  * 宿主抽象：前端对 Tauri 的全部依赖都在这一个接口后面，
  * 测试用假宿主替换（docs/apps/desktop.md）。
@@ -304,6 +329,8 @@ export interface DesktopHost {
   terminals?: TerminalHost;
   /** 面板内置浏览器；没有时网址与 HTML 交给系统浏览器 */
   browsers?: BrowserHost;
+  /** Open Artifact 隔离编辑器子 webview（ADR-0125）；没有时仅提供在系统浏览器打开 */
+  artifactViews?: ArtifactViewHost;
   /** Agent 浏览器；没有时「设置 › 浏览器」不显示「Agent 浏览器」一组 */
   agentBrowser?: AgentBrowserHost;
 }

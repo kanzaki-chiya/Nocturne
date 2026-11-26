@@ -4,6 +4,7 @@
 //! 所有 Nocturne 语义在前端经 `@nocturne/rpc/client` 处理。
 
 mod agent_browser;
+mod artifact_view;
 mod backend;
 mod browser;
 mod browser_fullscreen;
@@ -57,6 +58,7 @@ fn begin_shutdown(app: &AppHandle, restart: bool) {
         let terminals = Arc::clone(app.state::<Arc<terminal::TerminalState>>().inner());
         let closing_terminals = thread::spawn(move || terminals.close_all());
         app.state::<Arc<browser::BrowserState>>().close_all(&app);
+        app.state::<Arc<artifact_view::ArtifactViewState>>().close_all(&app);
         // agent 浏览器：先撤绑定（阻断仍在途的 HTTP 调用），再关 webview
         let agents = app.state::<Arc<agent_browser::AgentBrowserState>>();
         agents.revoke_all();
@@ -236,6 +238,12 @@ pub fn run() {
         browser::browser_capture,
         browser::browser_destroy,
         browser::browser_downloads_set,
+        artifact_view::artifact_view_create,
+        artifact_view::artifact_view_navigate,
+        artifact_view::artifact_view_set_origins,
+        artifact_view::artifact_view_layout,
+        artifact_view::artifact_view_capture,
+        artifact_view::artifact_view_destroy,
         browsing_data::browser_data_sizes,
         browsing_data::browser_data_clear,
         agent_browser::agent_browser_watch,
@@ -293,6 +301,10 @@ pub fn run() {
             app.manage(Arc::new(terminal::TerminalState::default()));
             // 面板浏览器（ADR-0060 第 5 节）：同上，随页面重载、应用退出全部关掉
             app.manage(Arc::new(browser::BrowserState::new(webview_data.clone())));
+            // Open Artifact 受限隔离视图（ADR-0125）：同上，随页面重载、应用退出全部关掉
+            app.manage(Arc::new(artifact_view::ArtifactViewState::new(
+                webview_data.clone(),
+            )));
             // 第 5 轮 agent 浏览器：回环 MCP 与 agent 标签，默认关闭；开关落在
             // agent 专用目录的标记文件里，外壳启动时先读它再开服务器，和前端调用顺序无关
             {
@@ -358,6 +370,9 @@ pub fn run() {
                 }
                 if let Some(browsers) = webview.try_state::<Arc<browser::BrowserState>>() {
                     browsers.close_all(webview.app_handle());
+                }
+                if let Some(artifacts) = webview.try_state::<Arc<artifact_view::ArtifactViewState>>() {
+                    artifacts.close_all(webview.app_handle());
                 }
                 // agent 标签与绑定随页面代际一起作废：先撤绑定再关 webview
                 if let Some(agents) = webview.try_state::<Arc<agent_browser::AgentBrowserState>>() {

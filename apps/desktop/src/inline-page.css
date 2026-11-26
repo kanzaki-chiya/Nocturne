@@ -334,6 +334,21 @@
   font-variant-numeric: tabular-nums;
 }
 
+.artifact-entry-row.is-remote {
+  cursor: default;
+}
+
+.artifact-entry-row.is-remote:hover {
+  background: var(--a-panel);
+  border-color: var(--a-border);
+}
+
+.artifact-entry-hint {
+  flex-shrink: 0;
+  font-size: var(--fs-1);
+  color: var(--a-muted);
+}
+
 .page-entry-arrow {
   flex-shrink: 0;
   color: var(--a-muted);

@@ -238,11 +238,37 @@ pub struct Bounds {
 }
 
 impl Bounds {
-    fn rect(self) -> Rect {
+    pub(crate) fn rect(self) -> Rect {
         Rect {
             position: LogicalPosition::new(self.x, self.y).into(),
             size: LogicalSize::new(self.width.max(1.0), self.height.max(1.0)).into(),
         }
+    }
+}
+
+pub(crate) fn dev_url_for(app: &AppHandle) -> Option<Url> {
+    dev_url(app)
+}
+
+pub(crate) async fn capture_webview_png(webview: &tauri::Webview) -> CmdResult<Vec<u8>> {
+    #[cfg(windows)]
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        webview
+            .with_webview(move |platform| native::capture(&platform, tx))
+            .map_err(native_error)?;
+        tauri::async_runtime::spawn_blocking(move || {
+            rx.recv_timeout(std::time::Duration::from_secs(3))
+        })
+        .await
+        .map_err(native_error)?
+        .map_err(|_| CommandError::new("browser_failed", "截图超时"))?
+        .ok_or_else(|| CommandError::new("browser_failed", "截图失败"))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = webview;
+        Err(CommandError::new("browser_failed", "这个平台不支持截图"))
     }
 }
 

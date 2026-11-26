@@ -13,7 +13,9 @@ import {
   type FileAttachment,
   type SessionPage,
   type SessionPageVersion,
+  type ToolCompletedArtifact,
 } from "@nocturne/core/protocol";
+import { formatArtifactTypeLabel } from "./ArtifactPane";
 
 import {
   triggerBytesDownload,
@@ -851,6 +853,61 @@ export function PageEntryRow({
       <Icon name="file" size={ICON_SM} className="page-entry-icon" />
       <span className="page-entry-title">{title}</span>
       <span className="page-entry-ver">v{version}</span>
+      <Icon name="right_small" size={ICON_SM} className="page-entry-arrow" />
+    </button>
+  );
+}
+
+export interface ArtifactEntryRowProps {
+  artifact: ToolCompletedArtifact;
+  active?: boolean | undefined;
+  remote?: boolean | undefined;
+  onOpenInPanel?: (() => void) | undefined;
+  searchHit?: boolean | undefined;
+  sessionSeq?: number | undefined;
+  completedSeq?: number | undefined;
+}
+
+/** 聊天流中的 Open Artifact 作品卡（ADR-0125）：桌面端点击打开右侧真实编辑器；移动端只显示作品信息与桌面打开提示 */
+export function ArtifactEntryRow({
+  artifact,
+  active = false,
+  remote = false,
+  onOpenInPanel,
+  searchHit = false,
+  sessionSeq,
+  completedSeq,
+}: ArtifactEntryRowProps) {
+  const typeLabel = formatArtifactTypeLabel(artifact.type);
+  const title = artifact.title || artifact.id;
+  if (remote || onOpenInPanel === undefined) {
+    return (
+      <div
+        className={`page-entry-row artifact-entry-row is-remote${searchHit ? " search-hit" : ""}`}
+        data-session-seq={sessionSeq}
+        data-completed-seq={completedSeq}
+        data-artifact-url={artifact.url}
+      >
+        <Icon name="layout_right" size={ICON_SM} className="page-entry-icon" />
+        <span className="page-entry-title">{title}</span>
+        <span className="page-entry-ver">{typeLabel}</span>
+        <span className="artifact-entry-hint">请在桌面端打开</span>
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={`page-entry-row artifact-entry-row${active ? " is-active" : ""}${searchHit ? " search-hit" : ""}`}
+      aria-current={active ? "true" : undefined}
+      data-session-seq={sessionSeq}
+      data-completed-seq={completedSeq}
+      data-artifact-url={artifact.url}
+      onClick={onOpenInPanel}
+    >
+      <Icon name="layout_right" size={ICON_SM} className="page-entry-icon" />
+      <span className="page-entry-title">{title}</span>
+      <span className="page-entry-ver">{typeLabel}</span>
       <Icon name="right_small" size={ICON_SM} className="page-entry-arrow" />
     </button>
   );

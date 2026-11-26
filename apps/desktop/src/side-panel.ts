@@ -166,6 +166,19 @@ export interface PageTab {
   version?: number | undefined;
 }
 
+/**
+ * Open Artifact 作品面板标签（ADR-0125）：
+ * 只持久化稳定 `open-artifact://` 地址、展示标题和作品类型，不存短期票据或本地端口；
+ * 每次打开/恢复时向后端请求新的短期视图票据并在受限子 webview 中渲染真实编辑器。
+ */
+export interface ArtifactTab {
+  id: string;
+  kind: "artifact";
+  url: string;
+  title: string;
+  artifactType: string;
+}
+
 export type PanelTab =
   | NewTab
   | ChangesTab
@@ -179,9 +192,10 @@ export type PanelTab =
   | SuiteTab
   | SuiteThreadTab
   | AppTab
-  | PageTab;
+  | PageTab
+  | ArtifactTab;
 
-/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Ensemble」「成员会话」「组曲」「组曲线程」「插件面板」「页面」（新标签页、终端不恢复） */
+/** 存进本机偏好的标签：「文件」「变更」「浏览器」「子代理」「Ensemble」「成员会话」「组曲」「组曲线程」「插件面板」「页面」「Open Artifact」（新标签页、终端不恢复） */
 export type StoredPanelTab =
   | ShellTab
   | { id: string; kind: "changes" }
@@ -190,6 +204,7 @@ export type StoredPanelTab =
   | { id: string; kind: "suite" }
   | { id: string; kind: "suite_thread"; threadId: string; childSessionId: string; title: string }
   | { id: string; kind: "page"; page: string }
+  | { id: string; kind: "artifact"; url: string; title: string; artifactType: string }
   | {
       id: string;
       kind: "subagent";
@@ -419,6 +434,7 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
   const shellTasks = new Set<string>();
   const appKeys = new Set<string>();
   const pages = new Set<string>();
+  const artifacts = new Set<string>();
   let changes = false;
   let ensemble = false;
   let suite = false;
@@ -442,6 +458,21 @@ export function parseStoredTabs(value: unknown): StoredPanelTab[] {
       pages.add(raw.page);
       ids.add(raw.id);
       tabs.push({ id: raw.id, kind: "page", page: raw.page });
+    } else if (
+      raw.kind === "artifact" &&
+      str(raw.url) &&
+      raw.url.startsWith("open-artifact://") &&
+      !artifacts.has(raw.url)
+    ) {
+      artifacts.add(raw.url);
+      ids.add(raw.id);
+      tabs.push({
+        id: raw.id,
+        kind: "artifact",
+        url: raw.url,
+        title: str(raw.title) ? raw.title : raw.url,
+        artifactType: str(raw.artifactType) ? raw.artifactType : "artifact",
+      });
     } else if (
       raw.kind === "suite_thread" &&
       str(raw.threadId) &&
@@ -578,6 +609,17 @@ export function storedTabs(tabs: readonly PanelTab[]): StoredPanelTab[] {
     if (tab.kind === "ensemble") return [{ id: tab.id, kind: "ensemble" }];
     if (tab.kind === "suite") return [{ id: tab.id, kind: "suite" }];
     if (tab.kind === "page") return [{ id: tab.id, kind: "page", page: tab.page }];
+    if (tab.kind === "artifact") {
+      return [
+        {
+          id: tab.id,
+          kind: "artifact",
+          url: tab.url,
+          title: tab.title,
+          artifactType: tab.artifactType,
+        },
+      ];
+    }
     if (tab.kind === "suite_thread") {
       return [
         {

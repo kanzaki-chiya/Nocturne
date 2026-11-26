@@ -22,6 +22,7 @@ export const WORK_MODE_ITEMS: readonly (InputLabelData & { name: WorkModeName })
   { name: "plan", label: "计划", icon: "list_check" },
   { name: "fugue", label: "多代理攻坚", icon: "robot" },
   { name: "ensemble", label: "合奏", icon: "group" },
+  { name: "artifact", label: "Open Artifact", icon: "layout_right" },
 ];
 
 /** 已下线执行方式的历史消息标签映射（仅用于历史回放显示，不进入命令菜单或补全） */

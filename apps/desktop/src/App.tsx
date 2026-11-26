@@ -13,6 +13,7 @@ import type {
   ExternalAgentOverview,
   MessageQuote,
   ModelRef,
+  OpenArtifactHostEvent,
   PageLibraryItem,
   PendingInputsSnapshot,
   RewindMode,
@@ -328,6 +329,7 @@ export function App({ host }: { host: DesktopHost }) {
    * 列出资源管理器与检测到的编辑器。prefsVersion 驱动设置变更后重算。
    */
   const panelRef = useRef<SidePanelController | null>(null);
+  const openArtifactEventRef = useRef<(event: OpenArtifactHostEvent) => void>(() => undefined);
   const fileLinks: FileLinkHooks = useMemo(
     () =>
       createFileLinkHooks({
@@ -644,6 +646,7 @@ export function App({ host }: { host: DesktopHost }) {
           event.type === "session.titled" ||
           event.type === "page.comment_resolved" ||
           (event.type === "message.user" && event.payload.pageComments !== undefined) ||
+          (event.type === "tool.completed" && event.payload.artifact !== undefined) ||
           (event.type === "tool.completed" &&
             event.payload.name === "reply_page_comment" &&
             event.payload.status === "ok"))
@@ -971,6 +974,10 @@ export function App({ host }: { host: DesktopHost }) {
         const stopSessions = client.onNotification("runtime.sessionsChanged", () => {
           void refresh();
         });
+        const stopOpenArtifact = client.onNotification("openArtifact.event", (event) => {
+          if (!alive) return;
+          openArtifactEventRef.current(event);
+        });
         const syncComputer = (description: ComputerDescription) => {
           if (!alive) return;
           const activeComputer = description.state?.active;
@@ -1003,6 +1010,7 @@ export function App({ host }: { host: DesktopHost }) {
           stopSettings();
           stopSchedules();
           stopSessions();
+          stopOpenArtifact();
           stopComputer();
         };
       }),
@@ -2110,15 +2118,81 @@ export function App({ host }: { host: DesktopHost }) {
     void selectSession(summary.id, summary.cwd);
   };
 
-  /** 点页面库一行：切到对应会话并打开其面板页面标签（最新版）；归档会话照样打开（ADR-0114） */
+  /** 点页面库一行：切到对应会话并打开面板页面或 Open Artifact 编辑器（ADR-0114、ADR-0125） */
   const openLibraryPage = (item: PageLibraryItem): void => {
     const summary = sessions.find((session) => session.id === item.sessionId);
     setPage(null);
     setSchedulesOpen(false);
     setSuitesOpen(false);
     setPagesOpen(false);
-    panelRef.current?.openPage(item.page, undefined, item.sessionId);
+    if (item.kind === "artifact") {
+      panelRef.current?.openArtifact(item.ref, {
+        title: item.title,
+        type: item.artifact?.type ?? "artifact",
+        sessionId: item.sessionId,
+      });
+    } else {
+      panelRef.current?.openPage(item.page, undefined, item.sessionId);
+    }
     void selectSession(item.sessionId, summary?.cwd ?? effectiveWorkspace ?? "");
+  };
+
+  openArtifactEventRef.current = (event) => {
+    if (event.kind === "open") {
+      if (event.ticket.allowedOrigins.length > 0) {
+        panelRef.current?.updateArtifactOrigins(event.ticket.allowedOrigins);
+      }
+      panelRef.current?.openArtifact(event.ticket.url, {
+        title: event.ticket.title,
+        type: event.ticket.type,
+        sessionId: event.sessionId ?? undefined,
+      });
+      setPagesVersion((v) => v + 1);
+      return;
+    }
+    if (event.kind === "origins") {
+      panelRef.current?.updateArtifactOrigins(event.allowedOrigins);
+      return;
+    }
+    if (event.kind === "artifact_changed") {
+      setPagesVersion((v) => v + 1);
+      if (event.change === "removed") {
+        panelRef.current?.closeArtifactByUrl(event.url);
+      } else {
+        panelRef.current?.updateArtifactMetaByUrl(event.url, {
+          title: event.title,
+          artifactType: event.artifactType,
+        });
+      }
+      return;
+    }
+    if (event.kind === "shell") {
+      const shellEv = event.event;
+      if (shellEv.type === "ready") {
+        panelRef.current?.updateArtifactMetaByUrl(event.artifactUrl, {
+          title: shellEv.title,
+          artifactType: shellEv.artifactType,
+        });
+      } else if (shellEv.type === "open_session" && shellEv.sessionId !== null) {
+        const sid = shellEv.sessionId;
+        const target = sessions.find((s) => s.id === sid);
+        setPage(null);
+        setSchedulesOpen(false);
+        setSuitesOpen(false);
+        setPagesOpen(false);
+        void selectSession(sid, target?.cwd ?? effectiveWorkspace ?? "");
+      } else if (shellEv.type === "open_external") {
+        void host.openUrl(shellEv.url).catch(() => undefined);
+      } else if (shellEv.type === "close") {
+        panelRef.current?.closeArtifactByUrl(event.artifactUrl);
+      }
+      return;
+    }
+    const sender =
+      event.fromKind === "collaborator" && event.fromName !== undefined && event.fromName !== ""
+        ? event.fromName
+        : event.fromKind;
+    setCommandOutput(`Open Artifact 通知（${sender} · ${event.title}）：${event.summary}`);
   };
   const pinnedPageOriginKeys = new Set(p.pinnedPages ?? []);
 
@@ -2898,6 +2972,8 @@ export function App({ host }: { host: DesktopHost }) {
                     }}
                     onOpenPage={sidePanel.openPage}
                     activePage={sidePanel.activePage}
+                    onOpenArtifact={sidePanel.openArtifact}
+                    activeArtifactUrl={sidePanel.activeArtifactUrl}
                     onShellKindChange={onShellKindChange}
                   />
                 </PaneErrorBoundary>
@@ -3288,6 +3364,10 @@ interface SessionPaneProps {
     ((thread: { threadId: string; childSessionId: string; title: string }) => void) | undefined;
   onOpenPage?: ((page: string, version?: number) => void) | undefined;
   activePage?: { page: string; version: number } | undefined;
+  onOpenArtifact?:
+    | ((url: string, meta?: { title?: string | undefined; type?: string | undefined }) => void)
+    | undefined;
+  activeArtifactUrl?: string | undefined;
   quotes?: readonly MessageQuote[] | undefined;
   onQuote?: ((quote: MessageQuote) => void) | undefined;
   onRemoveQuote?: ((index: number) => void) | undefined;
@@ -3369,6 +3449,8 @@ function SessionPane({
   onOpenSuiteThread,
   onOpenPage,
   activePage,
+  onOpenArtifact,
+  activeArtifactUrl,
   quotes,
   onQuote,
   onRemoveQuote,
@@ -3486,6 +3568,8 @@ function SessionPane({
         onOpenEnsembleMember={onOpenEnsembleMember}
         onOpenPage={onOpenPage}
         activePage={activePage}
+        onOpenArtifact={onOpenArtifact}
+        activeArtifactUrl={activeArtifactUrl}
         onOpenSuiteThread={
           view.suite !== undefined && onOpenSuiteThread !== undefined
             ? (threadId) => {

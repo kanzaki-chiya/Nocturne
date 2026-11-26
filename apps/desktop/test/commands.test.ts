@@ -198,11 +198,15 @@ describe("completeSlash", () => {
       "/goal",
       "/plan",
       "/fugue",
-      // 执行方式补全来自 Core 的 WORK_MODE_COMMANDS（ADR-0089 修订：对外显示 /ensemble；ADR-0125 移除 /cadenza）
+      // 执行方式补全来自 Core 的 WORK_MODE_COMMANDS（ADR-0089 修订：对外显示 /ensemble；ADR-0125 移除 /cadenza、新增 /artifact）
       "/ensemble",
+      "/artifact",
     ]);
     expect(groups[0]?.items.find((item) => item.label === "/fugue")?.summary).toBe("多代理攻坚");
     expect(groups[0]?.items.find((item) => item.label === "/ensemble")?.summary).toBe("合奏协作");
+    expect(groups[0]?.items.find((item) => item.label === "/artifact")?.summary).toBe(
+      "Open Artifact",
+    );
     expect(groups[0]?.items.some((item) => item.label === "/cadenza")).toBe(false);
     expect(completeSlash("/cad")).toEqual([]);
     expect(parseSlash("/cadenza 做个看板")).toMatchObject({ kind: "unknown", name: "/cadenza" });

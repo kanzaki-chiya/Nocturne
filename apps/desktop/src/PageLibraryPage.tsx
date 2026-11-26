@@ -7,6 +7,7 @@ import type {
 } from "@nocturne/core/protocol";
 import type { RpcClient } from "@nocturne/rpc/client";
 
+import { formatArtifactTypeLabel } from "./ArtifactPane";
 import { Dropdown } from "./Dropdown";
 import { ICON_MD, ICON_SM, Icon } from "./ui";
 import "./pages.css";
@@ -154,7 +155,9 @@ export function PageLibraryPage({
         ? items
         : items.filter(
             (item) =>
-              item.title.toLowerCase().includes(q) || item.sessionTitle.toLowerCase().includes(q),
+              item.title.toLowerCase().includes(q) ||
+              item.sessionTitle.toLowerCase().includes(q) ||
+              (item.artifact?.type.toLowerCase().includes(q) ?? false),
           );
     const byRecent = [...filtered].sort((a, b) => {
       const diff = Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
@@ -202,13 +205,21 @@ export function PageLibraryPage({
         openContextMenu(event, item);
       }}
     >
-      <Icon name={pinned ? "pin" : "file"} size={ICON_MD} className="plib-icon" />
+      <Icon
+        name={pinned ? "pin" : item.kind === "artifact" ? "layout_right" : "file"}
+        size={ICON_MD}
+        className="plib-icon"
+      />
       <span className="plib-title">
         <span>{item.title}</span>
         {item.hasUnresolvedComments && <span className="plib-comment-dot" aria-hidden="true" />}
       </span>
       <span className="plib-session">{item.sessionTitle}</span>
-      <span className="plib-ver">v{item.version}</span>
+      <span className="plib-ver">
+        {item.kind === "artifact"
+          ? formatArtifactTypeLabel(item.artifact?.type ?? "artifact")
+          : `v${item.version}`}
+      </span>
       <span className="plib-time">{formatPageUpdatedAt(item.updatedAt)}</span>
     </button>
   );

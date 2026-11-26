@@ -14,6 +14,7 @@ import type {
   AgentBrowserStatus,
   AgentWatchMessage,
   AgentWatchSnapshot,
+  ArtifactViewMessage,
   BrowserMessage,
   DesktopHost,
   FileAppList,
@@ -85,6 +86,27 @@ export function createTauriHost(): DesktopHost {
       clearData: (which) => invoke<number>("browser_data_clear", { which }),
       setDownloads: (ask, dir) =>
         invoke<{ defaultDir: string | null }>("browser_downloads_set", { ask, dir }),
+    },
+    artifactViews: {
+      create(embedUrl, allowedOrigins, bounds, onMessage) {
+        const channel = new Channel<ArtifactViewMessage>();
+        channel.onmessage = onMessage;
+        return invoke<number>("artifact_view_create", {
+          embedUrl,
+          allowedOrigins,
+          bounds,
+          channel,
+        });
+      },
+      navigate: (id, embedUrl, allowedOrigins) =>
+        invoke("artifact_view_navigate", { id, embedUrl, allowedOrigins }),
+      setOrigins: (id, allowedOrigins) =>
+        invoke("artifact_view_set_origins", { id, allowedOrigins }),
+      layout: (id, bounds) => invoke("artifact_view_layout", { id, bounds }),
+      async capture(id) {
+        return new Uint8Array(await invoke<ArrayBuffer>("artifact_view_capture", { id }));
+      },
+      destroy: (id) => invoke("artifact_view_destroy", { id }),
     },
     agentBrowser: {
       watch(onMessage) {

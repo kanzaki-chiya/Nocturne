@@ -30,6 +30,7 @@ import type { DesktopHost } from "./host";
 import type { PrefsStore } from "./prefs";
 import { AgentBrowserPane } from "./AgentBrowserPane";
 import { AppPane } from "./AppPane";
+import { ArtifactPane, formatArtifactTypeLabel, type ArtifactPaneApi } from "./ArtifactPane";
 import { PagePane, type PagePaneCommentsController } from "./InlinePage";
 import type { PageSession } from "./page-bridge";
 import type { McpAppToolDelivery } from "./mcp-app-host";
@@ -45,7 +46,7 @@ import {
   useSaveFile,
 } from "./ImageViewer";
 import type { CodeViewer } from "./code-viewer";
-import type { AgentTabInfo, BrowserBounds, TerminalHost } from "./host";
+import type { AgentTabInfo, ArtifactViewHost, BrowserBounds, TerminalHost } from "./host";
 import { displayPath } from "./paths";
 import { formatShortcut, isMacOS } from "./platform";
 import {
@@ -205,6 +206,16 @@ export interface SidePanelProps {
   apps?: PanelApps | undefined;
   /** 会话页面面板标签的数据与版本切换回调（ADR-0109） */
   page?: PanelPages | undefined;
+  /** Open Artifact 受限隔离编辑器标签（ADR-0125） */
+  artifacts?: PanelArtifacts | undefined;
+}
+
+export interface PanelArtifacts {
+  host: ArtifactViewHost | undefined;
+  api: ArtifactPaneApi | undefined;
+  latestOrigins?: readonly string[] | undefined;
+  originsVersion?: number | undefined;
+  onMetaChange: (tabId: string, meta: { title?: string; artifactType?: string }) => void;
 }
 
 export interface PanelPages {
@@ -336,6 +347,13 @@ function tabTitle(
     const found = pages?.find((p) => p.page === tab.page);
     const name = found?.title ?? tab.page;
     return { name, title: name };
+  }
+  if (tab.kind === "artifact") {
+    return {
+      name: tab.title,
+      project: formatArtifactTypeLabel(tab.artifactType),
+      title: tab.title,
+    };
   }
   if (tab.kind === "app") {
     const name = resolveAppTitle?.(tab) ?? tab.title;
@@ -525,6 +543,8 @@ function TabBar(props: SidePanelProps) {
                 <BrowserTabIcon pool={props.browsers} tab={tab} globe={<Glyph kind="globe" />} />
               ) : tab.kind === "app" ? (
                 <AppTabIcon icon={appMeta?.icon ?? tab.icon} />
+              ) : tab.kind === "artifact" ? (
+                <Icon name="layout_right" size={ICON_SM} className="sp-glyph" />
               ) : (
                 <Glyph
                   kind={
@@ -1765,6 +1785,20 @@ export function SidePanel(props: SidePanelProps) {
                     comments={props.page?.commentsForPage?.(tab.page)}
                     onSelectVersion={(version) => {
                       props.page?.onSelectVersion(tab.id, version);
+                    }}
+                  />
+                ) : tab.kind === "artifact" ? (
+                  <ArtifactPane
+                    tab={tab}
+                    visible={!hidden && tab.id === activeId && current.has(tab.id)}
+                    moving={props.motion !== undefined}
+                    host={props.artifacts?.host}
+                    api={props.artifacts?.api}
+                    openExternal={props.openExternalUrl ?? (() => Promise.resolve())}
+                    latestOrigins={props.artifacts?.latestOrigins}
+                    originsVersion={props.artifacts?.originsVersion}
+                    onMetaChange={(meta) => {
+                      props.artifacts?.onMetaChange(tab.id, meta);
                     }}
                   />
                 ) : tab.diffText !== undefined ? (

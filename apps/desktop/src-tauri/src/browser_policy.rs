@@ -215,6 +215,90 @@ pub fn browser_data_store_id(user_data_override: Option<&Path>) -> [u8; 16] {
     }
 }
 
+/// Open Artifact 隔离编辑器子 webview 的持久数据目录（ADR-0125）：
+/// 与主界面、面板浏览器和 agent 浏览器分开。
+pub fn artifact_data_dir(app_local_data: &Path, user_data_override: Option<&Path>) -> PathBuf {
+    user_data_override
+        .unwrap_or(app_local_data)
+        .join("open-artifact")
+}
+
+/// macOS WKWebsiteDataStore 固定标识（Open Artifact 隔离编辑器，UUID v4；ADR-0125）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const ARTIFACT_DATA_STORE_ID: [u8; 16] = [
+    0x7a, 0x3d, 0x91, 0x4c, 0x2e, 0x8f, 0x4b, 0x10, 0x9c, 0x55, 0x13, 0xa8, 0x60, 0xd2, 0xe4, 0x03,
+];
+
+/// Open Artifact 隔离编辑器子 webview 标签：与 `main` 错开，绝不匹配任何 Tauri capability。
+pub fn artifact_label(id: u32) -> String {
+    format!("nct-artifact-{id}")
+}
+
+/// macOS Open Artifact 隔离编辑器 webview 的 WKWebsiteDataStore 标识。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn artifact_data_store_id(user_data_override: Option<&Path>) -> [u8; 16] {
+    match user_data_override {
+        Some(dir) => derive_data_store_id("nocturne:open-artifact", dir),
+        None => ARTIFACT_DATA_STORE_ID,
+    }
+}
+
+/// 解析精确的 HTTP(S) origin（scheme + lowercased host + effective port）。
+/// 拒绝非 http(s)、含通配符、缺 host、以及应用内部地址/devUrl。
+fn exact_http_origin(url: &Url, dev_url: Option<&Url>) -> Option<(String, String, u16)> {
+    let scheme = url.scheme().to_ascii_lowercase();
+    if scheme != "http" && scheme != "https" {
+        return None;
+    }
+    let host = url.host_str()?.to_ascii_lowercase();
+    if host.is_empty() || host.contains('*') || APP_HOSTS.contains(&host.as_str()) {
+        return None;
+    }
+    if dev_url.is_some_and(|dev| same_origin(url, dev)) {
+        return None;
+    }
+    let port = url.port_or_known_default()?;
+    Some((scheme, host, port))
+}
+
+/// Open Artifact 受限视图的导航校验（ADR-0125）：
+/// - `about:blank` 仅作初始空白页放行；
+/// - 其余顶层导航只允许进入 daemon 明确声明的精确来源（`allowed_origins`），
+///   绝不放行 `tauri:`/`ipc:`/`asset:`/`nct-sandbox:`/`file:`/外部站点或 devUrl。
+pub fn allow_artifact_navigation(
+    url: &Url,
+    allowed_origins: &[String],
+    dev_url: Option<&Url>,
+) -> Result<(), Blocked> {
+    if url.as_str() == "about:blank" {
+        return Ok(());
+    }
+    let scheme = url.scheme().to_ascii_lowercase();
+    if INTERNAL_SCHEMES.contains(&scheme.as_str()) {
+        return Err(Blocked::Internal);
+    }
+    if scheme == "file" {
+        return Err(Blocked::File);
+    }
+    if scheme != "http" && scheme != "https" {
+        if BROWSER_SCHEMES.contains(&scheme.as_str()) {
+            return Err(Blocked::Unsupported { scheme });
+        }
+        return Err(Blocked::External { scheme });
+    }
+    let Some(target_origin) = exact_http_origin(url, dev_url) else {
+        return Err(Blocked::Internal);
+    };
+    for raw in allowed_origins {
+        if let Ok(parsed) = Url::parse(raw.trim()) {
+            if exact_http_origin(&parsed, dev_url) == Some(target_origin.clone()) {
+                return Ok(());
+            }
+        }
+    }
+    Err(Blocked::External { scheme })
+}
+
 /// macOS agent 浏览 webview 的 WKWebsiteDataStore 标识（预留供二期使用）。
 #[allow(dead_code)]
 pub fn agent_data_store_id(user_data_override: Option<&Path>) -> [u8; 16] {

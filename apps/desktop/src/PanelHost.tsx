@@ -86,6 +86,7 @@ import {
   subagentTabFor,
   vanishedSessions,
   type AppTab,
+  type ArtifactTab,
   type BrowserTab,
   type FileTab,
   type PageTab,
@@ -184,6 +185,26 @@ export interface SidePanelController {
   onLivePanelPage: (targetSessionId: string, page: string) => void;
   /** 面板当前正在显示的页面与版本号；面板关闭或非页面标签时为 undefined */
   activePage: { page: string; version: number } | undefined;
+  /** 打开或切换到指定会话（缺省当前会话）的 Open Artifact 隔离编辑器标签（ADR-0125） */
+  openArtifact: (
+    url: string,
+    meta?: {
+      title?: string | undefined;
+      type?: string | undefined;
+      sessionId?: string | undefined;
+    },
+  ) => void;
+  /** 面板当前正在显示的 Open Artifact 稳定 URL；未打开或非作品标签时为 undefined */
+  activeArtifactUrl: string | undefined;
+  /** 关闭所有会话里对应 URL 的 Open Artifact 标签（如编辑器主动请求关闭） */
+  closeArtifactByUrl: (url: string) => void;
+  /** 更新已打开 Open Artifact 标签的标题/类型 */
+  updateArtifactMetaByUrl: (
+    url: string,
+    meta: { title?: string | undefined; artifactType?: string | undefined },
+  ) => void;
+  /** daemon 重连或更新 origins 时同步所有存活的隔离视图来源白名单 */
+  updateArtifactOrigins: (origins: string[]) => void;
   /** 实时收到带 ui 的 tool.completed 时打开/切换对应会话的插件标签并投递参数与结果 */
   onToolCompletedUi: (
     targetSessionId: string,
@@ -1354,6 +1375,170 @@ export function useSidePanel({
         : latest.version;
     return { page: found.page, version };
   }, [shown, active, current]);
+
+  // ── Open Artifact 隔离编辑器标签（ADR-0125） ──
+  const [artifactOriginsState, setArtifactOriginsState] = useState<{
+    origins: string[];
+    version: number;
+  }>({ origins: [], version: 0 });
+
+  const updateArtifactOrigins = useCallback((origins: string[]) => {
+    setArtifactOriginsState((prev) => ({ origins, version: prev.version + 1 }));
+  }, []);
+
+  const openArtifact = useCallback(
+    (
+      url: string,
+      meta?: {
+        title?: string | undefined;
+        type?: string | undefined;
+        sessionId?: string | undefined;
+      },
+    ) => {
+      const target = meta?.sessionId ?? sessionId;
+      if (target === null) return;
+      const applyTo = (panel: SessionPanel): SessionPanel => {
+        const found = panel.tabs.find(
+          (tab): tab is ArtifactTab => tab.kind === "artifact" && tab.url === url,
+        );
+        if (found !== undefined) {
+          return {
+            ...panel,
+            open: true,
+            activeId: found.id,
+            tabs: panel.tabs.map((tab) =>
+              tab.id === found.id
+                ? {
+                    ...found,
+                    ...(meta?.title !== undefined && meta.title !== ""
+                      ? { title: meta.title }
+                      : {}),
+                    ...(meta?.type !== undefined && meta.type !== ""
+                      ? { artifactType: meta.type }
+                      : {}),
+                  }
+                : tab,
+            ),
+          };
+        }
+        return withTab(panel, {
+          id: newTabId(),
+          kind: "artifact",
+          url,
+          title: meta?.title !== undefined && meta.title !== "" ? meta.title : url,
+          artifactType: meta?.type !== undefined && meta.type !== "" ? meta.type : "artifact",
+        });
+      };
+      if (target === sessionId) {
+        hideBrowserThen(() => {
+          update(applyTo);
+        });
+      } else {
+        setPanels((map) => new Map(map).set(target, applyTo(panelFor(target, map))));
+      }
+    },
+    [sessionId, hideBrowserThen, update, panelFor],
+  );
+
+  const closeArtifactByUrl = useCallback((url: string) => {
+    setPanels((map) => {
+      let changed = false;
+      const next = new Map(map);
+      for (const [sid, panel] of map) {
+        const target = panel.tabs.find(
+          (tab): tab is ArtifactTab => tab.kind === "artifact" && tab.url === url,
+        );
+        if (target === undefined) continue;
+        changed = true;
+        const remaining = panel.tabs.filter((tab) => tab.id !== target.id);
+        if (remaining.length === 0) {
+          const freshId = newTabId();
+          next.set(sid, {
+            ...panel,
+            open: false,
+            tabs: [{ id: freshId, kind: "new" }],
+            activeId: freshId,
+          });
+        } else {
+          const activeId =
+            panel.activeId === target.id
+              ? (nextActiveAfterClose(panel.tabs, target.id, panel.activeId) ??
+                remaining[0]?.id ??
+                panel.activeId)
+              : panel.activeId;
+          next.set(sid, { ...panel, tabs: remaining, activeId });
+        }
+      }
+      return changed ? next : map;
+    });
+  }, []);
+
+  const updateArtifactMetaByUrl = useCallback(
+    (url: string, meta: { title?: string | undefined; artifactType?: string | undefined }) => {
+      setPanels((map) => {
+        let changed = false;
+        const next = new Map(map);
+        for (const [sid, panel] of map) {
+          if (!panel.tabs.some((tab) => tab.kind === "artifact" && tab.url === url)) continue;
+          changed = true;
+          next.set(sid, {
+            ...panel,
+            tabs: panel.tabs.map((tab) =>
+              tab.kind === "artifact" && tab.url === url
+                ? {
+                    ...tab,
+                    ...(meta.title !== undefined && meta.title !== "" ? { title: meta.title } : {}),
+                    ...(meta.artifactType !== undefined && meta.artifactType !== ""
+                      ? { artifactType: meta.artifactType }
+                      : {}),
+                  }
+                : tab,
+            ),
+          });
+        }
+        return changed ? next : map;
+      });
+    },
+    [],
+  );
+
+  const updateArtifactTabMeta = useCallback(
+    (tabId: string, meta: { title?: string | undefined; artifactType?: string | undefined }) => {
+      update((panel) => ({
+        ...panel,
+        tabs: panel.tabs.map((tab) =>
+          tab.id === tabId && tab.kind === "artifact"
+            ? {
+                ...tab,
+                ...(meta.title !== undefined && meta.title !== "" ? { title: meta.title } : {}),
+                ...(meta.artifactType !== undefined && meta.artifactType !== ""
+                  ? { artifactType: meta.artifactType }
+                  : {}),
+              }
+            : tab,
+        ),
+      }));
+    },
+    [update],
+  );
+
+  const activeArtifactUrl = useMemo(() => {
+    if (!shown) return undefined;
+    const activeTab = current.tabs.find((tab) => tab.id === current.activeId);
+    return activeTab?.kind === "artifact" ? activeTab.url : undefined;
+  }, [shown, current]);
+
+  const artifactApi = useMemo(() => {
+    if (client === undefined) return undefined;
+    return {
+      openView: (url: string, theme: { scheme: "light" | "dark"; accent?: string | undefined }) =>
+        client.runtime.openArtifactView({ url, theme }),
+      closeView: (view: string) => client.runtime.closeOpenArtifactView({ view }),
+      setTheme: (theme: { scheme: "light" | "dark"; accent?: string | undefined }) =>
+        client.runtime.setOpenArtifactTheme({ theme }),
+      resolveLocalUrl: (url: string) => client.runtime.resolveLocalArtifactUrl({ url }),
+    };
+  }, [client]);
   const openEnsembleMember = useCallback(
     (member: { name: string; childSessionId: string }, targetSessionId?: string) => {
       const target = targetSessionId ?? sessionId;
@@ -2161,11 +2346,18 @@ export function useSidePanel({
               pages: active.view.pages,
               session: active.session,
               onSelectVersion: selectPageVersion,
-                    commentsForPage: (pageId: string) => ({
-                      onResolve: (comment) => active.session.resolvePageComment(pageId, comment),
-                    }),
-                  }
+              commentsForPage: (pageId: string) => ({
+                onResolve: (comment) => active.session.resolvePageComment(pageId, comment),
+              }),
+            }
       }
+      artifacts={{
+        host: host.artifactViews,
+        api: artifactApi,
+        latestOrigins: artifactOriginsState.origins,
+        originsVersion: artifactOriginsState.version,
+        onMetaChange: updateArtifactTabMeta,
+      }}
     />
   );
 
@@ -2278,6 +2470,11 @@ export function useSidePanel({
     openPage,
     onLivePanelPage,
     activePage,
+    openArtifact,
+    activeArtifactUrl,
+    closeArtifactByUrl,
+    updateArtifactMetaByUrl,
+    updateArtifactOrigins,
     onToolCompletedUi,
     subagentLinks,
     bodyClass: maximized ? " panel-maximized" : docked ? " panel-docked" : "",

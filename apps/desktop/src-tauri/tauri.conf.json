@@ -43,7 +43,8 @@
       "resources/node/node.exe": "node/node.exe",
       "resources/node/LICENSE": "node/LICENSE",
       "resources/computer/": "computer/",
-      "resources/plugins/": "plugins/"
+      "resources/plugins/": "plugins/",
+      "resources/open-artifact-runtime/": "open-artifact-runtime/"
     },
     "windows": {
       "nsis": {
