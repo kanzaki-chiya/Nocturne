@@ -1515,9 +1515,7 @@ describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () =
       }
       if (user.includes("remember")) {
         return {
-          toolCalls: [
-            { id: "call_read_a", name: "read", arguments: { path: "note.txt" } },
-          ],
+          toolCalls: [{ id: "call_read_a", name: "read", arguments: { path: "note.txt" } }],
         };
       }
       return { textParts: ["a-turn-done"] };
@@ -1527,9 +1525,11 @@ describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () =
 
     await childA.request("initialize", { protocolVersion: 1 });
     expect(
-      (await childA.request<{ agentCapabilities: { loadSession: boolean } }>("initialize", {
-        protocolVersion: 1,
-      })).agentCapabilities.loadSession,
+      (
+        await childA.request<{ agentCapabilities: { loadSession: boolean } }>("initialize", {
+          protocolVersion: 1,
+        })
+      ).agentCapabilities.loadSession,
     ).toBe(true);
 
     const created = await childA.request<{ sessionId: string; configOptions?: unknown }>(
@@ -1548,7 +1548,8 @@ describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () =
     // 确认工具实际执行过（read 不产生权限请求——read 在默认预设下是只读 allow? 但
     // 至少应观察到 tool_call 更新帧）
     const toolFramesA = childA.updates.filter(
-      (u) => u.update.sessionUpdate === "tool_call" || u.update.sessionUpdate === "tool_call_update",
+      (u) =>
+        u.update.sessionUpdate === "tool_call" || u.update.sessionUpdate === "tool_call_update",
     );
     expect(toolFramesA.length).toBeGreaterThan(0);
 

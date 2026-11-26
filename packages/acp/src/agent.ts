@@ -1559,9 +1559,10 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       const name = started?.name ?? ev.payload.name;
       const input = started?.input;
       const status = mapToolCompletedStatus(ev.payload.status);
-      const text = ev.payload.modelContent.length > 0
-        ? ev.payload.modelContent
-        : (ev.payload.error?.message ?? "");
+      const text =
+        ev.payload.modelContent.length > 0
+          ? ev.payload.modelContent
+          : (ev.payload.error?.message ?? "");
       const content: ToolCallContent[] | undefined =
         text.length > 0 ? [{ type: "content", content: { type: "text", text } }] : undefined;
       entry.enqueueUpdate({
@@ -1583,7 +1584,8 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         case "message.user": {
           const p = ev.payload;
           // 后台子代理结果、合奏/组曲投递、运行时工作模式消息不是用户对话——跳过投递类
-          if (p.subagent !== undefined || p.ensemble !== undefined || p.suiteReport !== undefined) break;
+          if (p.subagent !== undefined || p.ensemble !== undefined || p.suiteReport !== undefined)
+            break;
           if (p.ensembleQuietReminder === true) break;
           const text = userEntryText({
             content: p.content,
@@ -1611,7 +1613,8 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
           for (const block of p.content) {
             if (block.text.length === 0) continue;
             entry.enqueueUpdate({
-              sessionUpdate: block.type === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk",
+              sessionUpdate:
+                block.type === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk",
               messageId: p.messageId,
               content: { type: "text", text: block.text },
             });
@@ -1627,7 +1630,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
           break;
         }
         case "tool.completed": {
-          flushTool(ev.payload.callId, ev as RuntimeEvent & { type: "tool.completed" });
+          flushTool(ev.payload.callId, ev);
           pendingTools.delete(ev.payload.callId);
           break;
         }

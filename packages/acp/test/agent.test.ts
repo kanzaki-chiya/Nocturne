@@ -1272,18 +1272,24 @@ describe("session/load 跨进程恢复（ADR-0127 第二阶段）", () => {
     const res = await h.conn.agent.request(methods.agent.initialize, {
       protocolVersion: PROTOCOL_VERSION,
     });
-    expect((res as { agentCapabilities: { loadSession: boolean } }).agentCapabilities.loadSession).toBe(true);
+    expect(
+      (res as { agentCapabilities: { loadSession: boolean } }).agentCapabilities.loadSession,
+    ).toBe(true);
   });
 
   it("session/new 创建的会话带 ACP 归属标记（session.created.client.name === acp）", async () => {
     const h = await startHarness();
     const sessionId = await initAndCreate(h, workspaceA);
-    const entry = (h.runtime as unknown as { sessionsDir?: string });
+    const entry = h.runtime as unknown as { sessionsDir?: string };
     void entry;
     // 直接读日志首行验证归属事件
     const sessionsDir = path.join(tempRoot, "sessions");
-    const firstLine = (await fs.readFile(path.join(sessionsDir, `${sessionId}.jsonl`), "utf8")).split("\n")[0] ?? "";
-    const created = JSON.parse(firstLine) as { payload: { client?: { kind: string; name: string } } };
+    const firstLine =
+      (await fs.readFile(path.join(sessionsDir, `${sessionId}.jsonl`), "utf8")).split("\n")[0] ??
+      "";
+    const created = JSON.parse(firstLine) as {
+      payload: { client?: { kind: string; name: string } };
+    };
     expect(created.payload.client).toMatchObject({ kind: "agent", name: "acp" });
   });
 
@@ -1349,7 +1355,11 @@ describe("session/load 跨进程恢复（ADR-0127 第二阶段）", () => {
       interactive: true,
       sessionsDir: path.join(tempRoot, "sessions"),
     });
-    const foreign = await rt.createSession({ model: "fake/fake-1", cwd: workspaceA, workspaceRoot: workspaceA });
+    const foreign = await rt.createSession({
+      model: "fake/fake-1",
+      cwd: workspaceA,
+      workspaceRoot: workspaceA,
+    });
     const foreignId = foreign.id;
     await foreign.close();
 
@@ -1399,8 +1409,16 @@ describe("session/load 跨进程恢复（ADR-0127 第二阶段）", () => {
 
     // 同帧发出两个 load（JSON-RPC 允许并发请求）
     const results = await Promise.allSettled([
-      h.conn.agent.request(methods.agent.session.load, { sessionId, cwd: workspaceA, mcpServers: [] }),
-      h.conn.agent.request(methods.agent.session.load, { sessionId, cwd: workspaceA, mcpServers: [] }),
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId,
+        cwd: workspaceA,
+        mcpServers: [],
+      }),
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId,
+        cwd: workspaceA,
+        mcpServers: [],
+      }),
     ]);
     const ok = results.filter((r) => r.status === "fulfilled").length;
     expect(ok).toBeLessThanOrEqual(1);
@@ -1420,7 +1438,10 @@ describe("session/load 跨进程恢复（ADR-0127 第二阶段）", () => {
           { type: "tool_call", toolCallId: "tc-1", name: "read", input: { path: "a.txt" } },
           { type: "finish", reason: "stop" },
         ],
-        [{ type: "text_delta", text: "file content noted" }, { type: "finish", reason: "stop" }],
+        [
+          { type: "text_delta", text: "file content noted" },
+          { type: "finish", reason: "stop" },
+        ],
       ],
     });
     const sessionId = await initAndCreate(h1, workspaceA, "remember DELTA-9");
@@ -1428,7 +1449,8 @@ describe("session/load 跨进程恢复（ADR-0127 第二阶段）", () => {
     await vi.waitFor(
       () => {
         const done = h1.updates.filter(
-          (u) => u.update.sessionUpdate === "tool_call_update" || u.update.sessionUpdate === "tool_call",
+          (u) =>
+            u.update.sessionUpdate === "tool_call_update" || u.update.sessionUpdate === "tool_call",
         );
         if (done.length === 0) throw new Error("tool updates not yet arrived");
       },
@@ -1462,7 +1484,8 @@ describe("session/load 跨进程恢复（ADR-0127 第二阶段）", () => {
 
     // 用户消息恰一条（"remember DELTA-9"）
     expect(userChunks.length).toBe(1);
-    const userText = ((userChunks[0]?.update ?? {}) as { content?: { text: string } }).content?.text ?? "";
+    const userText =
+      ((userChunks[0]?.update ?? {}) as { content?: { text: string } }).content?.text ?? "";
     expect(userText).toContain("remember DELTA-9");
 
     // 助手消息含决定文本
@@ -1485,7 +1508,10 @@ describe("session/load 跨进程恢复（ADR-0127 第二阶段）", () => {
     const marker = "ZEBRA-UNIQUE-77";
     const h1 = await startHarness({
       scripts: [
-        [{ type: "text_delta", text: `the code is ${marker}` }, { type: "finish", reason: "stop" }],
+        [
+          { type: "text_delta", text: `the code is ${marker}` },
+          { type: "finish", reason: "stop" },
+        ],
       ],
     });
     const sessionId = await initAndCreate(h1, workspaceA, `remember the code`);
