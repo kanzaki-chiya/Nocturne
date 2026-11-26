@@ -512,6 +512,11 @@
   min-width: var(--w-menu);
 }
 
+.menu.file-ref-submenu {
+  width: auto;
+  min-width: var(--w-menu);
+}
+
 .menu .mcp-dot {
   width: 6px;
   height: 6px;

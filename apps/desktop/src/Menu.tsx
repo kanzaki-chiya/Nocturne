@@ -113,11 +113,17 @@ export function Menu({
         rightX + width <= window.innerWidth - MENU_MARGIN
           ? rightX
           : Math.max(MENU_MARGIN, (bounds?.left ?? 0) - width - 8);
-      const bottomOffset = Math.max(MENU_MARGIN, window.innerHeight - (bounds?.bottom ?? 0));
+      const maxH = Math.max(96, window.innerHeight - MENU_MARGIN * 2);
+      const desiredTop = (bounds?.top ?? MENU_MARGIN) - 6;
+      const effectiveHeight = Math.min(height, maxH);
+      const top = Math.max(
+        MENU_MARGIN,
+        Math.min(desiredTop, window.innerHeight - effectiveHeight - MENU_MARGIN),
+      );
       setStyle({
         left: `${left}px`,
-        bottom: `${bottomOffset}px`,
-        maxHeight: `${Math.max(96, (bounds?.bottom ?? window.innerHeight) - MENU_MARGIN)}px`,
+        top: `${top}px`,
+        ...(height > maxH ? { maxHeight: `${maxH}px` } : {}),
         visibility: "visible",
       });
     } else {
@@ -471,15 +477,26 @@ export interface MenuSubmenuProps {
   icon?: ReactNode;
   right?: ReactNode;
   className?: string;
+  /** 异步内容就绪后再挂载子菜单，避免空菜单闪烁并确保首项聚焦 */
+  ready?: boolean;
   children: ReactNode;
 }
 
 /** 二级子菜单触发项：悬停与 → 展开，← 与 Esc 退回触发项，移出延迟收起避免斜向移动闪退。 */
-export function MenuSubmenu({ label, icon, right, className, children }: MenuSubmenuProps) {
+export function MenuSubmenu({
+  label,
+  icon,
+  right,
+  className,
+  ready = true,
+  children,
+}: MenuSubmenuProps) {
   const id = useId();
   const coord = useContext(SubmenuCoordContext);
   const [localOpen, setLocalOpen] = useState(false);
   const open = coord !== null ? coord.activeId === id : localOpen;
+  const visible = open && ready;
+  const entryRef = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const cancelClose = () => {
@@ -504,6 +521,7 @@ export function MenuSubmenu({ label, icon, right, className, children }: MenuSub
   };
   return (
     <div
+      ref={entryRef}
       className="menu-submenu-entry"
       onPointerEnter={cancelClose}
       onPointerLeave={() => {
@@ -513,11 +531,23 @@ export function MenuSubmenu({ label, icon, right, className, children }: MenuSub
         }, 220);
       }}
       onKeyDown={(event) => {
-        if (event.key === "ArrowRight" && event.target === trigger.current) {
+        if (event.target !== trigger.current) return;
+        if (event.key === "ArrowRight") {
           event.preventDefault();
           event.stopPropagation();
           cancelClose();
-          setOpenState(true);
+          if (visible) {
+            entryRef.current
+              ?.querySelector<HTMLElement>('[role="menu"]')
+              ?.querySelector<HTMLButtonElement>(ITEM_SELECTOR)
+              ?.focus();
+          } else {
+            setOpenState(true);
+          }
+          return;
+        }
+        if ((event.key === "ArrowUp" || event.key === "ArrowDown") && open) {
+          close();
         }
       }}
     >
@@ -528,7 +558,7 @@ export function MenuSubmenu({ label, icon, right, className, children }: MenuSub
         right={right}
         active={open}
         aria-haspopup="menu"
-        aria-expanded={open}
+        aria-expanded={visible}
         onHover={() => {
           cancelClose();
           if (!open) {
@@ -541,7 +571,7 @@ export function MenuSubmenu({ label, icon, right, className, children }: MenuSub
           setOpenState(!open);
         }}
       />
-      {open && (
+      {visible && (
         <Menu
           anchor={trigger.current}
           placement="submenu"

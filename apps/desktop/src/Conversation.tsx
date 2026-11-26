@@ -158,6 +158,8 @@ import type { AttachmentImageSource } from "./attachment-images";
 import { fileIconText, formatBytes } from "./web/phone-images";
 import { isAllowedExternalUrl } from "./external-url";
 import { fileRefTitle, userText } from "./file-refs";
+import { closeOtherFileRefMenus, FileRefMenu, registerFileRefMenuCloser } from "./FileRefMenu";
+import type { FileAppList } from "./host";
 import { InputLabel } from "./InputLabel";
 import { skillCommandLength, skillLabel, workModeLabel } from "./input-labels";
 import { grantKind } from "./GrantsPage";
@@ -409,6 +411,12 @@ export interface FileLinkHooks {
   previewsHtml?: (absolutePath: string) => boolean;
   /** 「查看源码」：在面板的文件标签里打开 */
   viewSource?: (absolutePath: string, line?: number) => Promise<void>;
+  /** Windows 会话文件引用右键菜单「打开方式 ›」（ADR-0124）：枚举系统推荐应用 */
+  listFileApps?: (absolutePath: string) => Promise<FileAppList>;
+  /** Windows 会话文件引用右键菜单「打开方式 ›」：按应用 ID 打开（编辑器带行号） */
+  openFileWithApp?: (absolutePath: string, id: string, line?: number) => Promise<void>;
+  /** Windows 原生“打开方式”对话框（SHOpenWithDialog + OAIF_EXEC）；取消正常返回 */
+  openFileWithDialog?: (absolutePath: string) => Promise<void>;
 }
 
 /**
@@ -947,6 +955,10 @@ function CodeRef({ text }: { text: string }) {
   const context = useContext(FileLinksContext);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const closeMenu = useCallback(() => {
+    setAnchor(null);
+  }, []);
+  useEffect(() => registerFileRefMenuCloser(closeMenu), [closeMenu]);
   if (context === null) return <code>{text}</code>;
   const hit = context.lookup(text);
   if (hit === undefined) return <code>{text}</code>;
@@ -960,6 +972,11 @@ function CodeRef({ text }: { text: string }) {
       setError(e instanceof Error ? e.message : String(e));
     });
   };
+  const openMenu = (target: HTMLElement) => {
+    closeOtherFileRefMenus(closeMenu);
+    setError(null);
+    setAnchor(target);
+  };
   const openDefault = () =>
     hit.isDirectory
       ? hooks.openFolder(hit.absolutePath)
@@ -970,7 +987,7 @@ function CodeRef({ text }: { text: string }) {
     !hit.isDirectory && viewSource !== undefined && hooks.previewsHtml?.(hit.absolutePath) === true;
   const activate = (target: HTMLElement) => {
     if (canOpen) run(openDefault);
-    else setAnchor(target);
+    else openMenu(target);
   };
   return (
     <>
@@ -990,21 +1007,25 @@ function CodeRef({ text }: { text: string }) {
         }}
         onContextMenu={(event) => {
           event.preventDefault();
-          setError(null);
-          setAnchor(event.currentTarget);
+          openMenu(event.currentTarget);
         }}
       >
         <FileGlyph directory={hit.isDirectory} />
         <span className="file-ref-text">{text}</span>
       </span>
-      {anchor !== null && (
-        <Menu
+      {anchor !== null &&
+        (!isMacOS() ? (
+          <FileRefMenu
           anchor={anchor}
           label={text}
-          onClose={() => {
-            setAnchor(null);
-          }}
-        >
+            hit={hit}
+            canOpen={canOpen}
+            hooks={hooks}
+            onRun={run}
+            onClose={closeMenu}
+          />
+        ) : (
+          <Menu anchor={anchor} label={text} onClose={closeMenu}>
           {canOpen && (
             <>
               <MenuItem
@@ -1026,7 +1047,7 @@ function CodeRef({ text }: { text: string }) {
           )}
           <MenuItem
             icon={<MenuGlyph kind="folder" />}
-            label={isMacOS() ? "访达" : "资源管理器"}
+              label="访达"
             onSelect={() => {
               run(() => hooks.reveal(hit.absolutePath));
             }}
@@ -1067,7 +1088,7 @@ function CodeRef({ text }: { text: string }) {
             />
           )}
         </Menu>
-      )}
+        ))}
       {error !== null && (
         <span className="file-ref-error" role="alert">
           {error}

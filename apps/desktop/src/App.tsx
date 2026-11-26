@@ -67,6 +67,7 @@ import {
   type SubagentLinks,
 } from "./Conversation";
 import { ImageViewerProvider } from "./ImageViewer";
+import { createFileLinkHooks } from "./FileRefMenu";
 import {
   activeConversationCount,
   Conversations,
@@ -138,7 +139,6 @@ import {
   createPrefsStore,
   FONT_SIZE_DEFAULT,
   migrateLegacyProjectOrder,
-  outsideOpenable,
   type PrefsStore,
 } from "./prefs";
 import { useDraftControls, useSessionControls } from "./session-controls";
@@ -337,41 +337,17 @@ export function App({ host }: { host: DesktopHost }) {
    * 列出资源管理器与检测到的编辑器。prefsVersion 驱动设置变更后重算。
    */
   const panelRef = useRef<SidePanelController | null>(null);
-  const fileLinks: FileLinkHooks = useMemo(() => {
-    // 缺省 Nocturne 面板（ADR-0060）；面板之外的选择照旧
-    const opener = () => prefs.get().fileOpener ?? "panel";
-    return {
-      open: async (absolutePath, line, ref) => {
-        const kind = opener();
-        if (kind === "panel") {
-          panelRef.current?.openFile(absolutePath, line, ref);
-          return;
-        }
-        // 选中的编辑器没装（或探测失败）时退回系统默认程序
-        if (kind === "system" || !editors[kind]) {
-          await host.openPath(absolutePath);
-          return;
-        }
-        await host.openInEditor(kind, absolutePath, line);
-      },
-      outsideOpenable: () => outsideOpenable(opener(), editors),
-      editors: () => editors,
-      openInEditor: (editor, absolutePath, line) => host.openInEditor(editor, absolutePath, line),
-      // 目录交给系统（资源管理器打开）；open_with_default 对目录不拦截
-      openFolder: (absolutePath) => host.openPath(absolutePath),
-      copy: async (text) => {
-        await navigator.clipboard.writeText(text);
-      },
-      reveal: (absolutePath) => host.revealItem(absolutePath),
-      // 工作区内的 HTML 左键进面板浏览器；「查看源码」照旧进文件标签
-      previewsHtml: (absolutePath) =>
-        opener() === "panel" && panelRef.current?.previewsHtml(absolutePath) === true,
-      viewSource: async (absolutePath, line) => {
-        panelRef.current?.viewSource(absolutePath, line);
-        return Promise.resolve();
-      },
-    };
-  }, [host, prefs, prefsVersion, editors]);
+  const fileLinks: FileLinkHooks = useMemo(
+    () =>
+      createFileLinkHooks({
+        host,
+        prefs,
+        editors,
+        getPanel: () => panelRef.current,
+      }),
+    // prefsVersion 驱动「默认打开方式」变更后重算
+    [host, prefs, prefsVersion, editors],
+  );
   /**
    * 模型回复里的链接（设置 › 浏览器 › 打开方式，ADR-0078）：选了 Nocturne 面板就在当前会话
    * 面板开浏览器标签；没有可用面板时退回系统浏览器，不提示。其他外链照旧用系统浏览器。
