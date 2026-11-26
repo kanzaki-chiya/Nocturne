@@ -1690,8 +1690,8 @@ describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () =
     // A 的连接里有 alpha 宿主工具可用（确认 A 配置确实生效，作为对照基线）；
     // 取最后一个带工具表的请求（排除无 tools 的标题生成等内部 purpose 调用）
     const alphaBaseline = [...providerRequests].reverse().find((r) => toolNamesOf(r).length > 0);
-    expect(alphaBaseline).toBeDefined();
-    expect(toolNamesOf(alphaBaseline!)).toContain("mcp__orch__dispatch");
+    if (alphaBaseline === undefined) throw new Error("alpha turn produced no tool-bearing request");
+    expect(toolNamesOf(alphaBaseline)).toContain("mcp__orch__dispatch");
 
     childA.closeStdin();
     expect((await childA.exit).code).toBe(0);
@@ -1713,7 +1713,11 @@ describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () =
       if (user.includes("dispatch-beta")) {
         return {
           toolCalls: [
-            { id: `call_beta_${randomUUID().slice(0, 6)}`, name: "mcp__betaorch__dispatch", arguments: { task: user } },
+            {
+              id: `call_beta_${randomUUID().slice(0, 6)}`,
+              name: "mcp__betaorch__dispatch",
+              arguments: { task: user },
+            },
           ],
         };
       }
@@ -1746,8 +1750,8 @@ describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () =
     ).toEqual({ stopReason: "end_turn" });
 
     const firstTurnReq = capturedB.find((r) => latestUserText(r).includes("dispatch-beta"));
-    expect(firstTurnReq).toBeDefined();
-    const tools = toolNamesOf(firstTurnReq!);
+    if (firstTurnReq === undefined) throw new Error("dispatch-beta turn request not captured");
+    const tools = toolNamesOf(firstTurnReq);
     expect(tools).toContain("mcp__betaorch__dispatch");
     expect(tools).not.toContain("mcp__orch__dispatch");
 
@@ -1756,7 +1760,10 @@ describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () =
     expect(childB.permissions[0]?.toolCall).toMatchObject({ name: "mcp__betaorch__dispatch" });
     // beta 实例的调用日志写入（带 beta 凭据），alpha 实例从未被执行
     expect(existsSync(callLogBeta)).toBe(true);
-    const betaCalls = readFileSync(callLogBeta, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const betaCalls = readFileSync(callLogBeta, "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
     expect(betaCalls[0]).toMatchObject({ tool: "dispatch", tag: "beta", hasToken: true });
     expect(existsSync(callLogAlpha)).toBe(false);
 
