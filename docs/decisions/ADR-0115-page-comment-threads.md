@@ -73,3 +73,7 @@ ADR-0113 让用户能在面板页面上留评论，但评论要等下一条消�
 - 不做重新打开已解决的评论。
 - 不做 `@` 提及和多人评论。
 - 不做手机端评论。
+
+## 修订（2026-11-26）：清退新评论、续回与 `reply_page_comment`（ADR-0125 第一批）
+
+按 [ADR-0125](ADR-0125-open-artifact-replaces-cadenza.md) 第一批，移除内置工具 `reply_page_comment`，桌面端移除面板评论模式开关与讨论串回复输入框，Core/RPC 拒绝新提交的 `pageComments`。历史面板上的已有讨论串（用户评论、模型历史回复、跨版本定位圆点）继续只读展示，并保留本地「解决」（`resolvePageComment` / `page.comment_resolved`）操作以便收起旧讨论。

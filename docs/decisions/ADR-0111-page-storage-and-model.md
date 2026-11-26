@@ -81,3 +81,7 @@ nocturne.ask(prompt: string, options?: { system?: string; maxTokens?: number }):
 ## 实现前要实测
 
 桌面调试包（WebView2）与经本机中继配对的手机网页（Edge，390 × 844）均实测通过全局对象不可覆盖或重定义、忽略伪造身份、阻断 `localStorage` 与 `fetch`、超过 1 MiB 后保留旧值及停止请求。WebView2 的页面 IPC 探测被拦。桌面重开后记账数据保留。对两次验收使用的会话通过宿主 RPC 验证分叉数据独立、回退全部版本后删除原数据文件。Core 集成测试也覆盖只回退部分版本时保留数据。安卓共用手机网页实现，未连接设备或模拟器。
+
+## 修订（2026-11-26）：ADR-0125 第一批说明
+
+按 [ADR-0125](ADR-0125-open-artifact-replaces-cadenza.md) 第一批，`render_html` 不再指导模型使用 `window.nocturne.storage` / `window.nocturne.ask` 构建面板交互工具，但底层宿主桥接、页面数据文件读取/保存与模型调用权限通道保持不变，确保历史页面与内嵌图表仍按原格式正常运行。

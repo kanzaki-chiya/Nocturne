@@ -173,3 +173,7 @@ Agent Loop 增加一个通用注入点 `continueTurn?(signal): Promise<PreparedI
 多代理攻坚的命令 `/boost`（内部名 `boost`）改名为 `/fugue`（内部名 `fugue`），菜单摘要仍为「多代理攻坚」，说明块改以 `Fugue mode` 开头，行为不变。改名缘于「赋格（fugue）」各声部独立进入、并行展开并最终编织成一体的意象，更贴合拆分子任务、后台子代理并行执行、整合回归的工作方式，也与 `/ensemble`、`/cadenza` 保持统一命名体系。
 
 不再保留 `/boost` 命令别名：输入 `/boost` 按普通未知命令处理，`SubmitInput.workMode: "boost"` 按未知执行方式拒绝。旧会话日志中落盘的 `message.user.workMode` 快照若为 `name: "boost"`，由 Core 协议层集中映射为 `fugue` 读取：`userWorkMode`、派生视图、`workModeCommandName` 与回退/重发均视作 `fugue`，客户端不各自特判；快照中的说明块正文原样沿用，不改写旧数据、不迁移文件。
+
+## 修订（2026-11-26）：清退华彩（ADR-0125 第一批）
+
+按 [ADR-0125](ADR-0125-open-artifact-replaces-cadenza.md) 第一批，`/cadenza`（华彩）已从桌面、手机网页、安卓、TUI、逐行 CLI 的命令菜单、帮助与新请求校验中移除；新提交 `workMode: "cadenza"` 被协议层/Core 拒绝。旧日志中已落盘的 `message.user.workMode.name === "cadenza"` 仍按原样解码、回放、显示与回退，不改写历史文件。

@@ -87,7 +87,7 @@ interface SessionView {
 }
 ```
 
-页面讨论串由 `message.user.pageComments`、成功的 `reply_page_comment` 和 `page.comment_resolved` 共同派生。`SessionPage.comments` 的原评论与回复均带 `seq` 和事件时间。已写入的评论在模型回复前为 `pending`，用户续回后再次进入 `pending`。待发列表的 `pageComments.items` 可投影为临时圆点和等待中的回复，回放只使用持久事件。详见 [ADR-0115](../decisions/ADR-0115-page-comment-threads.md)。
+历史面板页面讨论串由持久事件中的 `message.user.pageComments`、历史成功的 `reply_page_comment` 和 `page.comment_resolved` 共同派生。`SessionPage.comments` 的原评论与回复均带 `seq` 和事件时间。按 [ADR-0125](../decisions/ADR-0125-open-artifact-replaces-cadenza.md) 第一批，不再接受新的页面评论提交与模型回复；历史讨论串继续只读回放，并保留本地解决操作（`page.comment_resolved`）。历史设计见 [ADR-0115](../decisions/ADR-0115-page-comment-threads.md)。
 
 ### 持久条目（entries）
 

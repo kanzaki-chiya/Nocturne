@@ -113,13 +113,13 @@ ADR-0060 第 5 轮的[桌面浏览器契约](desktop-browser.md)不在本协议�
 
 解码后交给 Core，大小与格式校验仍在 Core（[ADR-0023](../decisions/ADR-0023-image-input.md)）。`data` 不是合法 base64 报 `invalid_params`，不进 Runtime。
 
-`submit` / `enqueueInput` 的 `pageComments.comments[]` 可传原评论 `{ path, text, x, y, note, screenshot? }` 或续回 `{ replyTo, note }`。Core 写入用户消息时分配 `id`。待发快照含去掉截图数据后的 `items`，用于显示排队中的讨论。详见 [ADR-0115](../decisions/ADR-0115-page-comment-threads.md)。
+`submit` / `enqueueInput` 不再接受 `pageComments`（按 [ADR-0125](../decisions/ADR-0125-open-artifact-replaces-cadenza.md) 第一批，传入时 RPC 报 `invalid_params`）；历史会话中的旧评论讨论串仍经会话状态与事件回放只读读取，并保留 `session.resolvePageComment` 本地标记解决。
 
 `submit` / `enqueueInput` 的 `quotes` 为可选 `{ text: string, seq?: number }[]`（[ADR-0116](../decisions/ADR-0116-quote-reply.md)）：`text` 非空（Core 去首尾空白），`seq` 可选正整数（来源消息持久事件序号）；允许正文为空提交，Core 在 `content` 最前面生成 `> ` 引用文本块，待发快照 `PendingInputItem.quotes` 与回退目标 `RewindTarget.quotes` 原样保留。
 
 `submit.delegate` 为 `{ agent: string, task: string }`，与 `skill` 互斥。RPC 保留任务原文，Core 校验 agent 已启用并生成明确的 `task.agent` 委派指令，将委派快照写入 `message.user`；它不绕过入口权限确认，也不是直接启动外部进程。见 [ADR-0049](../decisions/ADR-0049-external-agent-subagent.md)。
 
-`submit.workMode` / `enqueueInput.workMode` 为执行方式名（[ADR-0076](../decisions/ADR-0076-work-modes.md)、[ADR-0089](../decisions/ADR-0089-ensemble.md)，含 `"ensemble"`），与 `skill`、`delegate` 互斥。不是已知名字时 RPC 报 `invalid_params`；其余校验（正文非空、不能作为插话、子会话不可用、环境不支持后台子代理或已有活动合奏）在 Core，报 `invalid_command`。合奏存续期间，本机与远程客户端可通过 `session.open` 打开未移除成员的 `childSessionId`，直接对其调用 `session.submit`、`session.enqueueInput`、`session.respondPermission`、`session.respondQuestion` 与 `session.interrupt`（复用 Runtime 托管的同一常驻子会话实例；直接 `submit` 给成员的消息不上指挥（Maestro，`@maestro`）留言板，成员被移除或合奏结束后拒绝新的提交）。
+`submit.workMode` / `enqueueInput.workMode` 为当前可用执行方式名（`grill-me`、`goal`、`plan`、`fugue`、`ensemble`，见 [ADR-0076](../decisions/ADR-0076-work-modes.md)、[ADR-0089](../decisions/ADR-0089-ensemble.md)；`"cadenza"` 已按 [ADR-0125](../decisions/ADR-0125-open-artifact-replaces-cadenza.md) 第一批移除），与 `skill`、`delegate` 互斥。不是已知名字时 RPC 报 `invalid_params`；其余校验（正文非空、不能作为插话、子会话不可用、环境不支持后台子代理或已有活动合奏）在 Core，报 `invalid_command`。合奏存续期间，本机与远程客户端可通过 `session.open` 打开未移除成员的 `childSessionId`，直接对其调用 `session.submit`、`session.enqueueInput`、`session.respondPermission`、`session.respondQuestion` 与 `session.interrupt`（复用 Runtime 托管的同一常驻子会话实例；直接 `submit` 给成员的消息不上指挥（Maestro，`@maestro`）留言板，成员被移除或合奏结束后拒绝新的提交）。
 
 `readAttachment` 对应 `RuntimeSession.readAttachment(file)`，客户端 `RpcSession.readAttachment(file)` 将标准 base64 解码为 `Uint8Array`。Core 仅接受单个文件名，拒绝路径分隔符、`..`、绝对路径与 Windows 替代数据流；文件必须出现于本会话的持久 `message.user.attachments` / `files` 或 `tool.completed.attachments` / `files`（包括回退后仍保留的原始记录）。读取当前会话附件目录中的实际文件，每次校验字节数与 sha256，不通过父会话目录兜底，也不允许链接逃逸。分叉读取复制到新 id 的附件；子会话仅授权自身日志里的引用（[sessions.md](../architecture/sessions.md)）。
 

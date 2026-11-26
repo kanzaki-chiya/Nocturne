@@ -57,3 +57,7 @@
 ## 修订（2026-11-24）
 
 桌面面板增加即时发送、讨论串、跨版本圆点与解决操作。详见 [ADR-0115](ADR-0115-page-comment-threads.md)。
+
+## 修订（2026-11-26）：清退新建评论提交（ADR-0125 第一批）
+
+按 [ADR-0125](ADR-0125-open-artifact-replaces-cadenza.md) 第一批，清退华彩与面板页更新后，桌面端移除面板页新建评论入口，Core 与 RPC 不再接受新的 `pageComments` 提交；历史会话日志中的 `message.user.pageComments` 与旧页面圆点/讨论串继续只读解码、回放和查看。
