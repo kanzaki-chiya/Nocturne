@@ -116,6 +116,7 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 目标完成时独立抽查工具证据与清单覆盖见 [ADR-0119](decisions/ADR-0119-goal-check.md)。
 
 外部 agent 经 MCP 驱动 Nocturne 会话（`nctrn mcp` 桥、本机管道、配对与范围）见 [ADR-0074](decisions/ADR-0074-mcp-server-for-outside-agents.md)。
+`nctrn acp` 让外部宿主运行 Nocturne 的入口与分期能力见 [ADR-0120](decisions/ADR-0120-acp-agent-stdio.md) 与 [ADR-0127](decisions/ADR-0127-acp-capability-roadmap.md)。
 
 后台子代理（准入、启动即返回、结果作为待发输入交付、生命周期）见 [ADR-0073](decisions/ADR-0073-background-subagents.md)，一次性内置子代理权限确认向父会话转发（实时聚合、直接回应、树共享授权与等待暂停超时）见 [ADR-0091](decisions/ADR-0091-subagent-permission-forward.md)，主文档是 [subagent.md](architecture/subagent.md)。
 

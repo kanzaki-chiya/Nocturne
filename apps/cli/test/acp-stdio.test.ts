@@ -336,6 +336,8 @@ interface SpawnedAcp {
 function spawnAcpCli(options: {
   configureModel?: boolean;
   configExtra?: Record<string, unknown>;
+  /** 完整替换 scripted 服务商的 models 声明（默认仅 e2e-model 无推理档位） */
+  modelsConfig?: Record<string, unknown>;
   userMcpJson?: Record<string, unknown>;
   extraArgs?: string[];
   onPermission?: (
@@ -362,7 +364,7 @@ function spawnAcpCli(options: {
               type: "openai-compatible",
               baseURL: providerBaseUrl,
               apiKeyEnv: "NOCTURNE_ACP_TEST_KEY",
-              models: {
+              models: options.modelsConfig ?? {
                 "e2e-model": { contextWindow: 128_000, maxOutputTokens: 4096 },
               },
             },
@@ -1305,6 +1307,192 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
     expect(findLockFiles(path.join(child.nocturneHome, "sessions"))).toEqual([]);
     expect(existsSync(path.join(child.nocturneHome, "sessions", `${sessionId}.jsonl`))).toBe(true);
     expect(existsSync(ws)).toBe(true);
+    assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
+  }, 60_000);
+
+  it("session/new 报告真实 configOptions，set_config_option 切换模型与档位直达 provider 请求", async () => {
+    const ws = makeTempDir("nctrn-acp-confopt-");
+    const child = spawnAcpCli({
+      modelsConfig: {
+        "e2e-model": {
+          contextWindow: 128_000,
+          maxOutputTokens: 4096,
+          capabilities: { reasoning: "visible", reasoningEffort: ["low", "high"] },
+        },
+        "org/deep-model": {
+          contextWindow: 128_000,
+          maxOutputTokens: 4096,
+          capabilities: { reasoning: "visible", reasoningEffort: ["medium", "xhigh", "max"] },
+        },
+        "plain-model": { contextWindow: 128_000, maxOutputTokens: 4096 },
+      },
+    });
+
+    providerHandler = () => ({ textParts: ["cfg-reply"] });
+    await child.request("initialize", { protocolVersion: 1 });
+
+    // 1) 默认会话：configOptions 报告完整目录（含多段斜杠 ID）与 e2e-model 的档位
+    const s1 = await child.request<{
+      sessionId: string;
+      configOptions?: {
+        id: string;
+        category?: string;
+        currentValue?: string;
+        options?: { value: string; name: string }[];
+      }[];
+    }>("session/new", { cwd: ws, mcpServers: [] });
+    expect(s1.configOptions).toBeDefined();
+    const modelOpt = s1.configOptions?.find((o) => o.id === "model");
+    expect(modelOpt).toMatchObject({ category: "model", currentValue: "scripted/e2e-model" });
+    const modelValues = modelOpt?.options?.map((o) => o.value) ?? [];
+    expect(modelValues).toContain("scripted/e2e-model");
+    expect(modelValues).toContain("scripted/org/deep-model");
+    expect(modelValues).toContain("scripted/plain-model");
+    const effortOpt = s1.configOptions?.find((o) => o.id === "thought_level");
+    expect(effortOpt).toMatchObject({ category: "thought_level", currentValue: "off" });
+    expect(effortOpt?.options?.map((o) => o.value)).toEqual(["off", "low", "high"]);
+
+    // 2) 第一轮（默认模型、off 档）：请求体为 e2e-model 且不带思考参数
+    providerRequests.length = 0;
+    expect(
+      await child.request("session/prompt", {
+        sessionId: s1.sessionId,
+        prompt: [{ type: "text", text: "turn-default" }],
+      }),
+    ).toEqual({ stopReason: "end_turn" });
+    const defaultReq = providerRequests.find((r) => latestUserText(r).includes("turn-default"));
+    expect(defaultReq?.body.model).toBe("e2e-model");
+    expect(defaultReq?.body).not.toHaveProperty("reasoning_effort");
+    expect(defaultReq?.body).not.toHaveProperty("reasoning");
+
+    // 3) 切到含多段斜杠的 org/deep-model：回报完整配置，档位集合刷新
+    const switched = await child.request<{
+      configOptions: {
+        id: string;
+        currentValue?: string;
+        options?: { value: string }[];
+      }[];
+    }>("session/set_config_option", {
+      sessionId: s1.sessionId,
+      configId: "model",
+      value: "scripted/org/deep-model",
+    });
+    expect(switched.configOptions.find((o) => o.id === "model")?.currentValue).toBe(
+      "scripted/org/deep-model",
+    );
+    const deepEffort = switched.configOptions.find((o) => o.id === "thought_level");
+    expect(deepEffort?.options?.map((o) => o.value)).toEqual(["off", "medium", "xhigh", "max"]);
+
+    // 4) 切 xhigh 档位后下一轮：请求体为 org/deep-model + reasoning_effort=xhigh
+    await child.request("session/set_config_option", {
+      sessionId: s1.sessionId,
+      configId: "thought_level",
+      value: "xhigh",
+    });
+    providerRequests.length = 0;
+    expect(
+      await child.request("session/prompt", {
+        sessionId: s1.sessionId,
+        prompt: [{ type: "text", text: "turn-deep" }],
+      }),
+    ).toEqual({ stopReason: "end_turn" });
+    const deepReq = providerRequests.find((r) => latestUserText(r).includes("turn-deep"));
+    expect(deepReq?.body.model).toBe("org/deep-model");
+    expect(deepReq?.body.reasoning_effort).toBe("xhigh");
+
+    // 5) 非法值保留原配置：未声明模型、未知档位、未知配置项
+    await expect(
+      child.request("session/set_config_option", {
+        sessionId: s1.sessionId,
+        configId: "model",
+        value: "scripted/ghost-model",
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    await expect(
+      child.request("session/set_config_option", {
+        sessionId: s1.sessionId,
+        configId: "thought_level",
+        value: "high",
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    await expect(
+      child.request("session/set_config_option", {
+        sessionId: s1.sessionId,
+        configId: "unknown_option",
+        value: "whatever",
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    // 原配置未变：下一轮仍是 org/deep-model + xhigh
+    providerRequests.length = 0;
+    expect(
+      await child.request("session/prompt", {
+        sessionId: s1.sessionId,
+        prompt: [{ type: "text", text: "turn-unchanged" }],
+      }),
+    ).toEqual({ stopReason: "end_turn" });
+    const unchangedReq = providerRequests.find((r) => latestUserText(r).includes("turn-unchanged"));
+    expect(unchangedReq?.body.model).toBe("org/deep-model");
+    expect(unchangedReq?.body.reasoning_effort).toBe("xhigh");
+
+    // 6) 双会话隔离：第二个会话用默认模型；无档位模型不出 thought_level
+    const s2 = await child.request<{
+      sessionId: string;
+      configOptions?: { id: string; currentValue?: string }[];
+    }>("session/new", { cwd: ws, mcpServers: [] });
+    const s2Model = s2.configOptions?.find((o) => o.id === "model");
+    expect(s2Model?.currentValue).toBe("scripted/e2e-model");
+    await child.request("session/set_config_option", {
+      sessionId: s2.sessionId,
+      configId: "model",
+      value: "scripted/plain-model",
+    });
+    const s2After = await child.request<{
+      configOptions: { id: string; currentValue?: string }[];
+    }>("session/set_config_option", {
+      sessionId: s2.sessionId,
+      configId: "thought_level",
+      value: "off",
+    });
+    // plain-model 无声明档位 → 不出现 thought_level 选择器
+    expect(s2After.configOptions.some((o) => o.id === "thought_level")).toBe(false);
+
+    providerRequests.length = 0;
+    await child.request("session/prompt", {
+      sessionId: s2.sessionId,
+      prompt: [{ type: "text", text: "turn-plain" }],
+    });
+    const plainReq = providerRequests.find((r) => latestUserText(r).includes("turn-plain"));
+    expect(plainReq?.body.model).toBe("plain-model");
+    expect(plainReq?.body).not.toHaveProperty("reasoning_effort");
+
+    // s1 的选择不受影响：s1 再发一轮仍是 org/deep-model + xhigh
+    providerRequests.length = 0;
+    await child.request("session/prompt", {
+      sessionId: s1.sessionId,
+      prompt: [{ type: "text", text: "turn-s1-final" }],
+    });
+    const s1FinalReq = providerRequests.find((r) => latestUserText(r).includes("turn-s1-final"));
+    expect(s1FinalReq?.body.model).toBe("org/deep-model");
+    expect(s1FinalReq?.body.reasoning_effort).toBe("xhigh");
+
+    // 7) 旧宿主路径：第三个会话忽略 configOptions 直接 prompt，仍按默认模型运行
+    const s3 = await child.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [],
+    });
+    providerRequests.length = 0;
+    expect(
+      await child.request("session/prompt", {
+        sessionId: s3.sessionId,
+        prompt: [{ type: "text", text: "turn-legacy" }],
+      }),
+    ).toEqual({ stopReason: "end_turn" });
+    const legacyReq = providerRequests.find((r) => latestUserText(r).includes("turn-legacy"));
+    expect(legacyReq?.body.model).toBe("e2e-model");
+
+    child.closeStdin();
+    expect((await child.exit).code).toBe(0);
     assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
   }, 60_000);
 });

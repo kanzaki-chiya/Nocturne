@@ -17,6 +17,7 @@ import {
   type CreateSessionOptions,
   type FakeHandler,
   type FakeScript,
+  type ModelInfo,
   type ModelRef,
   type Platform,
   type Runtime,
@@ -108,6 +109,7 @@ async function startHarness(options?: {
   handler?: FakeHandler;
   scripts?: FakeScript[];
   model?: string | undefined;
+  models?: ModelInfo[] | undefined;
   noModel?: boolean;
   resolveModelError?: Error;
   resolveModel?: (workspaceRoot: string) => Promise<string | ModelRef | undefined>;
@@ -125,6 +127,7 @@ async function startHarness(options?: {
   const platform = options?.wrapPlatform ? options.wrapPlatform(basePlatform) : basePlatform;
   const provider = new FakeProvider({
     id: "fake",
+    ...(options?.models !== undefined ? { models: options.models } : {}),
     ...(options?.handler !== undefined
       ? { handler: options.handler }
       : { scripts: options?.scripts ?? [textScript("ok")] }),
@@ -874,5 +877,355 @@ describe("ACP Agent 协议与能力契约（ADR-0120 §1–3）", () => {
       await preClosed.serve(pair.agentStream);
       pair.closeClientInput();
     }
+  });
+});
+
+describe("session/new configOptions 与 session/set_config_option（ADR-0127 第一阶段）", () => {
+  function modelEntry(
+    model: string,
+    reasoningEffort?: ("minimal" | "low" | "medium" | "high" | "xhigh" | "max")[],
+    extra?: Partial<ModelInfo>,
+  ): ModelInfo {
+    return {
+      ref: { provider: "fake", model },
+      contextWindow: 128_000,
+      maxOutputTokens: 8_192,
+      capabilities: {
+        toolCalls: true,
+        parallelToolCalls: true,
+        reasoning: reasoningEffort !== undefined && reasoningEffort.length > 0 ? "visible" : "none",
+        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+        imageInput: false,
+        promptCache: false,
+        editTool: "edit",
+        historyPrune: true,
+      },
+      ...extra,
+    };
+  }
+
+  async function newSession(h: Awaited<ReturnType<typeof startHarness>>, cwd: string) {
+    return await h.conn.agent.request(methods.agent.session.new, { cwd, mcpServers: [] });
+  }
+
+  it("session/new 返回真实 configOptions：当前模型、完整 provider/model ID 与该模型实际档位", async () => {
+    const h = await startHarness({
+      model: "fake/fake-1",
+      models: [
+        modelEntry("fake-1", ["minimal", "low", "high"]),
+        modelEntry("org/deep-model", ["low", "medium", "high", "max"], {
+          displayName: "Deep Model",
+        }),
+        modelEntry("broken-model", undefined, {
+          unavailable: { reason: "协议不支持" },
+        }),
+      ],
+    });
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const res = await newSession(h, workspaceA);
+
+    expect(res.configOptions).toBeDefined();
+    const modelOpt = res.configOptions?.find((o: { id: string }) => o.id === "model");
+    expect(modelOpt).toMatchObject({
+      type: "select",
+      category: "model",
+      currentValue: "fake/fake-1",
+    });
+    const values = modelOpt.options.map((o: { value: string }) => o.value);
+    // 完整 provider/model ID，含多段斜杠保留；不可用模型不列出
+    expect(values).toContain("fake/fake-1");
+    expect(values).toContain("fake/org/deep-model");
+    expect(values).not.toContain("fake/broken-model");
+    const deep = modelOpt.options.find((o: { value: string }) => o.value === "fake/org/deep-model");
+    expect(deep.name).toBe("fake/Deep Model");
+
+    const effortOpt = res.configOptions?.find((o: { id: string }) => o.id === "thought_level");
+    expect(effortOpt).toMatchObject({
+      type: "select",
+      category: "thought_level",
+      currentValue: "off",
+    });
+    expect(effortOpt.options.map((o: { value: string }) => o.value)).toEqual([
+      "off",
+      "minimal",
+      "low",
+      "high",
+    ]);
+  });
+
+  it("无可调档位的模型不出 thought_level 配置项，但 model 选择器仍在", async () => {
+    const h = await startHarness({
+      model: "fake/fake-1",
+      models: [modelEntry("fake-1", [])],
+    });
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const res = await newSession(h, workspaceA);
+    expect(res.configOptions?.some((o: { id: string }) => o.id === "thought_level")).toBe(false);
+    expect(res.configOptions?.some((o: { id: string }) => o.id === "model")).toBe(true);
+  });
+
+  it("当前模型不在工作区目录（如经 --model 指定清单外）时追加一项保证 currentValue 命中", async () => {
+    const h = await startHarness({
+      model: "fake/outside-model",
+      models: [modelEntry("fake-1", ["low", "high"])],
+    });
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const res = await newSession(h, workspaceA);
+    const modelOpt = res.configOptions?.find((o: { id: string }) => o.id === "model");
+    expect(modelOpt.currentValue).toBe("fake/outside-model");
+    expect(modelOpt.options.map((o: { value: string }) => o.value)).toContain("fake/outside-model");
+  });
+
+  it("set_config_option 切换模型后刷新档位并回报完整配置；prompt 用新模型", async () => {
+    const h = await startHarness({
+      model: "fake/fake-1",
+      models: [
+        modelEntry("fake-1", ["minimal", "low"]),
+        modelEntry("fake-2", ["high", "xhigh", "max"]),
+      ],
+    });
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const { sessionId } = await newSession(h, workspaceA);
+
+    const res = await h.conn.agent.request(methods.agent.session.setConfigOption, {
+      sessionId,
+      configId: "model",
+      value: "fake/fake-2",
+    });
+    const modelOpt = res.configOptions.find((o) => o.id === "model");
+    expect(modelOpt.currentValue).toBe("fake/fake-2");
+    const effortOpt = res.configOptions.find((o) => o.id === "thought_level");
+    expect(effortOpt.options.map((o) => o.value)).toEqual(["off", "high", "xhigh", "max"]);
+
+    // 切档后立即生效于下一轮
+    const eff = await h.conn.agent.request(methods.agent.session.setConfigOption, {
+      sessionId,
+      configId: "thought_level",
+      value: "xhigh",
+    });
+    expect(eff.configOptions.find((o) => o.id === "thought_level").currentValue).toBe("xhigh");
+
+    // config_option_update 通知随每次变更发出
+    await flushMicrotasks();
+    const configUpdates = h.updates.filter(
+      (u) => u.sessionId === sessionId && u.update.sessionUpdate === "config_option_update",
+    );
+    expect(configUpdates.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("未知配置项、非法模型引用与未知档位都拒绝且保留原配置", async () => {
+    const h = await startHarness({
+      model: "fake/fake-1",
+      models: [modelEntry("fake-1", ["low", "high"]), modelEntry("fake-2", ["high", "max"])],
+    });
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const { sessionId } = await newSession(h, workspaceA);
+
+    // 未知配置项
+    await expect(
+      h.conn.agent.request(methods.agent.session.setConfigOption, {
+        sessionId,
+        configId: "permission_mode",
+        value: "bypass",
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    // 非法模型引用（无斜杠）
+    await expect(
+      h.conn.agent.request(methods.agent.session.setConfigOption, {
+        sessionId,
+        configId: "model",
+        value: "no-slash",
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    // 未知 provider/model
+    await expect(
+      h.conn.agent.request(methods.agent.session.setConfigOption, {
+        sessionId,
+        configId: "model",
+        value: "ghost/missing",
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    // 清单外模型（FakeProvider strictModels）
+    await expect(
+      h.conn.agent.request(methods.agent.session.setConfigOption, {
+        sessionId,
+        configId: "model",
+        value: "fake/not-declared",
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    // 模型未声明的档位
+    await expect(
+      h.conn.agent.request(methods.agent.session.setConfigOption, {
+        sessionId,
+        configId: "thought_level",
+        value: "max",
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    // 未知档位名
+    await expect(
+      h.conn.agent.request(methods.agent.session.setConfigOption, {
+        sessionId,
+        configId: "thought_level",
+        value: "ultra",
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    // 布尔型请求一律拒绝（当前无布尔配置项）
+    await expect(
+      h.conn.agent.request(methods.agent.session.setConfigOption, {
+        sessionId,
+        configId: "model",
+        type: "boolean",
+        value: true,
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    // 原配置不变：再读一次完整配置核对
+    const verify = await h.conn.agent.request(methods.agent.session.setConfigOption, {
+      sessionId,
+      configId: "thought_level",
+      value: "low",
+    });
+    expect(verify.configOptions.find((o) => o.id === "model").currentValue).toBe("fake/fake-1");
+    expect(verify.configOptions.find((o) => o.id === "thought_level").currentValue).toBe("low");
+  });
+
+  it("忙时切换模型失败且保留原配置；空闲时切档位成功", async () => {
+    const release = Promise.withResolvers<undefined>();
+    const started = Promise.withResolvers<undefined>();
+    const h = await startHarness({
+      model: "fake/fake-1",
+      models: [modelEntry("fake-1", ["low", "high"]), modelEntry("fake-2", ["high", "max"])],
+      handler: async (_req, callIndex) => {
+        if (callIndex === 0) {
+          started.resolve(undefined);
+          await release.promise;
+          return textScript("first");
+        }
+        return textScript("later");
+      },
+    });
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const { sessionId } = await newSession(h, workspaceA);
+
+    const turn = h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "go" }],
+    });
+    turn.catch(() => undefined);
+    await started.promise;
+
+    // 忙时切模型：Core session_busy —— 映射为 invalidRequest 且原配置保留
+    await expect(
+      h.conn.agent.request(methods.agent.session.setConfigOption, {
+        sessionId,
+        configId: "model",
+        value: "fake/fake-2",
+      }),
+    ).rejects.toMatchObject({ code: -32600 });
+
+    // 忙时切档位允许（下一个 Turn 生效）——ADR-0018 §3：本 Turn 沿用快照
+    const effRes = await h.conn.agent.request(methods.agent.session.setConfigOption, {
+      sessionId,
+      configId: "thought_level",
+      value: "high",
+    });
+    // current 已更新为下一轮意图；effective（本 Turn 快照）不暴露在选择器上
+    expect(effRes.configOptions.find((o) => o.id === "thought_level").currentValue).toBe("high");
+
+    release.resolve(undefined);
+    await turn;
+
+    // Turn 结束后模型仍未切换（忙时那次被拒绝），档位意图保留
+    const post = await h.conn.agent.request(methods.agent.session.setConfigOption, {
+      sessionId,
+      configId: "model",
+      value: "fake/fake-2",
+    });
+    expect(post.configOptions.find((o) => o.id === "model").currentValue).toBe("fake/fake-2");
+    // 换模型后档位集合刷新为 fake-2 的档位；原 "high" 意图在新模型可用集合内得以保留
+    const effort = post.configOptions.find((o) => o.id === "thought_level");
+    expect(effort.options.map((o) => o.value)).toEqual(["off", "high", "max"]);
+    expect(effort.currentValue).toBe("high");
+  });
+
+  it("同一连接上的不同会话互不影响：A 切模型不影响 B 的默认值", async () => {
+    const h = await startHarness({
+      model: "fake/fake-1",
+      models: [modelEntry("fake-1", ["low", "high"]), modelEntry("fake-2", ["high", "max"])],
+    });
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const sA = await newSession(h, workspaceA);
+    const sB = await newSession(h, workspaceB);
+    expect(sA.sessionId).not.toBe(sB.sessionId);
+
+    await h.conn.agent.request(methods.agent.session.setConfigOption, {
+      sessionId: sA.sessionId,
+      configId: "model",
+      value: "fake/fake-2",
+    });
+    await h.conn.agent.request(methods.agent.session.setConfigOption, {
+      sessionId: sA.sessionId,
+      configId: "thought_level",
+      value: "max",
+    });
+
+    // B 的配置仍是初始默认；A 的 config_option_update 不会出现在 B 的更新流里
+    await flushMicrotasks();
+    const bModelUpdates = h.updates.filter(
+      (u) => u.sessionId === sB.sessionId && u.update.sessionUpdate === "config_option_update",
+    );
+    expect(bModelUpdates).toHaveLength(0);
+
+    // 对 B 查询（借一次合法 set 验证其当前值）：B 仍为 fake-1/off
+    const verifyB = await h.conn.agent.request(methods.agent.session.setConfigOption, {
+      sessionId: sB.sessionId,
+      configId: "thought_level",
+      value: "low",
+    });
+    expect(verifyB.configOptions.find((o) => o.id === "model").currentValue).toBe("fake/fake-1");
+
+    // A 的更新全部带 A 的 sessionId
+    const aModelUpdates = h.updates.filter(
+      (u) => u.update.sessionUpdate === "config_option_update" && u.sessionId === sA.sessionId,
+    );
+    expect(aModelUpdates.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("旧宿主不使用 configOptions 直接 prompt 仍按默认模型正常对话", async () => {
+    const h = await startHarness({
+      model: "fake/fake-1",
+      models: [modelEntry("fake-1", ["low", "high"])],
+    });
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const { sessionId } = await newSession(h, workspaceA);
+    // 忽略 configOptions、不发任何 set_config_option，直接对话
+    const res = await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "legacy hello" }],
+    });
+    expect(res).toEqual({ stopReason: "end_turn" });
+  });
+
+  it("已关闭会话的 set_config_option 报 resourceNotFound", async () => {
+    const h = await startHarness({
+      model: "fake/fake-1",
+      models: [modelEntry("fake-1", ["low"])],
+    });
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const { sessionId } = await newSession(h, workspaceA);
+    await h.conn.agent.request(methods.agent.session.close, { sessionId });
+    await expect(
+      h.conn.agent.request(methods.agent.session.setConfigOption, {
+        sessionId,
+        configId: "model",
+        value: "fake/fake-1",
+      }),
+    ).rejects.toMatchObject({ code: -32002 });
   });
 });

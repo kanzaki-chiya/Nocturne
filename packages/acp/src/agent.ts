@@ -26,6 +26,10 @@ import {
   type PermissionOption as AcpPermissionOption,
   type PromptRequest,
   type PromptResponse,
+  type SessionConfigOption,
+  type SessionConfigSelectOption,
+  type SetSessionConfigOptionRequest,
+  type SetSessionConfigOptionResponse,
   type SessionUpdate,
   type StopReason,
   type Stream,
@@ -38,6 +42,7 @@ import {
   RuntimeCommandError,
   type McpServerConfig,
   type McpValue,
+  type ModelInfo,
   type ModelRef,
   type PermissionOption,
   type PermissionReply,
@@ -570,6 +575,144 @@ function formatModelConfigError(message?: string): RequestError {
   return RequestError.internalError({ code: "model_not_configured" }, detail);
 }
 
+function unknownConfigOptionError(configId: string): RequestError {
+  return RequestError.invalidParams(
+    { code: "unknown_config_option", configId },
+    `未知的会话配置项：${configId}（当前支持 model 与 thought_level）`,
+  );
+}
+
+/**
+ * setModel 失败映射（ADR-0127：非法值或忙时失败必须保留原配置——
+ * Core 在写入任何状态前先行校验并拒绝，这里只负责把拒绝原因如实交给宿主）。
+ */
+function mapSetModelError(err: unknown, value: string): RequestError {
+  if (err instanceof RuntimeCommandError) {
+    if (err.code === "session_busy") {
+      return RequestError.invalidRequest(
+        { code: "session_busy" },
+        "会话正忙，不能切换模型；配置保持不变",
+      );
+    }
+    if (err.code === "invalid_model") {
+      return RequestError.invalidParams(
+        { code: "invalid_model", value },
+        `无效的模型选择：${err.message}；配置保持不变`,
+      );
+    }
+    return RequestError.internalError({ code: err.code }, err.message);
+  }
+  return RequestError.internalError(undefined, err instanceof Error ? err.message : String(err));
+}
+
+function mapSetEffortError(err: unknown, value: string): RequestError {
+  if (err instanceof RuntimeCommandError) {
+    if (err.code === "invalid_command") {
+      return RequestError.invalidParams(
+        { code: "invalid_thought_level", value },
+        `无效的思考档位：${err.message}；配置保持不变`,
+      );
+    }
+    return RequestError.internalError({ code: err.code }, err.message);
+  }
+  return RequestError.internalError(undefined, err instanceof Error ? err.message : String(err));
+}
+
+function formatModelRefId(ref: ModelRef): string {
+  return `${ref.provider}/${ref.model}`;
+}
+
+function parseModelRefId(raw: string): ModelRef {
+  const slash = raw.indexOf("/");
+  if (slash <= 0 || slash === raw.length - 1) {
+    throw RequestError.invalidParams(
+      { value: raw },
+      `模型引用必须是 "provider/model" 形式：${raw}`,
+    );
+  }
+  return { provider: raw.slice(0, slash), model: raw.slice(slash + 1) };
+}
+
+/**
+ * 模型条目的展示标签（ADR-0127 第一阶段）：沿用桌面与 TUI 模型选择页的
+ * 习惯——有上游显示名时用 `provider/显示名`，否则用完整 `provider/model` ID。
+ */
+function modelOptionLabel(info: ModelInfo): string {
+  const display = info.displayName?.trim();
+  if (display !== undefined && display.length > 0 && display !== info.ref.model) {
+    return `${info.ref.provider}/${display}`;
+  }
+  return formatModelRefId(info.ref);
+}
+
+/**
+ * 构建 ACP 会话配置项（ADR-0127 第一阶段）。
+ *
+ * - `model`（category "model"）：完整 `provider/model` ID 为值，保留含多段
+ *   斜杠的模型 ID；可选项来自该工作区已配置的可用模型（停用与不可用模型
+ *   不列出，与 /model 选择页口径一致）；当前模型不在清单中（例如经
+ *   --model / NOCTURNE_MODEL 显式指定的清单外模型）时追加一项，保证
+ *   currentValue 始终命中可选项。
+ * - `thought_level`（category "thought_level"）：off 恒可用并列为首项，
+ *   其余档位取当前模型已解析的可用集合；模型无可用档位时不出该配置项
+ *   （无可调档位即无选择器，与 Paseo per-model 档位探测口径一致）。
+ */
+export function buildAcpSessionConfigOptions(input: {
+  models: readonly ModelInfo[];
+  currentModel: ModelRef;
+  currentModelInfo: ModelInfo | undefined;
+  currentEffort: string;
+}): SessionConfigOption[] {
+  const { models, currentModel, currentModelInfo, currentEffort } = input;
+  const currentId = formatModelRefId(currentModel);
+  const selectOptions: SessionConfigSelectOption[] = [];
+  const seen = new Set<string>();
+
+  for (const info of models) {
+    if (info.unavailable !== undefined) continue;
+    const id = formatModelRefId(info.ref);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    selectOptions.push({ value: id, name: modelOptionLabel(info) });
+  }
+  if (!seen.has(currentId)) {
+    selectOptions.push({
+      value: currentId,
+      name: currentModelInfo !== undefined ? modelOptionLabel(currentModelInfo) : currentId,
+    });
+  }
+
+  const options: SessionConfigOption[] = [
+    {
+      type: "select",
+      id: "model",
+      name: "Model",
+      category: "model",
+      currentValue: currentId,
+      options: selectOptions,
+    },
+  ];
+
+  const available = currentModelInfo?.capabilities.reasoningEffort ?? [];
+  if (available.length > 0) {
+    const effortOptions: SessionConfigSelectOption[] = [{ value: "off", name: "off" }];
+    for (const level of available) {
+      effortOptions.push({ value: level, name: level });
+    }
+    const validValues = new Set(effortOptions.map((o) => o.value));
+    options.push({
+      type: "select",
+      id: "thought_level",
+      name: "Thinking",
+      category: "thought_level",
+      currentValue: validValues.has(currentEffort) ? currentEffort : "off",
+      options: effortOptions,
+    });
+  }
+
+  return options;
+}
+
 export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
   const { runtime, platform, version, diagnostics } = options;
   const sessions = new Map<string, ManagedSession>();
@@ -673,6 +816,82 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     entry.closing ||
     isServerClosing() ||
     entry.cancelRequested;
+
+  /**
+   * 会话当前配置项快照（ADR-0127 第一阶段）。
+   *
+   * 工作区模型清单与工作区根按创建会话时的 realCwd 解析（与 CLI 分层
+   * 配置、NOCTURNE_MODEL/--model 覆盖及默认模型解析同一入口）；当前值
+   * 与可用档位直接取 Core 会话状态与 reasoningEffortInfo()——后者已按
+   * 当前模型就近降档，current 即下一轮的持久化意图。
+   */
+  const buildSessionConfigOptions = (entry: ManagedSession): SessionConfigOption[] => {
+    const currentRef = entry.session.state().config.model;
+    const models = runtime.listModels({ workspaceRoot: entry.realCwd });
+    const currentModelInfo =
+      models.find(
+        (m) => m.ref.provider === currentRef.provider && m.ref.model === currentRef.model,
+      ) ?? undefined;
+    const effort = entry.session.reasoningEffortInfo();
+    return buildAcpSessionConfigOptions({
+      models,
+      currentModel: currentRef,
+      currentModelInfo,
+      currentEffort: effort.current,
+    });
+  };
+
+  const handleSetConfigOption = async (
+    params: SetSessionConfigOptionRequest,
+  ): Promise<SetSessionConfigOptionResponse> => {
+    const entry = sessions.get(params.sessionId);
+    if (entry === undefined) {
+      throw RequestError.resourceNotFound(params.sessionId);
+    }
+    if (entry.closing || isServerClosing()) {
+      throw RequestError.invalidRequest({ sessionId: params.sessionId }, "会话已关闭");
+    }
+    // 布尔型配置项当前不存在：布尔请求一律按未知配置项拒绝（fail-closed，
+    // 避免旧宿主误写尚未实现的开关）。
+    const rawValue = typeof params.value === "boolean" ? undefined : params.value;
+
+    if (params.configId === "model") {
+      if (rawValue === undefined) {
+        throw unknownConfigOptionError(params.configId);
+      }
+      const ref = parseModelRefId(rawValue);
+      try {
+        await entry.session.setModel(ref);
+      } catch (err) {
+        throw mapSetModelError(err, rawValue);
+      }
+    } else if (params.configId === "thought_level") {
+      if (rawValue === undefined) {
+        throw unknownConfigOptionError(params.configId);
+      }
+      try {
+        await entry.session.setReasoningEffort(rawValue);
+      } catch (err) {
+        throw mapSetEffortError(err, rawValue);
+      }
+    } else {
+      throw unknownConfigOptionError(params.configId);
+    }
+
+    // 返回更新后的完整配置（ADR-0127：换模型后档位集合随之刷新）
+    const configOptions = buildSessionConfigOptions(entry);
+    // 同步回报 config_option_update，宿主（Paseo 0.17.5）据此更新会话快照
+    entry.enqueueUpdate({
+      sessionUpdate: "config_option_update",
+      configOptions,
+    });
+    recordDiag({
+      event: "session_set_config_option",
+      sessionId: entry.id,
+      detail: params.configId,
+    });
+    return { configOptions };
+  };
 
   const forwardPermission = (
     entry: ManagedSession,
@@ -1290,7 +1509,8 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       });
       sessions.set(session.id, entry);
       recordDiag({ event: "session_new", sessionId: session.id });
-      return { sessionId: session.id };
+      const configOptions = buildSessionConfigOptions(entry);
+      return { sessionId: session.id, configOptions };
     } finally {
       inFlightCreations.delete(tracked);
       finishTracked(undefined);
@@ -1396,6 +1616,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       handleNewSession(ctx.params, ctx.client, ctx.signal),
     )
     .onRequest(methods.agent.session.prompt, (ctx) => handlePrompt(ctx.params, ctx.signal))
+    .onRequest(methods.agent.session.setConfigOption, (ctx) => handleSetConfigOption(ctx.params))
     .onRequest(methods.agent.session.close, (ctx) => handleCloseSession(ctx.params.sessionId))
     .onNotification(methods.agent.session.cancel, (ctx) => {
       handleCancel(ctx.params.sessionId);
