@@ -501,6 +501,7 @@ describe("Composer 斜杠命令", () => {
       expect.stringContaining("/plan"),
       expect.stringContaining("/fugue"),
       expect.stringContaining("/ensemble"),
+      expect.stringContaining("/artifact"),
     ]);
     expect(menu.textContent).toContain("多代理攻坚");
     expect(menu.textContent).not.toContain("/cadenza");
