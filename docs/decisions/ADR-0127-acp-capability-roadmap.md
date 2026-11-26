@@ -38,3 +38,21 @@
 ## 取舍
 
 建议先做第一阶段，再依次推进恢复和提问。第四阶段的进度项可以单独选做。额外工作目录、宿主追加系统提示、音频及会话管理操作等需求，等有明确消费者再排期。每阶段固定记录 Nocturne、ACP SDK、宿主及插件版本，分别列出协议测试和真实宿主验收结果。
+
+## 实施记录
+
+### 第二阶段（2026-11-27 验收）
+
+实现要点：
+
+- `nctrn acp` 的 `session/new` 在 `session.created.client` 写入 `{ kind: "agent", name: "acp" }` 归属标记（复用 ADR-0074 已有可选字段，兼容变更不提升 formatVersion）。`session/load` 按已知 ID 恢复：校验请求 `cwd` 为绝对路径且目录存在、会话归属 ACP 且不是子会话、请求 `cwd` 与会话当前执行目录一致（`config.worktree.current ?? meta.cwd`，按真实路径比较）；不符合的 ID、外来会话与子会话一律 `resourceNotFound`，工作区不匹配 `invalidParams(workspace_mismatch)`，锁被占用返回 `session_locked` 错误且不强制夺锁。
+- 恢复经 Core `resumeSession` 并注入本次连接的宿主 MCP（`ResumeSessionOptions.sessionMcp`），历史按协议时序在 load 响应之前回放：`user_message_chunk`（`userEntryText` 去快照块）、`agent_message_chunk`/`agent_thought_chunk`、终态 `tool_call`——不重新执行工具、不重放审批、历史不重复计入上下文。
+- `initialize` 广告 `loadSession: true`；旧宿主 `new/prompt` 流程不变。
+
+版本：Nocturne 0.68.0（开发分支）、ACP SDK `@agentclientprotocol/sdk` 1.7.0（Nocturne 侧）/ 1.9.0（Paseo 侧捆绑）、Paseo daemon 与 `@getpaseo/plugin` 0.17.5。Paseo 0.17.5 无需插件改动：其 acp-internal 连接在 `agentCapabilities.loadSession` 时自动广告 `session.persistence`，`session.open` 带 persistence 时调用 `loadSession` 并在 ready 前消费回放。
+
+验收结果：
+
+- 协议测试：真实 stdio 进程 A/B——A 建会话跑工具轮后 EOF 退出（锁释放），B 同 NOCTURNE_HOME 以 `session/load` 恢复：用户 chunk 恰 1 条、agent text 含合成标记、工具帧全终态、零权限请求、新轮 provider 请求体中标记恰出现 1 次、错误 cwd `-32602`、重复 load `-32600`、无锁泄漏（`apps/cli/test/acp-stdio.test.ts` 9/9）。单测覆盖归属标记、无效/外来/子会话拒绝、并发重复 load、占用冲突、断线与失败清理（`packages/acp/test/agent.test.ts` 29/29）。
+- 真实宿主验收（隔离 Paseo daemon `127.0.0.1:6933` + 测试 capture provider `127.0.0.1:13552`，证据在 `Z:\nocturne-mockups\impl\r1126k\testhost\`）：Paseo agent `75c078f3` 经 nocturne provider 创建，首轮写入含合成决定 `KESTREL-7821` 的 write 工具调用（经审批桥批准），记录 ACP sessionId `202611262113-a3f8c373`；daemon `restart`（worker 102208→74484→94524）后 `agent reload` 重开——同一 sessionId 恢复、persistence 不变、时间线恰一份（连续多次 reload 条目数不重复累积）、恢复后新轮 provider 请求体中 `KESTREL-7821` 恰 1 份且消息数逐轮递增、恢复后新的 write 审批正常出现并被批准、宿主注入 MCP（`mcp__paseo__*` 19 项）在每次新连接的新轮 tools 中齐备。
+- 限制：第一阶段之前创建的旧 ACP 会话没有归属标记，按设计**不可**经 `session/load` 恢复（拒绝为 `resourceNotFound`）——恢复接口不成为打开任意本地会话的入口。Paseo `agent reload` 在 idle 宽限期内会话本就关闭时也能重开（Paseo 0.17.5 idle-keep-alive 设计），锁文件按 ADR-0009 失效判定清理。

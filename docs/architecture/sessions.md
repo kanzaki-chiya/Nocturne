@@ -83,6 +83,8 @@ Turn 前分支基准与说明从 `session.config_changed.branch` 的有效历史
 
 会话新建与恢复不等待 MCP 初始启动，工具暂存并在主 Turn 首次请求前等待与切换，见 [mcp.md](mcp.md) 第 4 节。
 
+`resumeSession` 接受可选的 `sessionMcp`（`ResumeSessionOptions.sessionMcp`，ADR-0127 第二阶段）：与 `CreateSessionOptions.sessionMcp` 同为进程内宿主注入（ADR-0120 §3），恢复出的会话按**本次**连接的宿主声明重新装配 MCP 服务器，旧连接注入的服务器不沿用；权限审批回调同样来自当前连接。跨进程 `session/load`（`nctrn acp`）经此参数把当前宿主的注入带入恢复会话，见 [cli.md](../apps/cli.md) ACP 装配段。
+
 ## 5. 写入与持久性
 
 - 所有持久化事件经由会话的单一写入通道按顺序追加；一个事件的写入调用完成后，才分发给订阅者（先写后发），才执行依赖它的动作（`tool.started` 写入后才执行工具）。
