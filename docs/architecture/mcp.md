@@ -65,6 +65,7 @@ stdio 传输**不**使用 SDK 自带的 `StdioClientTransport`（它内部自行
 - **信任**：项目配置的 `mcp` 段是**可执行内容**——未信任时整段忽略（不是收紧语义；规则可以只收紧，但"启动哪个进程"没有收紧方向），并随 `project_config_untrusted` 警告一并提示。`nctrn trust` 后生效。用户级配置始终可信。
 - 合并产物进入 `ResolvedConfig.mcpServers`（`origin: "app" | "user" | "project"`），由 `forWorkspace` 按工作区与信任状态输出。相对 cwd 按会话工作区解析。
 - **会话级宿主注入（[ADR-0120](../decisions/ADR-0120-acp-agent-stdio.md) §3）**：`nctrn acp` 等进程内宿主入口可通过 `CreateSessionOptions.sessionMcp` 按会话动态注入 `origin: "host"` 的 stdio 或 Streamable HTTP MCP 服务器。其环境值与请求头仅保存在该会话的进程内 `hostCredentials` 中（不回退用户凭据库、不写盘、不授予项目额外信任），在 `reconcile` 期间保留，并与本地工具经过同一权限层；同名冲突或初始启动失败时立即报错并回收已分配连接。
+  恢复路径同样支持：`ResumeSessionOptions.sessionMcp`（ADR-0127 第二阶段）让跨进程 `session/load` 的会话按**本次**连接的宿主声明重新装配 MCP——旧连接注入的服务器不沿用，恢复出的会话只携带当前宿主注入与配置文件声明的服务器。
 
 ## 4. 服务器生命周期
 
