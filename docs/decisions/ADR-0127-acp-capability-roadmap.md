@@ -49,6 +49,11 @@
 - 恢复经 Core `resumeSession` 并注入本次连接的宿主 MCP（`ResumeSessionOptions.sessionMcp`），历史按协议时序在 load 响应之前回放：`user_message_chunk`（`userEntryText` 去快照块）、`agent_message_chunk`/`agent_thought_chunk`、终态 `tool_call`——不重新执行工具、不重放审批、历史不重复计入上下文。
 - `initialize` 广告 `loadSession: true`；旧宿主 `new/prompt` 流程不变。
 
+返工修正（2026-11-27，本阶段验收前）：资格校验的次序与路径比较按主审意见修正——
+
+- 归属、子会话与工作区校验原先在 `resumeSession` 返回完整会话之后才做，Core 会先取锁、装配宿主 MCP 并包装会话，可能在拒绝前误关闭借来的会话或启动宿主工具。修正为把这三项校验放进 `resumeSession` 新增的 `validate` 回调：在取得会话锁、读取持久化状态之后，装配宿主 MCP、绑定工具或投递历史之前执行；校验失败关闭会话、释放锁，宿主工具从未绑定，且与最终恢复读取同一份会话状态（无读改竞态）。id 格式、`cwd` 合法性等不依赖持久化状态的校验仍在锁前完成。
+- 工作区比较原先对所有平台一律 `.toLowerCase()` 并替换反斜杠，会把 POSIX 上大小写或反斜杠不同的独立目录误判为相同。修正为用平台真实路径语义（`paths.equals` 按平台大小写规则 canonicalize）：POSIX 保持区分，Windows 等价路径仍正常匹配；会话工作目录 realpath 失败时拒绝恢复，不再回退到未经验证的字符串比较。
+
 版本：Nocturne 0.68.0（开发分支）、ACP SDK `@agentclientprotocol/sdk` 1.7.0（Nocturne 侧）/ 1.9.0（Paseo 侧捆绑）、Paseo daemon 与 `@getpaseo/plugin` 0.17.5。Paseo 0.17.5 无需插件改动：其 acp-internal 连接在 `agentCapabilities.loadSession` 时自动广告 `session.persistence`，`session.open` 带 persistence 时调用 `loadSession` 并在 ready 前消费回放。
 
 验收结果：

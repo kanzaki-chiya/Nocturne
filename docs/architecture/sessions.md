@@ -85,6 +85,8 @@ Turn 前分支基准与说明从 `session.config_changed.branch` 的有效历史
 
 `resumeSession` 接受可选的 `sessionMcp`（`ResumeSessionOptions.sessionMcp`，ADR-0127 第二阶段）：与 `CreateSessionOptions.sessionMcp` 同为进程内宿主注入（ADR-0120 §3），恢复出的会话按**本次**连接的宿主声明重新装配 MCP 服务器，旧连接注入的服务器不沿用；权限审批回调同样来自当前连接。跨进程 `session/load`（`nctrn acp`）经此参数把当前宿主的注入带入恢复会话，见 [cli.md](../apps/cli.md) ACP 装配段。
 
+`resumeSession` 另接受可选的 `validate`（`ResumeSessionOptions.validate`，进程内使用，RPC 不暴露）：恢复资格校验回调，在取得会话锁、读取持久化状态**之后**，装配宿主 MCP、绑定工具或投递任何历史**之前**调用；校验抛错则关闭会话、释放锁，宿主工具从未绑定。校验与最终恢复在同一把锁内，回调读到的 `state()` 即恢复所用的同一份会话状态，无读改竞态。用于按宿主归属/工作区决定是否允许恢复——`nctrn acp` 的 `session/load` 经此在锁内拒绝外来会话、子会话与工作区不匹配的请求，避免误关闭或误装配借来的会话。这是宿主侧资格判定注入点，不把任何特定宿主的判断写进通用恢复流程。
+
 ## 5. 写入与持久性
 
 - 所有持久化事件经由会话的单一写入通道按顺序追加；一个事件的写入调用完成后，才分发给订阅者（先写后发），才执行依赖它的动作（`tool.started` 写入后才执行工具）。
