@@ -198,13 +198,14 @@ describe("completeSlash", () => {
       "/goal",
       "/plan",
       "/fugue",
-      // 执行方式补全来自 Core 的 WORK_MODE_COMMANDS（ADR-0089 修订：对外显示 /ensemble）
+      // 执行方式补全来自 Core 的 WORK_MODE_COMMANDS（ADR-0089 修订：对外显示 /ensemble；ADR-0125 移除 /cadenza）
       "/ensemble",
-      "/cadenza",
     ]);
     expect(groups[0]?.items.find((item) => item.label === "/fugue")?.summary).toBe("多代理攻坚");
     expect(groups[0]?.items.find((item) => item.label === "/ensemble")?.summary).toBe("合奏协作");
-    expect(groups[0]?.items.find((item) => item.label === "/cadenza")?.summary).toBe("华彩");
+    expect(groups[0]?.items.some((item) => item.label === "/cadenza")).toBe(false);
+    expect(completeSlash("/cad")).toEqual([]);
+    expect(parseSlash("/cadenza 做个看板")).toMatchObject({ kind: "unknown", name: "/cadenza" });
     expect(completeSlash("/sw")).toEqual([]);
   });
 

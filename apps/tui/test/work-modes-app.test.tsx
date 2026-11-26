@@ -34,18 +34,17 @@ const callTool = (id: string, name: string, input: unknown): FakeScript[number] 
   input,
 });
 
-it("在 TUI 发送 /cadenza 并显示一行页面版本", async () => {
+it("在 TUI 发送普通图表请求显示一行内嵌图表版本，/cadenza 不再作为执行方式提交", async () => {
   const provider = new FakeProvider({
     scripts: [
       [
-        callTool("make-page", "render_html", {
-          title: "周报",
-          html: "<h1>周报</h1>",
-          display: "panel",
+        callTool("make-chart", "render_html", {
+          title: "周报趋势图",
+          html: "<svg></svg>",
         }),
         { type: "finish", reason: "tool_calls" },
       ],
-      text("已生成周报"),
+      text("已生成周报趋势图"),
     ],
   });
   const runtime = await createRuntime({ cwd: temp(), sessionsDir: temp(), providers: [provider] });
@@ -58,11 +57,14 @@ it("在 TUI 发送 /cadenza 并显示一行页面版本", async () => {
     ui.stdin.write("/cadenza 做周报");
     await flush();
     ui.stdin.write("\r");
-    await settle(() => ui.lastFrame()?.includes("已生成周报") === true);
-    expect(ui.lastFrame()).toContain("▣ 周报 v1");
-    expect(
-      session.durableEvents().find((event) => event.type === "message.user")?.payload,
-    ).toMatchObject({ workMode: { name: "cadenza" } });
+    await settle(() => ui.lastFrame()?.includes("未知命令") === true);
+    expect(session.durableEvents().some((event) => event.type === "message.user")).toBe(false);
+
+    ui.stdin.write("画一张周报趋势图");
+    await flush();
+    ui.stdin.write("\r");
+    await settle(() => ui.lastFrame()?.includes("已生成周报趋势图") === true);
+    expect(ui.lastFrame()).toContain("▣ 周报趋势图 v1");
   } finally {
     ui.unmount();
     await session.close();

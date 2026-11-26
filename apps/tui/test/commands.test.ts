@@ -117,15 +117,13 @@ describe("执行方式命令（ADR-0076）", () => {
     expect(helpLines().join("\n")).toContain("/ensemble");
   });
 
-  it("/cadenza 出现在 TUI 目录和 CLI 帮助里，并可补全", () => {
+  it("/cadenza 已从 TUI 目录、CLI 帮助和补全中移除", () => {
     const ctx = { effortLevels: [], providerIds: [] };
-    expect(helpLines().join("\n")).toContain("/cadenza");
-    expect(helpLines().join("\n")).toContain("华彩");
-    expect(cliHelpText()).toContain("/cadenza");
-    expect(cliHelpText()).toContain("创建面板页面");
-    const hits = completeSlash("/cad", ctx);
-    expect(hits.map((item) => item.insert)).toEqual(["/cadenza "]);
-    expect(hits[0]?.label).toContain("华彩");
+    expect(helpLines().join("\n")).not.toContain("/cadenza");
+    expect(helpLines().join("\n")).not.toContain("华彩");
+    expect(cliHelpText()).not.toContain("/cadenza");
+    expect(cliHelpText()).not.toContain("华彩");
+    expect(completeSlash("/cad", ctx)).toEqual([]);
   });
 });
 

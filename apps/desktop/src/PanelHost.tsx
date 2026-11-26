@@ -20,7 +20,6 @@ import type {
   ApplicationTarget,
   BackgroundShellTask,
   LocalFileContent,
-  PageCommentsInput,
   PluginOverview,
   SessionAppSurface,
   SubagentSummary,
@@ -64,7 +63,6 @@ import {
   type PanelFileActions,
   type TerminalShellChoice,
 } from "./SidePanel";
-import type { DraftPageComment, DraftPageCommentGroup } from "./page-comments";
 import {
   appTabKey,
   browserTabShowing,
@@ -232,7 +230,6 @@ export function useSidePanel({
   openDirectory,
   providersVersion,
   onAppMessage,
-  pageComments,
 }: {
   prefs: PrefsStore;
   host: DesktopHost;
@@ -267,17 +264,6 @@ export function useSidePanel({
   openDirectory?: ((path: string) => Promise<void>) | undefined;
   providersVersion?: number | undefined;
   onAppMessage?: ((sessionId: string, text: string) => void) | undefined;
-  pageComments?:
-    | {
-        groups: readonly DraftPageCommentGroup[];
-        onAdd: (page: string, version: number, title: string, item: DraftPageComment) => void;
-        onUpdate: (page: string, version: number, id: string, note: string) => void;
-        onDelete: (page: string, version: number, id: string) => void;
-        onClearPage: (page: string) => void;
-        onSend: (sessionId: string, input: PageCommentsInput) => Promise<void>;
-        supportsImageInput?: (() => Promise<boolean>) | undefined;
-      }
-    | undefined;
 }): SidePanelController {
   const [width, setWidth] = useState(() => prefs.get().panelWidth ?? PANEL_DEFAULT_WIDTH);
   const [overview, setOverview] = useState(() => prefs.get().overviewOpen === true);
@@ -887,10 +873,6 @@ export function useSidePanel({
       if (closing?.kind === "browser" && closing.agent !== undefined) {
         void agents.control(closing.agent.tabId, "close");
       }
-      // 面板页面关闭时丢弃该页面的未发送评论（ADR-0113）
-      if (closing?.kind === "page") {
-        pageComments?.onClearPage(closing.page);
-      }
       const apply = () => {
         if (closing?.kind === "app" && sessionId !== null) {
           const key = `${sessionId}\0${appTabKey(closing)}`;
@@ -934,7 +916,7 @@ export function useSidePanel({
       if (id === activeTabRef.current) hideBrowserThen(apply);
       else apply();
     },
-    [tabs, sessionId, watcher, update, hideBrowserThen, agents, pageComments],
+    [tabs, sessionId, watcher, update, hideBrowserThen, agents],
   );
   const activate = useCallback(
     (id: string) => {
@@ -2179,29 +2161,10 @@ export function useSidePanel({
               pages: active.view.pages,
               session: active.session,
               onSelectVersion: selectPageVersion,
-              ...(pageComments !== undefined
-                ? {
                     commentsForPage: (pageId: string) => ({
-                      itemsForVersion: (version: number) =>
-                        pageComments.groups.find((g) => g.page === pageId && g.version === version)
-                          ?.comments ?? [],
-                      onAdd: (version: number, title: string, item: DraftPageComment) => {
-                        pageComments.onAdd(pageId, version, title, item);
-                      },
-                      onUpdate: (version: number, id: string, note: string) => {
-                        pageComments.onUpdate(pageId, version, id, note);
-                      },
-                      onDelete: (version: number, id: string) => {
-                        pageComments.onDelete(pageId, version, id);
-                      },
-                      pendingInputs: active.pendingInputs.items,
-                      onSend: (input) => pageComments.onSend(active.session.id, input),
                       onResolve: (comment) => active.session.resolvePageComment(pageId, comment),
-                      supportsImageInput: pageComments.supportsImageInput,
                     }),
                   }
-                : {}),
-            }
       }
     />
   );

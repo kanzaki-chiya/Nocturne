@@ -297,7 +297,6 @@ export function EnsembleMemberPane({
           plan: "子会话不能使用执行方式",
           fugue: "子会话不能使用执行方式",
           ensemble: "子会话不能使用执行方式",
-          cadenza: "子会话不能使用执行方式",
         }}
         todos={view.todos}
         running={showRunning}

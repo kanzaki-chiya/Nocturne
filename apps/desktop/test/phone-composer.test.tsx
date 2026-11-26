@@ -560,10 +560,8 @@ it("手机斜杠菜单的命令和技能说明都左对齐并单行省略", asyn
   );
   expect(fugue?.textContent).toContain("多代理攻坚");
   expect(container.textContent).not.toContain("/boost");
-  const page = [...container.querySelectorAll(".phone-slash-row")].find((row) =>
-    row.textContent?.includes("/cadenza"),
-  );
-  expect(page?.textContent).toContain("华彩");
+  expect(container.textContent).not.toContain("/cadenza");
+  expect(container.textContent).not.toContain("华彩");
   expect(summaries.map((summary) => summary.textContent)).toContain("压缩当前上下文");
   expect(summaries.map((summary) => summary.textContent)).toContain(description);
   for (const summary of summaries) {

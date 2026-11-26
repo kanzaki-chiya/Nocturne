@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -8,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, FakeProvider } from "@nocturne/core";
 import {
   createSessionView,
+  encodeDurableEvent,
   reduceSessionView,
   type DurableEvent,
   type PageLibraryItem,
@@ -511,12 +513,66 @@ describe("项目页面库桌面端（ADR-0114）", () => {
     });
   });
 
-  it("集成真实 Core Runtime：内嵌页面不出现在页面库列表里", async () => {
+  it("集成真实 Core Runtime：历史面板页仍可浏览，新生成的内嵌图表不出现在页面库列表里", async () => {
     const root = makeTmp("nct-desk-plib-");
     const home = path.join(root, "home");
     const sessionsDir = path.join(home, "sessions");
     const ws = path.join(root, "my-project");
     mkdirSync(ws, { recursive: true });
+
+    // 写入升级前格式的历史面板会话夹具
+    const legacyId = "legacy-panel-sess";
+    const legacyAttachDir = path.join(sessionsDir, "attachments", legacyId);
+    mkdirSync(legacyAttachDir, { recursive: true });
+    const legacyHtml = "<!doctype html><html><body><h1>可见面板页</h1></body></html>";
+    writeFileSync(path.join(legacyAttachDir, "file-1.html"), legacyHtml, "utf8");
+    const legacyEvents: DurableEvent[] = [
+      {
+        type: "session.created",
+        sessionId: legacyId,
+        seq: 1,
+        time: "2026-11-23T10:00:00.000Z",
+        payload: {
+          formatVersion: 1,
+          nocturneVersion: "0.68.0",
+          cwd: ws,
+          workspaceRoot: ws,
+          model: { provider: "fake", model: "fake-model" },
+          permissionPreset: "default",
+        },
+      },
+      {
+        type: "tool.completed",
+        sessionId: legacyId,
+        seq: 2,
+        turnId: "t-legacy",
+        time: "2026-11-23T10:00:01.000Z",
+        payload: {
+          callId: "c-legacy",
+          name: "render_html",
+          status: "ok",
+          modelContent: "ok",
+          durationMs: 5,
+          files: [
+            {
+              type: "file",
+              file: "file-1.html",
+              sha256: createHash("sha256").update(legacyHtml, "utf8").digest("hex"),
+              bytes: Buffer.byteLength(legacyHtml),
+              mimeType: "text/html",
+              label: "可见面板页.html",
+              source: "upload",
+              inline: { title: "可见面板页", page: "page-1", version: 1, display: "panel" },
+            },
+          ],
+        },
+      },
+    ];
+    writeFileSync(
+      path.join(sessionsDir, `${legacyId}.jsonl`),
+      `${legacyEvents.map((e) => encodeDurableEvent(e)).join("\n")}\n`,
+      "utf8",
+    );
 
     const provider = new FakeProvider({
       handler: (req) => {
@@ -525,15 +581,9 @@ describe("项目页面库桌面端（ADR-0114）", () => {
           return [
             {
               type: "tool_call",
-              toolCallId: "t1",
-              name: "render_html",
-              input: { title: "可见面板页", display: "panel", html: "<p>panel</p>" },
-            },
-            {
-              type: "tool_call",
               toolCallId: "t2",
               name: "render_html",
-              input: { title: "隐藏内嵌页", display: "inline", html: "<p>inline</p>" },
+              input: { title: "隐藏内嵌页", html: "<p>inline</p>" },
             },
             { type: "finish", reason: "tool_calls" },
           ];
@@ -560,7 +610,7 @@ describe("项目页面库桌面端（ADR-0114）", () => {
         workspaceRoot: ws,
         permissionPreset: "read-only",
       });
-      await sess.submit({ text: "画两个页面" });
+      await sess.submit({ text: "画一张内嵌图表" });
       await sess.close();
 
       render(

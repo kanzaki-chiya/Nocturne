@@ -22,13 +22,18 @@ export const WORK_MODE_ITEMS: readonly (InputLabelData & { name: WorkModeName })
   { name: "plan", label: "计划", icon: "list_check" },
   { name: "fugue", label: "多代理攻坚", icon: "robot" },
   { name: "ensemble", label: "合奏", icon: "group" },
-  { name: "cadenza", label: "华彩", icon: "layout_right" },
 ];
+
+/** 已下线执行方式的历史消息标签映射（仅用于历史回放显示，不进入命令菜单或补全） */
+const LEGACY_WORK_MODE_LABELS: Readonly<Record<string, InputLabelData>> = {
+  cadenza: { label: "华彩", icon: "layout_right" },
+};
 
 export function workModeLabel(name: string): InputLabelData {
   const canonical = workModeCommandName(name);
   return (
-    WORK_MODE_ITEMS.find((item) => item.name === canonical) ?? {
+    WORK_MODE_ITEMS.find((item) => item.name === canonical) ??
+    LEGACY_WORK_MODE_LABELS[canonical] ?? {
       icon: "list_check",
       label: canonical,
     }

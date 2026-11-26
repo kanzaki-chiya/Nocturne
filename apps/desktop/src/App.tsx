@@ -127,15 +127,6 @@ import {
 import { abbreviateHome } from "./paths";
 import { useSidePanel, type SidePanelController } from "./PanelHost";
 import {
-  addDraftPageComment,
-  removeDraftPageComment,
-  removeDraftPageCommentGroup,
-  removeDraftPageCommentsByPage,
-  updateDraftPageComment,
-  type DraftPageComment,
-  type DraftPageCommentGroup,
-} from "./page-comments";
-import {
   createPrefsStore,
   FONT_SIZE_DEFAULT,
   migrateLegacyProjectOrder,
@@ -1473,36 +1464,6 @@ export function App({ host }: { host: DesktopHost }) {
     [pool, prefs, bumpPrefs, refresh, defaultWorkspace],
   );
 
-  // 未发送的面板页面评论（ADR-0113）：只存在当前会话内存状态，不持久化；切换会话或关闭页面标签时丢弃
-  const [draftPageComments, setDraftPageComments] = useState<DraftPageCommentGroup[]>([]);
-  useEffect(() => {
-    setDraftPageComments([]);
-  }, [selectedId]);
-
-  const handleAddPageComment = useCallback(
-    (pageId: string, version: number, title: string, item: DraftPageComment) => {
-      setDraftPageComments((prev) =>
-        addDraftPageComment(prev, { page: pageId, version, title }, item),
-      );
-    },
-    [],
-  );
-  const handleUpdatePageComment = useCallback(
-    (pageId: string, version: number, id: string, note: string) => {
-      setDraftPageComments((prev) => updateDraftPageComment(prev, pageId, version, id, note));
-    },
-    [],
-  );
-  const handleDeletePageComment = useCallback((pageId: string, version: number, id: string) => {
-    setDraftPageComments((prev) => removeDraftPageComment(prev, pageId, version, id));
-  }, []);
-  const handleRemovePageCommentGroup = useCallback((pageId: string, version: number) => {
-    setDraftPageComments((prev) => removeDraftPageCommentGroup(prev, pageId, version));
-  }, []);
-  const handleClearPageCommentsByPage = useCallback((pageId: string) => {
-    setDraftPageComments((prev) => removeDraftPageCommentsByPage(prev, pageId));
-  }, []);
-
   // 未发送的引用回复草稿（ADR-0116）：按会话保留，切换会话时不丢弃，发送后清空
   const [draftQuotesBySession, setDraftQuotesBySession] = useState<
     ReadonlyMap<string, readonly MessageQuote[]>
@@ -1548,18 +1509,6 @@ export function App({ host }: { host: DesktopHost }) {
         return next;
       });
     }
-    const inputPageComments = input.pageComments;
-    const sentCommentGroup =
-      inputPageComments !== undefined
-        ? draftPageComments.find(
-            (g) => g.page === inputPageComments.page && g.version === inputPageComments.version,
-          )
-        : undefined;
-    if (sentCommentGroup !== undefined) {
-      setDraftPageComments((prev) =>
-        removeDraftPageCommentGroup(prev, sentCommentGroup.page, sentCommentGroup.version),
-      );
-    }
     try {
       // ADR-0070：Turn 运行中 Enter 排队、Alt+Enter 插话；空闲时都是普通发送
       // 新会话 createSession 一返回就选中，侧栏随即出现（treeSessions 合入本地会话）
@@ -1578,15 +1527,6 @@ export function App({ host }: { host: DesktopHost }) {
           if (existing !== undefined && existing.length > 0) return prev;
           return new Map(prev).set(activeSessionId, sentQuotes);
         });
-      }
-      if (sentCommentGroup !== undefined) {
-        setDraftPageComments((prev) =>
-          prev.some(
-            (g) => g.page === sentCommentGroup.page && g.version === sentCommentGroup.version,
-          )
-            ? prev
-            : [...prev, sentCommentGroup],
-        );
       }
       selectedIdRef.current = conversations.selectedId;
       setSelectedId(conversations.selectedId);
@@ -1960,26 +1900,6 @@ export function App({ host }: { host: DesktopHost }) {
     openDirectory: (path) => host.revealItem(path),
     providersVersion,
     onAppMessage,
-    pageComments: {
-      groups: draftPageComments,
-      onAdd: handleAddPageComment,
-      onUpdate: handleUpdatePageComment,
-      onDelete: handleDeletePageComment,
-      onClearPage: handleClearPageCommentsByPage,
-      onSend: async (sessionId, pageComments) => {
-        await conversations.submitInput(
-          { text: "", attachments: [], pageComments },
-          "steer",
-          undefined,
-          undefined,
-          sessionId,
-        );
-      },
-      supportsImageInput:
-        active !== undefined && active.dead !== true && active.session.id === selectedId
-          ? () => active.session.visionInfo().then((info) => info.imageInput)
-          : undefined,
-    },
   });
   panelRef.current = sidePanel;
   // 有活着的 agent 标签的会话不随空闲关闭；标签都关了再按原规则关
@@ -2922,8 +2842,6 @@ export function App({ host }: { host: DesktopHost }) {
                     onViewChanges={sidePanel.viewChanges}
                     subagentLinks={sidePanel.subagentLinks}
                     onSubmit={(input, mode) => submitInput(input, mode)}
-                    pageComments={draftPageComments}
-                    onRemovePageComments={handleRemovePageCommentGroup}
                     quotes={draftQuotesBySession.get(active.session.id)}
                     onQuote={(quote) => {
                       handleAddQuote(active.session.id, quote);
@@ -3370,8 +3288,6 @@ interface SessionPaneProps {
     ((thread: { threadId: string; childSessionId: string; title: string }) => void) | undefined;
   onOpenPage?: ((page: string, version?: number) => void) | undefined;
   activePage?: { page: string; version: number } | undefined;
-  pageComments?: readonly DraftPageCommentGroup[] | undefined;
-  onRemovePageComments?: ((page: string, version: number) => void) | undefined;
   quotes?: readonly MessageQuote[] | undefined;
   onQuote?: ((quote: MessageQuote) => void) | undefined;
   onRemoveQuote?: ((index: number) => void) | undefined;
@@ -3453,8 +3369,6 @@ function SessionPane({
   onOpenSuiteThread,
   onOpenPage,
   activePage,
-  pageComments,
-  onRemovePageComments,
   quotes,
   onQuote,
   onRemoveQuote,
@@ -3648,8 +3562,6 @@ function SessionPane({
         prefs={prefs}
         running={running}
         onSubmit={onSubmit}
-        pageComments={pageComments}
-        onRemovePageComments={onRemovePageComments}
         quotes={quotes}
         onRemoveQuote={onRemoveQuote}
         focusNonce={quoteFocusNonce}

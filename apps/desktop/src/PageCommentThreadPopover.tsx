@@ -24,7 +24,7 @@ export function PageCommentThreadPopover({
   y: number;
   onClose: () => void;
   onResolve?: (() => Promise<void>) | undefined;
-  onReply: (note: string) => Promise<void>;
+  onReply?: ((note: string) => Promise<void>) | undefined;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [note, setNote] = useState("");
@@ -67,7 +67,7 @@ export function PageCommentThreadPopover({
   }, []);
 
   async function send() {
-    if (pending || sending || !note.trim()) return;
+    if (!onReply || pending || sending || !note.trim()) return;
     setSending(true);
     setError(undefined);
     try {
@@ -136,42 +136,44 @@ export function PageCommentThreadPopover({
           </div>
         ))}
       </div>
-      {pending || sending ? (
-        <div className="page-comment-thread-wait" aria-busy="true" />
-      ) : (
-        <form
-          className="page-comment-thread-reply"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void send();
-          }}
-        >
-          <textarea
-            rows={1}
-            className="page-comment-popover-input"
-            aria-label="回复"
-            value={note}
-            onChange={(event) => {
-              setNote(event.target.value);
+      {onReply !== undefined ? (
+        pending || sending ? (
+          <div className="page-comment-thread-wait" aria-busy="true" />
+        ) : (
+          <form
+            className="page-comment-thread-reply"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void send();
             }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                void send();
-              }
-            }}
-          />
-          <IconButton
-            className="page-comment-thread-send"
-            aria-label="发送"
-            title="发送"
-            disabled={note.trim() === ""}
-            onClick={() => void send()}
           >
-            <Icon name="arrow_up" size={ICON_SM} />
-          </IconButton>
-        </form>
-      )}
+            <textarea
+              rows={1}
+              className="page-comment-popover-input"
+              aria-label="回复"
+              value={note}
+              onChange={(event) => {
+                setNote(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
+            />
+            <IconButton
+              className="page-comment-thread-send"
+              aria-label="发送"
+              title="发送"
+              disabled={note.trim() === ""}
+              onClick={() => void send()}
+            >
+              <Icon name="arrow_up" size={ICON_SM} />
+            </IconButton>
+          </form>
+        )
+      ) : null}
       {error && <output className="sr-only">{error}</output>}
     </div>
   );
