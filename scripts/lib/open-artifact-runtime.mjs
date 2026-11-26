@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
@@ -47,4 +47,30 @@ export function copyOpenArtifactRuntimeToDir(openArtifactPkgJsonPath, destRuntim
       // ignore if optional package unavailable
     }
   }
+}
+
+/**
+ * 将 bundle 产物旁的 open-artifact-runtime/ 目录复制到目标目录（供 pack-npm.mjs 复用）。
+ * 若源目录不存在返回 false；复制时同样排除 node_modules。
+ */
+export function copyBundledOpenArtifactRuntimeFromDir(srcDir, destDir) {
+  const srcRuntime = join(srcDir, "open-artifact-runtime");
+  if (!existsSync(srcRuntime) || !statSync(srcRuntime).isDirectory()) {
+    return false;
+  }
+  const entry = join(srcRuntime, "scripts", "open-artifact.mjs");
+  if (!existsSync(entry)) {
+    throw new Error(`bundle 旁 open-artifact-runtime 缺少入口脚本：${entry}`);
+  }
+  const destRuntime = join(destDir, "open-artifact-runtime");
+  rmSync(destRuntime, { recursive: true, force: true });
+  mkdirSync(destRuntime, { recursive: true });
+  cpSync(srcRuntime, destRuntime, {
+    recursive: true,
+    filter: (src) => {
+      const rel = src.slice(srcRuntime.length);
+      return !rel.includes("node_modules");
+    },
+  });
+  return true;
 }

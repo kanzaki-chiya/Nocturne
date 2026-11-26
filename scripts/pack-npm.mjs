@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * 组装 npm 包 nctrn：<tmp>/staging 里放 nctrn.mjs、packaging/npm 模板、
- * LICENSE、THIRD-PARTY-NOTICES.md，然后 npm pack 出 nctrn-<version>.tgz。
+ * 组装 npm 包 nctrn：<tmp>/staging 里放 nctrn.mjs、image-worker.mjs、wasm/、
+ * plugins/、open-artifact-runtime/、packaging/npm 模板、LICENSE、
+ * THIRD-PARTY-NOTICES.md，然后 npm pack 出 nctrn-<version>.tgz。
  *
  * 用法：node scripts/pack-npm.mjs [--bundle <nctrn.mjs 路径>] [--out <输出目录>]
  * 默认 bundle 用 src-tauri/resources/nctrn.mjs（即 bundle-nctrn.mjs 的默认产物），
@@ -14,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { run } from "./lib/proc.mjs";
 import { copyImageAssetsFromDir } from "./lib/image-wasm.mjs";
+import { copyBundledOpenArtifactRuntimeFromDir } from "./lib/open-artifact-runtime.mjs";
 import { copyBundledPluginsFromDir } from "./lib/plugins.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -42,6 +44,7 @@ export function packNpm({ bundleFile, out }) {
     copyFileSync(bundleFile, join(staging, "nctrn.mjs"));
     copyImageAssetsFromDir(dirname(bundleFile), staging);
     copyBundledPluginsFromDir(dirname(bundleFile), staging);
+    copyBundledOpenArtifactRuntimeFromDir(dirname(bundleFile), staging);
     copyFileSync(join(templateDir, "package.json"), join(staging, "package.json"));
     copyFileSync(join(templateDir, "README.md"), join(staging, "README.md"));
     copyFileSync(join(root, "LICENSE"), join(staging, "LICENSE"));

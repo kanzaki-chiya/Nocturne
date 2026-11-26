@@ -163,6 +163,38 @@ describe("pack-npm", () => {
     }
   }, 30_000);
 
+  it("bundle 旁存在 open-artifact-runtime/ 时一起打进 npm 包，保留许可文件并排除 node_modules/", () => {
+    const bundle = join(dir, "nctrn.mjs");
+    writeFileSync(bundle, "#!/usr/bin/env node\nconsole.log('fake');\n");
+    writeFileSync(join(dir, "image-worker.mjs"), "console.log('worker');\n");
+    mkdirSync(join(dir, "wasm"), { recursive: true });
+    for (const [wasmFile] of IMAGE_WASM_FILES) {
+      writeFileSync(join(dir, "wasm", wasmFile), "wasm");
+    }
+    const oaDir = join(dir, "open-artifact-runtime");
+    mkdirSync(join(oaDir, "scripts"), { recursive: true });
+    mkdirSync(join(oaDir, "LICENSES", "harness-kit"), { recursive: true });
+    mkdirSync(join(oaDir, "LICENSES", "protocol"), { recursive: true });
+    mkdirSync(join(oaDir, "node_modules", "ignored"), { recursive: true });
+    writeFileSync(join(oaDir, "package.json"), '{"name":"@open-artifact/cli","version":"0.16.3"}');
+    writeFileSync(join(oaDir, "scripts", "open-artifact.mjs"), "// daemon entry\n");
+    writeFileSync(join(oaDir, "LICENSE"), "Apache-2.0\n");
+    writeFileSync(join(oaDir, "NOTICE"), "Open Artifact\n");
+    writeFileSync(join(oaDir, "LICENSES", "harness-kit", "LICENSE"), "Apache-2.0\n");
+    writeFileSync(join(oaDir, "LICENSES", "protocol", "LICENSE"), "Apache-2.0\n");
+    writeFileSync(join(oaDir, "node_modules", "ignored", "index.js"), "ignored\n");
+
+    const tgz = packNpm({ bundleFile: bundle, out: join(dir, "out") });
+    const files = untar(tgz);
+    expect(files.has("package/open-artifact-runtime/package.json")).toBe(true);
+    expect(files.has("package/open-artifact-runtime/scripts/open-artifact.mjs")).toBe(true);
+    expect(files.has("package/open-artifact-runtime/LICENSE")).toBe(true);
+    expect(files.has("package/open-artifact-runtime/NOTICE")).toBe(true);
+    expect(files.has("package/open-artifact-runtime/LICENSES/harness-kit/LICENSE")).toBe(true);
+    expect(files.has("package/open-artifact-runtime/LICENSES/protocol/LICENSE")).toBe(true);
+    expect(files.has("package/open-artifact-runtime/node_modules/ignored/index.js")).toBe(false);
+  });
+
   it("bundle 文件不存在时报错", () => {
     expect(() => packNpm({ bundleFile: join(dir, "none.mjs"), out: join(dir, "o") })).toThrow(
       "找不到单文件",

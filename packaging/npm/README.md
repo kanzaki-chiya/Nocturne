@@ -8,7 +8,7 @@ Nocturne 的命令行入口：开源的编程 agent 运行时，终端里直接�
 npm install -g nctrn
 ```
 
-要求 Node.js ≥ 24.16。包内是单个自包含文件，没有运行时依赖，也没有安装脚本。
+要求 Node.js ≥ 24.16。包内自带单文件入口、图像处理 WASM、内置插件与 Open Artifact 本地运行时，没有 npm 运行时依赖，也没有安装脚本。
 
 升级：
 

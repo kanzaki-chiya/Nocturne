@@ -15,6 +15,7 @@
     "image-worker.mjs",
     "wasm/",
     "plugins/",
+    "open-artifact-runtime/",
     "THIRD-PARTY-NOTICES.md"
   ],
   "repository": {

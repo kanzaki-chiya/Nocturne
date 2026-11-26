@@ -10,7 +10,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -24,6 +24,32 @@ const RPC_PROTOCOL_VERSION = 1;
 /** 临时前缀里 nctrn 可执行文件的位置（npm 在 Windows 下直接放前缀根部） */
 function binPath(prefix) {
   return process.platform === "win32" ? join(prefix, "nctrn.cmd") : join(prefix, "bin", "nctrn");
+}
+
+/** 临时前缀里 nctrn npm 包解压后的根目录 */
+function packageRoot(prefix) {
+  return process.platform === "win32"
+    ? join(prefix, "node_modules", "nctrn")
+    : join(prefix, "lib", "node_modules", "nctrn");
+}
+
+/** 校验 nctrn 包已随附锁定版本的 open-artifact-runtime 及上游许可文件 */
+function assertBundledOpenArtifactRuntime(prefix) {
+  const pkgDir = packageRoot(prefix);
+  const required = [
+    join("open-artifact-runtime", "scripts", "open-artifact.mjs"),
+    join("open-artifact-runtime", "package.json"),
+    join("open-artifact-runtime", "LICENSE"),
+    join("open-artifact-runtime", "NOTICE"),
+    join("open-artifact-runtime", "LICENSES", "harness-kit", "LICENSE"),
+    join("open-artifact-runtime", "LICENSES", "protocol", "LICENSE"),
+  ];
+  for (const rel of required) {
+    const full = join(pkgDir, rel);
+    if (!existsSync(full)) {
+      throw new Error(`安装的 nctrn 包缺少内置 Open Artifact 运行时文件：${rel}`);
+    }
+  }
 }
 
 function crc32(buf) {
@@ -336,6 +362,7 @@ async function main() {
   const workspace = mkdtempSync(join(tmpdir(), "nctrn-ws-"));
   try {
     run("npm", ["install", "--global", tgz, "--prefix", prefix]);
+    assertBundledOpenArtifactRuntime(prefix);
     const bin = binPath(prefix);
     const version = run(bin, ["--version"], { capture: true, env: { ...process.env } }).trim();
     if (!/^\d+\.\d+\.\d+/.test(version)) {

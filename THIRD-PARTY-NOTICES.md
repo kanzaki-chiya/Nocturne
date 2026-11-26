@@ -109,9 +109,9 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 
 ## Open Artifact 运行时与 SDK
 
-桌面包随附锁定版本的 `@open-artifact/cli` `0.16.3`、`@open-artifact/harness-kit` `0.16.3` 与 `@open-artifact/protocol` `0.16.3`（均为 Apache-2.0，Copyright 2026 Jim Liu 宝玉，原名 `baoyu-design`），用于本地 Open Artifact daemon、内置作品编辑器与宿主协议通信（ADR-0125）。
+桌面包与 `nctrn` npm 包均随附锁定版本的 `@open-artifact/cli` `0.16.3`、`@open-artifact/harness-kit` `0.16.3` 与 `@open-artifact/protocol` `0.16.3`（均为 Apache-2.0，Copyright 2026 Jim Liu 宝玉，原名 `baoyu-design`），用于本地 Open Artifact daemon、内置作品编辑器与宿主协议通信（ADR-0125）。
 
-桌面发行包将 `@open-artifact/cli` 原样安装到 `open-artifact-runtime/` 资源目录，并保留其根目录的 `LICENSE`、`NOTICE`、内置编辑器随附字体的 SIL OFL 许可文本与 `vendor/type-server/pdf-cmaps/LICENSE`，同时在 `open-artifact-runtime/LICENSES/` 下附带 `@open-artifact/harness-kit` 与 `@open-artifact/protocol` 的 `LICENSE` 与 `NOTICE`。`nctrn` 后台与该运行时的关系为按需连接或独立子进程启动，未修改上游源码。
+桌面发行包与 `nctrn` npm 包将 `@open-artifact/cli` 原样放入 `open-artifact-runtime/` 资源目录，并保留其根目录的 `LICENSE`、`NOTICE`、内置编辑器随附字体的 SIL OFL 许可文本与 `vendor/type-server/pdf-cmaps/LICENSE`，同时在 `open-artifact-runtime/LICENSES/` 下附带 `@open-artifact/harness-kit` 与 `@open-artifact/protocol` 的 `LICENSE` 与 `NOTICE`。`nctrn` 后台与该运行时的关系为按需连接或独立子进程启动，未修改上游源码。
 
 ## 电脑操控驱动
 

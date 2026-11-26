@@ -14,8 +14,8 @@ nocturne/
 ├── package.json                 pnpm workspace 根
 ├── pnpm-workspace.yaml
 ├── scripts/
-│   ├── bundle-nctrn.mjs                 tsdown 把 apps/cli 打成单文件后台 nctrn.mjs（默认进 src-tauri/resources/，--out-dir 可改）
-│   ├── pack-npm.mjs                     组装 nctrn npm 包暂存目录并 npm pack（packaging/npm 模板 + LICENSE + THIRD-PARTY-NOTICES.md）
+│   ├── bundle-nctrn.mjs                 tsdown 把 apps/cli 打成单文件后台 nctrn.mjs，并复制 image-worker、WASM、内置插件与 open-artifact-runtime/（默认进 src-tauri/resources/，--out-dir 可改）
+│   ├── pack-npm.mjs                     组装 nctrn npm 包暂存目录并 npm pack（nctrn.mjs + image-worker/wasm + plugins/ + open-artifact-runtime/ + packaging/npm 模板 + LICENSE + THIRD-PARTY-NOTICES.md）
 │   ├── pack-relay.mjs                   组装中继 tgz（relay dist + 手机 dist-web + 指南与许可）
 │   ├── smoke-relay.mjs                  临时安装中继 tgz，验证版本、HTTP、管理与正常关闭
 │   ├── fetch-node.mjs                   下载校验官方 Node（node-version.json 固定版本与 SHA-256），解出 src-tauri/resources/node/
