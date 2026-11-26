@@ -145,6 +145,13 @@ export function createTauriHost(): DesktopHost {
           throw asDesktopError(error);
         }
       },
+      async openWithDialog(path) {
+        try {
+          await invoke("open_file_with_dialog", { path });
+        } catch (error) {
+          throw asDesktopError(error);
+        }
+      },
     },
     pickFolder: () => openDialog({ directory: true, multiple: false }),
     pickExecutable: () =>

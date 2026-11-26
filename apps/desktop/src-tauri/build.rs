@@ -21,6 +21,7 @@ fn main() {
             "open_with_default",
             "list_file_apps",
             "open_file_with_app",
+            "open_file_with_dialog",
             "list_fonts",
             "notify_show",
             "notify_dismiss",

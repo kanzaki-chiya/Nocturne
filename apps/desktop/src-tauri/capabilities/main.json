@@ -57,6 +57,7 @@
     "allow-open-with-default",
     "allow-list-file-apps",
     "allow-open-file-with-app",
+    "allow-open-file-with-dialog",
     "allow-list-fonts",
     "allow-notify-show",
     "allow-notify-dismiss",

@@ -218,6 +218,7 @@ pub fn run() {
         editor::open_with_default,
         file_apps::list_file_apps,
         file_apps::open_file_with_app,
+        file_apps::open_file_with_dialog,
         fonts::list_fonts,
         notify::notify_show,
         notify::notify_dismiss,

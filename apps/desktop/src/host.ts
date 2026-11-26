@@ -213,6 +213,8 @@ export interface FileAppsHost {
   list: (path: string) => Promise<FileAppList>;
   /** VS Code / Cursor 由外壳改用 `-g file:line` 打开，line 才有用 */
   open: (path: string, id: string, line?: number) => Promise<void>;
+  /** Windows 原生“打开方式”对话框（SHOpenWithDialog + OAIF_EXEC）；取消正常返回 */
+  openWithDialog?: (path: string) => Promise<void>;
 }
 
 export interface AgentBrowserStatus {

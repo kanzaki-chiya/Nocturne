@@ -307,6 +307,15 @@ pub async fn list_file_apps(path: String) -> Result<FileAppList, CommandError> {
     .map_err(|e| CommandError::new("io", format!("查询失败：{e}")))
 }
 
+/// 校验并拦截会被直接执行的文件类型（`open_file_with_app` 与 `open_file_with_dialog` 共用）。
+pub(crate) fn validate_openable_file(path: &str) -> Result<PathBuf, CommandError> {
+    let target = validate_file(path)?;
+    if editor::launches_code_any(&target) {
+        return Err(CommandError::new("app_unavailable", "无法打开此文件"));
+    }
+    Ok(target)
+}
+
 /// 用 `list_file_apps` 给的应用打开文件：重新枚举，按 id 找回处理器再 `Invoke`；
 /// VS Code / Cursor 改走 `code -g file:line` 以便跳到行。找不到报 `app_unavailable`。
 #[tauri::command]
@@ -315,10 +324,7 @@ pub async fn open_file_with_app(
     id: String,
     line: Option<u32>,
 ) -> Result<(), CommandError> {
-    let target = validate_file(&path)?;
-    if editor::launches_code_any(&target) {
-        return Err(CommandError::new("app_unavailable", "无法打开此文件"));
-    }
+    let target = validate_openable_file(&path)?;
     let opened = tauri::async_runtime::spawn_blocking(move || platform::open(&target, &id))
         .await
         .map_err(|e| CommandError::new("io", format!("无法打开此文件：{e}")))??;
@@ -326,6 +332,26 @@ pub async fn open_file_with_app(
         editor::launch_editor(editor, &path, line)?;
     }
     Ok(())
+}
+
+/// 打开 Windows 原生“打开方式”对话框（`SHOpenWithDialog` + `OAIF_EXEC`，ADR-0124）；
+/// 沿用路径校验与防误执行保护，用户取消正常返回。
+#[tauri::command]
+pub async fn open_file_with_dialog(
+    window: tauri::Window,
+    path: String,
+) -> Result<(), CommandError> {
+    let target = validate_openable_file(&path)?;
+    #[cfg(windows)]
+    let owner_hwnd = window.hwnd().ok().map(|hwnd| hwnd.0 as isize);
+    #[cfg(not(windows))]
+    let owner_hwnd = {
+        let _ = window;
+        None
+    };
+    tauri::async_runtime::spawn_blocking(move || platform::open_with_dialog(&target, owner_hwnd))
+        .await
+        .map_err(|e| CommandError::new("io", format!("无法打开此文件：{e}")))?
 }
 
 /// `platform::open` 的结果：已交给系统处理器，或要改由编辑器带行号打开。
@@ -348,6 +374,13 @@ mod platform {
 
     pub fn open(_path: &Path, _id: &str) -> Result<Opened, CommandError> {
         Err(CommandError::new("unsupported", "无法打开此文件"))
+    }
+
+    pub fn open_with_dialog(
+        _path: &Path,
+        _owner_hwnd: Option<isize>,
+    ) -> Result<(), CommandError> {
+        Err(CommandError::new("unsupported", "此平台不提供系统应用选择器"))
     }
 
     pub fn editor_icons() -> EditorIcons {
@@ -568,6 +601,13 @@ mod platform {
         })
     }
 
+    pub fn open_with_dialog(
+        _path: &Path,
+        _owner_hwnd: Option<isize>,
+    ) -> Result<(), CommandError> {
+        Err(CommandError::new("unsupported", "此平台不提供系统应用选择器"))
+    }
+
     pub fn editor_icons() -> EditorIcons {
         let read = |cmd: &str| {
             find_editor_bundle(cmd).and_then(|bundle| icon_for_path(&bundle.to_string_lossy()))
@@ -584,7 +624,7 @@ mod platform {
     use std::path::Path;
 
     use windows::core::{Interface, HSTRING, PCWSTR, PWSTR};
-    use windows::Win32::Foundation::SIZE;
+    use windows::Win32::Foundation::{ERROR_CANCELLED, HWND, SIZE};
     use windows::Win32::Graphics::Gdi::{
         CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
         BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
@@ -598,8 +638,9 @@ mod platform {
         ApplicationAssociationRegistration, AssocQueryStringW, BHID_DataObject,
         IApplicationAssociationRegistration, IAssocHandler, IObjectWithProgID, IShellItem,
         IShellItemImageFactory, SHAssocEnumHandlers, SHCreateItemFromParsingName,
-        SHDefExtractIconW, SHLoadIndirectString, AL_EFFECTIVE, ASSOCF_NONE, ASSOCSTR_EXECUTABLE,
-        ASSOC_FILTER_RECOMMENDED, AT_FILEEXTENSION, SIIGBF_THUMBNAILONLY,
+        SHDefExtractIconW, SHLoadIndirectString, SHOpenWithDialog, AL_EFFECTIVE, ASSOCF_NONE,
+        ASSOCSTR_EXECUTABLE, ASSOC_FILTER_RECOMMENDED, AT_FILEEXTENSION, OAIF_EXEC, OPENASINFO,
+        SIIGBF_THUMBNAILONLY,
     };
     use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
 
@@ -802,6 +843,37 @@ mod platform {
             Ok(Opened::Invoked)
         })
         .ok_or_else(unavailable)?
+    }
+
+    /// 映射 `SHOpenWithDialog` 结果：用户取消（`ERROR_CANCELLED`）视为正常结束。
+    pub(crate) fn map_open_with_dialog_result(
+        result: windows::core::Result<()>,
+    ) -> Result<(), CommandError> {
+        match result {
+            Ok(()) => Ok(()),
+            Err(err) if err.code() == ERROR_CANCELLED.to_hresult() => Ok(()),
+            Err(err) => Err(CommandError::new(
+                "open_failed",
+                format!("无法打开此文件：{}", err.message()),
+            )),
+        }
+    }
+
+    /// 调用 Windows 原生“打开方式”对话框（`SHOpenWithDialog` + `OAIF_EXEC`）。
+    pub fn open_with_dialog(path: &Path, owner_hwnd: Option<isize>) -> Result<(), CommandError> {
+        let file = HSTRING::from(path.as_os_str());
+        in_sta(move || -> Result<(), CommandError> {
+            let hwnd = owner_hwnd
+                .filter(|raw| *raw != 0)
+                .map(|raw| HWND(raw as *mut std::ffi::c_void));
+            let info = OPENASINFO {
+                pcszFile: PCWSTR::from_raw(file.as_ptr()),
+                pcszClass: PCWSTR::null(),
+                oaifInFlags: OAIF_EXEC,
+            };
+            map_open_with_dialog_result(unsafe { SHOpenWithDialog(hwnd, &info) })
+        })
+        .ok_or_else(|| CommandError::new("io", "无法打开此文件"))?
     }
 
     /// 间接资源（`@{包名?ms-resource://…}`、`@%SystemRoot%\…,-123`）先让系统解析成路径，
@@ -1148,8 +1220,65 @@ mod tests {
                 None,
             ));
             assert_eq!(opened.unwrap_err().code, "app_unavailable", "{name}");
+            // 原生选择器入口（open_file_with_dialog）复用同一路径与可执行保护
+            assert_eq!(
+                validate_openable_file(&file.to_string_lossy())
+                    .unwrap_err()
+                    .code,
+                "app_unavailable",
+                "{name}"
+            );
         }
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn validate_openable_file_enforces_same_path_rules_for_dialog_and_open() {
+        let dir =
+            std::env::temp_dir().join(format!("nct-file-apps-openable-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("note.txt");
+        std::fs::write(&file, "hello").unwrap();
+        assert!(validate_openable_file(&file.to_string_lossy()).is_ok());
+        assert_eq!(
+            validate_openable_file("relative/note.txt").unwrap_err().code,
+            "invalid_path"
+        );
+        assert_eq!(
+            validate_openable_file(r"\\server\share\note.txt")
+                .unwrap_err()
+                .code,
+            "invalid_path"
+        );
+        assert_eq!(
+            validate_openable_file(&dir.to_string_lossy())
+                .unwrap_err()
+                .code,
+            "is_directory"
+        );
+        assert_eq!(
+            validate_openable_file(&dir.join("missing.txt").to_string_lossy())
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn map_open_with_dialog_treats_cancel_as_ok_and_other_errors_as_open_failed() {
+        use windows::Win32::Foundation::{ERROR_CANCELLED, E_FAIL};
+        assert!(platform::map_open_with_dialog_result(Ok(())).is_ok());
+        let cancelled = windows::core::Error::from_hresult(ERROR_CANCELLED.to_hresult());
+        assert!(platform::map_open_with_dialog_result(Err(cancelled)).is_ok());
+        let failed = windows::core::Error::from_hresult(E_FAIL);
+        assert_eq!(
+            platform::map_open_with_dialog_result(Err(failed))
+                .unwrap_err()
+                .code,
+            "open_failed"
+        );
     }
 
     #[cfg(windows)]
