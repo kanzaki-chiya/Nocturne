@@ -1,9 +1,9 @@
 /**
  * 桌面端平台判定与修饰键归一化（ADR-0110 第 4 节）：前端只在这一处读取
- * `navigator.userAgent` 判断 macOS；测试通过 `setPlatformForTest` 注入平台。
+ * `navigator.userAgent` 判断 macOS / Windows；测试通过 `setPlatformForTest` 注入平台。
  */
 
-export type DesktopPlatform = "macos" | "other";
+export type DesktopPlatform = "windows" | "macos" | "other";
 
 let platformOverride: DesktopPlatform | null = null;
 
@@ -16,6 +16,12 @@ export function setPlatformForTest(platform: DesktopPlatform | null): void {
 export function isMacOS(): boolean {
   if (platformOverride !== null) return platformOverride === "macos";
   return typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh");
+}
+
+/** 是否运行在 Windows 桌面环境（`navigator.userAgent` 含 `Windows`）。 */
+export function isWindows(): boolean {
+  if (platformOverride !== null) return platformOverride === "windows";
+  return typeof navigator !== "undefined" && navigator.userAgent.includes("Windows");
 }
 
 export interface ModifierKeyLike {

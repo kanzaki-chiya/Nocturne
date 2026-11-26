@@ -53,7 +53,7 @@ import {
 } from "./quote-reply";
 import { shellResultSummary, shellResultText, shellToolStatus } from "./background-shell";
 import { useMotionAllowed } from "./motion";
-import { hasPrimaryModOrMetaOnOther, isMacOS } from "./platform";
+import { hasPrimaryModOrMetaOnOther, isMacOS, isWindows } from "./platform";
 
 export function GrantedTag({
   permission,
@@ -158,7 +158,12 @@ import type { AttachmentImageSource } from "./attachment-images";
 import { fileIconText, formatBytes } from "./web/phone-images";
 import { isAllowedExternalUrl } from "./external-url";
 import { fileRefTitle, userText } from "./file-refs";
-import { closeOtherFileRefMenus, FileRefMenu, registerFileRefMenuCloser } from "./FileRefMenu";
+import {
+  closeOtherFileRefMenus,
+  FileRefMenu,
+  hasWindowsFileRefMenuCapabilities,
+  registerFileRefMenuCloser,
+} from "./FileRefMenu";
 import type { FileAppList } from "./host";
 import { InputLabel } from "./InputLabel";
 import { skillCommandLength, skillLabel, workModeLabel } from "./input-labels";
@@ -1014,7 +1019,7 @@ function CodeRef({ text }: { text: string }) {
         <span className="file-ref-text">{text}</span>
       </span>
       {anchor !== null &&
-        (!isMacOS() ? (
+        (isWindows() && hasWindowsFileRefMenuCapabilities(hooks) ? (
           <FileRefMenu
           anchor={anchor}
           label={text}
@@ -1047,7 +1052,7 @@ function CodeRef({ text }: { text: string }) {
           )}
           <MenuItem
             icon={<MenuGlyph kind="folder" />}
-              label="访达"
+              label={isMacOS() ? "访达" : "资源管理器"}
             onSelect={() => {
               run(() => hooks.reveal(hit.absolutePath));
             }}

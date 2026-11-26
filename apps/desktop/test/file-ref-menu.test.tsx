@@ -11,10 +11,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAttachmentImageSource } from "../src/attachment-images";
 import { Conversation, type FileLinkHooks } from "../src/Conversation";
-import { createFileLinkHooks, type FileRefPanelController } from "../src/FileRefMenu";
+import {
+  buildOpenWithEntries,
+  createFileLinkHooks,
+  type FileRefPanelController,
+} from "../src/FileRefMenu";
 import type { DesktopHost, FileApp, FileAppList } from "../src/host";
-import { setPlatformForTest } from "../src/platform";
+import {
+  formatShortcut,
+  hasPrimaryMod,
+  hasPrimaryModOrMetaOnOther,
+  isMacOS,
+  isWindows,
+  setPlatformForTest,
+} from "../src/platform";
 import { createPrefsStore, type FileOpener } from "../src/prefs";
+import { createTauriHost } from "../src/tauri-host";
 
 const ICON = "data:image/png;base64,iVBORw0KGgo=";
 
@@ -114,7 +126,7 @@ function directSeparators(menu: HTMLElement): HTMLElement[] {
 }
 
 beforeEach(() => {
-  setPlatformForTest("other");
+  setPlatformForTest("windows");
 });
 
 afterEach(() => {
@@ -800,5 +812,321 @@ describe("Windows 会话文件引用右键菜单（ADR-0124）", () => {
       expect(host.fileApps?.openWithDialog).toHaveBeenCalledWith("Z:\\project\\src\\app.ts");
     });
     expect(prefs.get().fileOpener).toBe("vscode");
+  });
+
+  it("真实 userAgent 平台判定：仅 Windows 进增强菜单，macOS 与非 Windows/非 macOS 保留原菜单与原平台标签", async () => {
+    setPlatformForTest(null);
+    const uaSpy = vi.spyOn(navigator, "userAgent", "get");
+    const makeHtmlHooks = () =>
+      makeHooks({
+        previewsHtml: vi.fn(() => true),
+        editors: vi.fn(() => ({ vscode: true, cursor: false })),
+        listFileApps: vi.fn(async () =>
+          appList({ apps: [app("app-edge", "Microsoft Edge", { isDefault: true })] }),
+        ),
+      });
+
+    // 1. 真实 Linux（非 Windows、非 macOS）UA：不走 Windows 增强菜单、不出现「更多打开方式…」、保留「资源管理器」与原有功能，快捷键规则不变
+    uaSpy.mockReturnValue(
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    );
+    expect(isWindows()).toBe(false);
+    expect(isMacOS()).toBe(false);
+    expect(hasPrimaryMod({ ctrlKey: true, metaKey: false })).toBe(true);
+    expect(hasPrimaryMod({ ctrlKey: false, metaKey: true })).toBe(false);
+    expect(hasPrimaryModOrMetaOnOther({ ctrlKey: false, metaKey: true })).toBe(true);
+    expect(formatShortcut("Mod+P")).toBe("Ctrl+P");
+    const linuxTauriHost = createTauriHost();
+    expect(linuxTauriHost.fileApps?.list).toBeTypeOf("function");
+    expect(linuxTauriHost.fileApps?.open).toBeTypeOf("function");
+    expect(linuxTauriHost.fileApps?.openWithDialog).toBeUndefined();
+    const linuxHooks = makeHtmlHooks();
+    mountConversation("查看 `web/index.html`", linuxHooks, async (paths) =>
+      paths.map((input) => ({
+        input,
+        absolutePath: "/home/me/proj/web/index.html",
+        relativePath: "web/index.html",
+        withinWorkspace: true,
+        exists: true,
+        isDirectory: false,
+      })),
+    );
+    fireEvent.contextMenu(await screen.findByRole("button", { name: "web/index.html" }));
+    const linuxMenu = await screen.findByRole("menu");
+    expect(directItemLabels(linuxMenu)).toEqual([
+      "打开",
+      "查看源码",
+      "资源管理器",
+      "VS Code",
+      "复制绝对路径",
+      "复制相对路径",
+    ]);
+    expect(linuxHooks.listFileApps).not.toHaveBeenCalled();
+    fireEvent.click(within(linuxMenu).getByRole("menuitem", { name: "资源管理器" }));
+    expect(linuxHooks.reveal).toHaveBeenCalledWith("/home/me/proj/web/index.html");
+
+    // 2. 真实 macOS UA：保留 macOS 原有菜单与「访达」标签，不暴露 Windows picker
+    cleanup();
+    uaSpy.mockReturnValue(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+    );
+    expect(isWindows()).toBe(false);
+    expect(isMacOS()).toBe(true);
+    expect(hasPrimaryMod({ ctrlKey: false, metaKey: true })).toBe(true);
+    expect(hasPrimaryMod({ ctrlKey: true, metaKey: false })).toBe(false);
+    expect(formatShortcut("Mod+P")).toBe("⌘P");
+    const macTauriHost = createTauriHost();
+    expect(macTauriHost.fileApps?.list).toBeTypeOf("function");
+    expect(macTauriHost.fileApps?.open).toBeTypeOf("function");
+    expect(macTauriHost.fileApps?.openWithDialog).toBeUndefined();
+    const macHooks = makeHtmlHooks();
+    mountConversation("查看 `web/index.html`", macHooks, async (paths) =>
+      paths.map((input) => ({
+        input,
+        absolutePath: "/Users/me/proj/web/index.html",
+        relativePath: "web/index.html",
+        withinWorkspace: true,
+        exists: true,
+        isDirectory: false,
+      })),
+    );
+    fireEvent.contextMenu(await screen.findByRole("button", { name: "web/index.html" }));
+    const macMenu = await screen.findByRole("menu");
+    expect(directItemLabels(macMenu)).toEqual([
+      "打开",
+      "查看源码",
+      "访达",
+      "VS Code",
+      "复制绝对路径",
+      "复制相对路径",
+    ]);
+    expect(macHooks.listFileApps).not.toHaveBeenCalled();
+
+    // 3. 真实 Windows UA（Edge WebView2）：进入 Windows 五项增强菜单与原生选择器入口，快捷键保持 Ctrl
+    cleanup();
+    uaSpy.mockReturnValue(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+    );
+    expect(isWindows()).toBe(true);
+    expect(isMacOS()).toBe(false);
+    expect(hasPrimaryMod({ ctrlKey: true, metaKey: false })).toBe(true);
+    expect(formatShortcut("Mod+P")).toBe("Ctrl+P");
+    const winTauriHost = createTauriHost();
+    expect(winTauriHost.fileApps?.openWithDialog).toBeTypeOf("function");
+    const winHooks = makeHtmlHooks();
+    mountConversation("查看 `web/index.html`", winHooks, async (paths) =>
+      paths.map((input) => ({
+        input,
+        absolutePath: "Z:\\project\\web\\index.html",
+        relativePath: "web\\index.html",
+        withinWorkspace: true,
+        exists: true,
+        isDirectory: false,
+      })),
+    );
+    fireEvent.contextMenu(await screen.findByRole("button", { name: "web/index.html" }));
+    const winMenu = await screen.findByRole("menu");
+    expect(directItemLabels(winMenu)).toEqual([
+      "打开",
+      "打开方式",
+      "在资源管理器中显示",
+      "复制相对路径",
+      "复制绝对路径",
+    ]);
+    await waitFor(() => {
+      expect(winHooks.listFileApps).toHaveBeenCalledWith("Z:\\project\\web\\index.html");
+    });
+    fireEvent.keyDown(within(winMenu).getByRole("menuitem", { name: "打开方式" }), {
+      key: "ArrowRight",
+    });
+    const sub = await screen.findByRole("menu", { name: "打开方式" });
+    expect(directItemLabels(sub)).toEqual(["Microsoft Edge", "更多打开方式…"]);
+
+    // 4. 显式注入 "other" 平台：非 Windows、非 macOS，不进 Windows 增强菜单且保留「资源管理器」与原快捷键规则
+    cleanup();
+    setPlatformForTest("other");
+    expect(isWindows()).toBe(false);
+    expect(isMacOS()).toBe(false);
+    expect(formatShortcut("Mod+Shift+G")).toBe("Ctrl+Shift+G");
+    const otherHooks = makeHtmlHooks();
+    mountConversation("查看 `web/index.html`", otherHooks, async (paths) =>
+      paths.map((input) => ({
+        input,
+        absolutePath: "/srv/proj/web/index.html",
+        relativePath: "web/index.html",
+        withinWorkspace: true,
+        exists: true,
+        isDirectory: false,
+      })),
+    );
+    fireEvent.contextMenu(await screen.findByRole("button", { name: "web/index.html" }));
+    const otherMenu = await screen.findByRole("menu");
+    expect(directItemLabels(otherMenu)).toEqual([
+      "打开",
+      "查看源码",
+      "资源管理器",
+      "VS Code",
+      "复制绝对路径",
+      "复制相对路径",
+    ]);
+    expect(otherHooks.listFileApps).not.toHaveBeenCalled();
+  });
+
+  it("缺少 openWithDialog（picker）或缺少 fileApps 的宿主不造报错回调，退回原有可用菜单", async () => {
+    setPlatformForTest(null);
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+    );
+    const store = new Map<string, string>();
+    const storage: Storage = {
+      get length() {
+        return store.size;
+      },
+      clear: () => {
+        store.clear();
+      },
+      key: (index) => [...store.keys()][index] ?? null,
+      getItem: (key) => store.get(key) ?? null,
+      setItem: (key, value) => {
+        store.set(key, value);
+      },
+      removeItem: (key) => {
+        store.delete(key);
+      },
+    };
+    const prefs = createPrefsStore(storage);
+    const panel: FileRefPanelController = {
+      openFile: vi.fn(),
+      previewsHtml: vi.fn(() => false),
+      viewSource: vi.fn(),
+    };
+
+    // 1. 有 fileApps.list/open 但缺少 openWithDialog
+    const hostWithoutPicker = {
+      openPath: vi.fn(async () => undefined),
+      openInEditor: vi.fn(async () => undefined),
+      revealItem: vi.fn(async () => undefined),
+      fileApps: {
+        list: vi.fn(async () =>
+          appList({ apps: [app("app-notepad", "记事本", { isDefault: true })] }),
+        ),
+        open: vi.fn(async () => undefined),
+      },
+    } as unknown as DesktopHost;
+    const hooksWithoutPicker = createFileLinkHooks({
+      host: hostWithoutPicker,
+      prefs,
+      editors: { vscode: true, cursor: false },
+      getPanel: () => panel,
+    });
+    expect(hooksWithoutPicker.openFileWithDialog).toBeUndefined();
+    expect(
+      buildOpenWithEntries(
+        appList({ apps: [app("app-notepad", "记事本", { isDefault: true })] }),
+        { vscode: true, cursor: false },
+        "Z:\\project\\src\\legacy.ts",
+        7,
+        hooksWithoutPicker,
+      ).showPicker,
+    ).toBe(false);
+
+    mountConversation("查看 `src/legacy.ts:7`", hooksWithoutPicker, async (paths) =>
+      paths.map((input) => ({
+        input,
+        absolutePath: "Z:\\project\\src\\legacy.ts",
+        relativePath: "src\\legacy.ts",
+        withinWorkspace: true,
+        exists: true,
+        isDirectory: false,
+      })),
+    );
+    const link1 = await screen.findByRole("button", { name: "src/legacy.ts:7" });
+    fireEvent.contextMenu(link1);
+    const menu1 = await screen.findByRole("menu");
+    expect(directItemLabels(menu1)).toEqual([
+      "打开",
+      "资源管理器",
+      "VS Code",
+      "复制绝对路径",
+      "复制相对路径",
+    ]);
+    expect(hostWithoutPicker.fileApps?.list).not.toHaveBeenCalled();
+    fireEvent.click(within(menu1).getByRole("menuitem", { name: "打开" }));
+    expect(panel.openFile).toHaveBeenCalledWith("Z:\\project\\src\\legacy.ts", 7, {
+      endLine: undefined,
+    });
+    fireEvent.contextMenu(link1);
+    fireEvent.click(
+      within(await screen.findByRole("menu")).getByRole("menuitem", { name: "资源管理器" }),
+    );
+    expect(hostWithoutPicker.revealItem).toHaveBeenCalledWith("Z:\\project\\src\\legacy.ts");
+    expect(document.querySelector(".file-ref-error")).toBeNull();
+
+    // 2. 完全没有 fileApps 的旧宿主：不造 list/open/openWithDialog 回调，普通打开与定位照常可用
+    cleanup();
+    const legacyHost = {
+      openPath: vi.fn(async () => undefined),
+      openInEditor: vi.fn(async () => undefined),
+      revealItem: vi.fn(async () => undefined),
+    } as unknown as DesktopHost;
+    const legacyHooks = createFileLinkHooks({
+      host: legacyHost,
+      prefs,
+      editors: { vscode: true, cursor: false },
+      getPanel: () => panel,
+    });
+    expect(legacyHooks.listFileApps).toBeUndefined();
+    expect(legacyHooks.openFileWithApp).toBeUndefined();
+    expect(legacyHooks.openFileWithDialog).toBeUndefined();
+
+    mountConversation("打开 `src/old.ts` 与 `sub/dir`", legacyHooks, async (paths) =>
+      paths.map((input) =>
+        input === "sub/dir"
+          ? {
+              input,
+              absolutePath: "Z:\\project\\sub\\dir",
+              relativePath: "sub\\dir",
+              withinWorkspace: true,
+              exists: true,
+              isDirectory: true,
+            }
+          : {
+              input,
+              absolutePath: "Z:\\project\\src\\old.ts",
+              relativePath: "src\\old.ts",
+              withinWorkspace: true,
+              exists: true,
+              isDirectory: false,
+            },
+      ),
+    );
+    const fileLink = await screen.findByRole("button", { name: "src/old.ts" });
+    fireEvent.contextMenu(fileLink);
+    const fileMenu = await screen.findByRole("menu");
+    expect(directItemLabels(fileMenu)).toEqual([
+      "打开",
+      "资源管理器",
+      "VS Code",
+      "复制绝对路径",
+      "复制相对路径",
+    ]);
+    fireEvent.click(within(fileMenu).getByRole("menuitem", { name: "VS Code" }));
+    expect(legacyHost.openInEditor).toHaveBeenCalledWith(
+      "vscode",
+      "Z:\\project\\src\\old.ts",
+      undefined,
+    );
+
+    const dirLink = await screen.findByRole("button", { name: "sub/dir" });
+    fireEvent.contextMenu(dirLink);
+    const dirMenu = await screen.findByRole("menu");
+    expect(directItemLabels(dirMenu)).toEqual([
+      "打开",
+      "资源管理器",
+      "复制绝对路径",
+      "复制相对路径",
+    ]);
+    fireEvent.click(within(dirMenu).getByRole("menuitem", { name: "打开" }));
+    expect(legacyHost.openPath).toHaveBeenCalledWith("Z:\\project\\sub\\dir");
   });
 });

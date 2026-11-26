@@ -50,6 +50,15 @@ export interface OpenWithEntry {
   run: () => Promise<void>;
 }
 
+/** 是否具备 Windows 会话文件引用增强菜单所需的全部宿主能力（枚举、按应用打开、原生选择器）。 */
+export function hasWindowsFileRefMenuCapabilities(hooks: FileRefMenuHooks): boolean {
+  return (
+    hooks.listFileApps !== undefined &&
+    hooks.openFileWithApp !== undefined &&
+    hooks.openFileWithDialog !== undefined
+  );
+}
+
 /** 生成「打开方式 ›」二级菜单内容：普通文件取前 3 个系统推荐 + 原生选择器；受保护类型只列安全编辑器。 */
 export function buildOpenWithEntries(
   list: FileAppList,
@@ -59,16 +68,14 @@ export function buildOpenWithEntries(
   hooks: FileRefMenuHooks,
 ): { apps: OpenWithEntry[]; showPicker: boolean } {
   const apps: OpenWithEntry[] = [];
-  if (!list.launchesCode) {
+  const openWithApp = hooks.openFileWithApp;
+  if (!list.launchesCode && openWithApp !== undefined) {
     for (const app of list.apps.slice(0, MAX_RECOMMENDED_APPS)) {
       apps.push({
         key: app.id,
         label: app.name,
         icon: app.iconDataUrl !== undefined ? { src: app.iconDataUrl } : { glyph: "code" },
-        run: async () => {
-          if (hooks.openFileWithApp === undefined) throw new Error("无法打开此文件");
-          await hooks.openFileWithApp(path, app.id, line);
-        },
+        run: () => openWithApp(path, app.id, line),
       });
     }
   }
@@ -88,7 +95,7 @@ export function buildOpenWithEntries(
   }
   return {
     apps,
-    showPicker: !list.launchesCode,
+    showPicker: !list.launchesCode && hooks.openFileWithDialog !== undefined,
   };
 }
 
@@ -137,6 +144,8 @@ export function createFileLinkHooks(input: {
   getPanel: () => FileRefPanelController | null;
 }) {
   const { host, prefs, editors, getPanel } = input;
+  const fileApps = host.fileApps;
+  const openWithDialog = fileApps?.openWithDialog;
   // 缺省 Nocturne 面板（ADR-0060）；面板之外的选择照旧
   const opener = () => prefs.get().fileOpener ?? "panel";
   return {
@@ -170,18 +179,16 @@ export function createFileLinkHooks(input: {
       getPanel()?.viewSource(absolutePath, line);
       return Promise.resolve();
     },
-    listFileApps: (absolutePath: string) =>
-      host.fileApps === undefined
-        ? Promise.resolve(FAILED_APP_LIST)
-        : host.fileApps.list(absolutePath),
-    openFileWithApp: async (absolutePath: string, id: string, line?: number) => {
-      if (host.fileApps === undefined) throw new Error("无法打开此文件");
-      await host.fileApps.open(absolutePath, id, line);
-    },
-    openFileWithDialog: async (absolutePath: string) => {
-      if (host.fileApps?.openWithDialog === undefined) throw new Error("无法打开此文件");
-      await host.fileApps.openWithDialog(absolutePath);
-    },
+    ...(fileApps !== undefined
+      ? {
+          listFileApps: (absolutePath: string) => fileApps.list(absolutePath),
+          openFileWithApp: (absolutePath: string, id: string, line?: number) =>
+            fileApps.open(absolutePath, id, line),
+          ...(openWithDialog !== undefined
+            ? { openFileWithDialog: (absolutePath: string) => openWithDialog(absolutePath) }
+            : {}),
+        }
+      : {}),
   };
 }
 

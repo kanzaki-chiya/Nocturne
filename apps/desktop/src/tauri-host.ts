@@ -21,6 +21,7 @@ import type {
 } from "./host";
 import type { NotifyResult } from "./notify";
 import { decodePickedImages } from "./picked-images";
+import { isWindows } from "./platform";
 import type { BackendMessage } from "./types";
 import { asDesktopError } from "./transport";
 import { parseRawChangelog } from "./versions";
@@ -145,13 +146,17 @@ export function createTauriHost(): DesktopHost {
           throw asDesktopError(error);
         }
       },
-      async openWithDialog(path) {
-        try {
-          await invoke("open_file_with_dialog", { path });
-        } catch (error) {
-          throw asDesktopError(error);
-        }
-      },
+      ...(isWindows()
+        ? {
+            async openWithDialog(path: string) {
+              try {
+                await invoke("open_file_with_dialog", { path });
+              } catch (error) {
+                throw asDesktopError(error);
+              }
+            },
+          }
+        : {}),
     },
     pickFolder: () => openDialog({ directory: true, multiple: false }),
     pickExecutable: () =>
