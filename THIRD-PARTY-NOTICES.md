@@ -15,6 +15,9 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 | `zod` | 4.6.5 | MIT |
 | `@modelcontextprotocol/sdk` | 1.30.0 | MIT |
 | `@agentclientprotocol/sdk` | 1.7.0 | Apache-2.0 |
+| `@open-artifact/cli` | 0.16.3 | Apache-2.0 |
+| `@open-artifact/harness-kit` | 0.16.3 | Apache-2.0 |
+| `@open-artifact/protocol` | 0.16.3 | Apache-2.0 |
 | `ink` | 7.1.1 | MIT |
 | `marked` | 18.0.7 | MIT |
 | `pdf-lib` | 1.17.1 | MIT |
@@ -103,6 +106,12 @@ Nocturne 自身按仓库根目录 [LICENSE](LICENSE) 中的 GPL-3.0-only 发布�
 `webview2-com`（面板内置浏览器调用 Tauri 没有包装的 WebView2 接口）与 `rfd`（下载的「另存为」对话框）原本已经是 `wry` 和 `tauri-plugin-dialog` 的间接依赖，这次改为直接依赖，版本与它们一致，没有带入新的 crate。`png` 与 `base64`（「文件」标签「打开」菜单把系统应用图标编码成 PNG data URL）同样原本就是 Tauri 依赖树里的间接依赖，改为直接依赖、版本不变。`tauri` 开启了 `unstable` 特性，不改变许可证。
 
 这些是通过各包 `package.json` 核对的直接依赖；间接依赖与完整许可文本可从 `pnpm-lock.yaml` 和安装后的 `node_modules` 查阅。仓库未从参考项目复制第三方源文件，故没有需要附加的来源 NOTICE。
+
+## Open Artifact 运行时与 SDK
+
+桌面包随附锁定版本的 `@open-artifact/cli` `0.16.3`、`@open-artifact/harness-kit` `0.16.3` 与 `@open-artifact/protocol` `0.16.3`（均为 Apache-2.0，Copyright 2026 Jim Liu 宝玉，原名 `baoyu-design`），用于本地 Open Artifact daemon、内置作品编辑器与宿主协议通信（ADR-0125）。
+
+桌面发行包将 `@open-artifact/cli` 原样安装到 `open-artifact-runtime/` 资源目录，并保留其根目录的 `LICENSE`、`NOTICE`、内置编辑器随附字体的 SIL OFL 许可文本与 `vendor/type-server/pdf-cmaps/LICENSE`，同时在 `open-artifact-runtime/LICENSES/` 下附带 `@open-artifact/harness-kit` 与 `@open-artifact/protocol` 的 `LICENSE` 与 `NOTICE`。`nctrn` 后台与该运行时的关系为按需连接或独立子进程启动，未修改上游源码。
 
 ## 电脑操控驱动
 

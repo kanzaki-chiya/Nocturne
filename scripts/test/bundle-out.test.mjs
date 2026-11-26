@@ -49,6 +49,17 @@ describe("bundle-nctrn --out-dir", () => {
     expect(existsSync(file)).toBe(true);
     expect(existsSync(join(out, "image-worker.mjs"))).toBe(true);
     expect(existsSync(join(out, "plugins"))).toBe(true);
+    expect(existsSync(join(out, "open-artifact-runtime", "scripts", "open-artifact.mjs"))).toBe(
+      true,
+    );
+    expect(existsSync(join(out, "open-artifact-runtime", "LICENSE"))).toBe(true);
+    expect(existsSync(join(out, "open-artifact-runtime", "NOTICE"))).toBe(true);
+    expect(
+      existsSync(join(out, "open-artifact-runtime", "LICENSES", "harness-kit", "LICENSE")),
+    ).toBe(true);
+    expect(existsSync(join(out, "open-artifact-runtime", "LICENSES", "protocol", "LICENSE"))).toBe(
+      true,
+    );
     for (const [wasmFile] of IMAGE_WASM_FILES) {
       expect(existsSync(join(out, "wasm", wasmFile)), wasmFile).toBe(true);
     }

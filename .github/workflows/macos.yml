@@ -23,7 +23,7 @@ jobs:
       - run: pnpm build
       - run: |
           failed=()
-          for pkg in packages/core packages/rpc packages/mcp apps/cli apps/tui; do
+          for pkg in packages/core packages/open-artifact packages/rpc packages/mcp apps/cli apps/tui; do
             if ! pnpm --dir "$pkg" test --maxWorkers=2; then
               failed+=("$pkg")
             fi

@@ -16,11 +16,13 @@ import { fileURLToPath } from "node:url";
 
 import { build } from "tsdown";
 import { copyImageWasmToDir } from "./lib/image-wasm.mjs";
+import { copyOpenArtifactRuntimeToDir } from "./lib/open-artifact-runtime.mjs";
 import { copyBuiltinPluginsDir } from "./lib/plugins.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cliDir = join(root, "apps", "cli");
 const coreDir = join(root, "packages", "core");
+const openArtifactDir = join(root, "packages", "open-artifact");
 
 const outDirIndex = process.argv.indexOf("--out-dir");
 const targetDir =
@@ -118,6 +120,11 @@ try {
   copyImageWasmToDir(join(coreDir, "package.json"), join(targetDir, "wasm"));
   // Tauri bundle.resources 要求 resources/plugins/ 存在，源目录缺失时建空目录
   copyBuiltinPluginsDir(pluginsSrcDir, join(targetDir, "plugins"), { ensureDestDir: true });
+  // ADR-0125：桌面随包交付匹配固定版的 @open-artifact/cli 运行时与上游 LICENSE/NOTICE
+  copyOpenArtifactRuntimeToDir(
+    join(openArtifactDir, "package.json"),
+    join(targetDir, "open-artifact-runtime"),
+  );
   const mib = (statSync(outFile).size / 1024 / 1024).toFixed(2);
   console.log(`nctrn.mjs: ${outFile} (${mib} MiB)`);
 } finally {
