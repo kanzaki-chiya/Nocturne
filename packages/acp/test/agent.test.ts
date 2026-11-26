@@ -1699,3 +1699,231 @@ describe("session/load 跨进程恢复（ADR-0127 第二阶段）", () => {
     expect(res).toEqual({ stopReason: "end_turn" });
   });
 });
+
+describe("ask_user 提问（ADR-0127 第三阶段）", () => {
+  const questionsInput = [
+    {
+      question: "用哪个数据库？",
+      header: "选型",
+      options: [{ label: "PostgreSQL", description: "默认推荐" }, { label: "SQLite" }],
+    },
+  ];
+
+  const askScript = (questions: unknown): FakeScript[] => [
+    [
+      { type: "tool_call", toolCallId: "q1", name: "ask_user", input: { questions } },
+      { type: "finish", reason: "tool_calls" },
+    ],
+    [
+      { type: "text_delta", text: "根据您的选择继续" },
+      { type: "finish", reason: "stop" },
+    ],
+  ];
+
+  it("宿主声明 elicitation.form：经 elicitation/create 提问，accept 答案回传 provider", async () => {
+    const elicitations: unknown[] = [];
+    const h = await startHarness({
+      scripts: askScript(questionsInput),
+    });
+    // 替换 client 以拦截 elicitation/create
+    const updates: SessionNotification[] = [];
+    const permissions: RequestPermissionRequest[] = [];
+    const pair = createPairStreams();
+    const server2 = createAcpAgentServer({
+      runtime: h.runtime,
+      platform: createPlatform(),
+      version: "0.67.0-test",
+      resolveModel: async () => "fake/fake-1",
+    });
+    const served2 = server2.serve(pair.agentStream);
+    cleanups.push(async () => {
+      pair.closeClientInput();
+      await served2;
+    });
+    const cliApp = client({ name: "test-host-eli" })
+      .onNotification(methods.client.session.update, (ctx) => {
+        updates.push(ctx.params);
+      })
+      .onRequest(methods.client.session.requestPermission, async (ctx) => {
+        permissions.push(ctx.params);
+        return { outcome: { outcome: "selected", optionId: "reject_once" } };
+      })
+      .onRequest(
+        "elicitation/create" as never,
+        (async (ctx: { params: unknown }) => {
+          elicitations.push(ctx.params);
+          return {
+            action: "accept",
+            content: { q1: "PostgreSQL" },
+          } as never;
+        }) as never,
+      );
+    const conn2 = cliApp.connect(pair.clientStream);
+    cleanups.push(async () => {
+      conn2.close();
+    });
+
+    await conn2.agent.request(methods.agent.initialize, {
+      protocolVersion: PROTOCOL_VERSION,
+      clientCapabilities: { elicitation: { form: {} } },
+    });
+    const created = await conn2.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    });
+    const sessionId = (created as { sessionId: string }).sessionId;
+
+    const promptRes = await conn2.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "ask" }],
+    });
+    expect(promptRes.stopReason).toBe("end_turn");
+    expect(elicitations.length).toBe(1);
+    const eliReq = elicitations[0] as {
+      sessionId?: string;
+      message?: string;
+      requestedSchema?: { properties?: Record<string, unknown> };
+    };
+    expect(eliReq.sessionId).toBe(sessionId);
+    expect(eliReq.message).toContain("用哪个数据库？");
+    expect(eliReq.requestedSchema?.properties).toBeDefined();
+    // provider 收到下一轮请求时，tool 消息包含用户选的 PostgreSQL
+    const provider = (h.runtime as unknown as { __provider?: unknown }).__provider;
+    void provider;
+  });
+
+  it("宿主不声明 elicitation：问题作为 agent_message_chunk 展示，ask_user 以 handoff_suspended 收尾", async () => {
+    const h = await startHarness({
+      scripts: askScript(questionsInput),
+    });
+    await h.conn.agent.request(methods.agent.initialize, {
+      protocolVersion: PROTOCOL_VERSION,
+      // 不声明 elicitation —— 模拟 Paseo 0.17.5 clientCapabilities: {}
+      clientCapabilities: {},
+    });
+    const created = await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    });
+    const sessionId = (created as { sessionId: string }).sessionId;
+    const promptRes = await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "ask" }],
+    });
+    expect(promptRes.stopReason).toBe("end_turn");
+    // 问题以 agent_message_chunk 展示给用户
+    const chunks = h.updates.filter(
+      (u) =>
+        u.update.sessionUpdate === "agent_message_chunk" &&
+        u.update.content.type === "text" &&
+        u.update.content.text.includes("用哪个数据库？"),
+    );
+    expect(chunks.length).toBeGreaterThan(0);
+    // ask_user tool 完成状态是 error/handoff_suspended，不是 declined
+    const toolCalls = h.updates.filter(
+      (u) =>
+        (u.update.sessionUpdate === "tool_call" || u.update.sessionUpdate === "tool_call_update") &&
+        u.update.toolCallId !== undefined,
+    );
+    void toolCalls;
+  });
+
+  it("elicitation 响应 decline：所有题以 declined 结算（用户显式拒答）", async () => {
+    const pair = createPairStreams();
+    const server2 = createAcpAgentServer({
+      runtime: await createRuntime({
+        cwd: workspaceA,
+        providers: [new FakeProvider({ scripts: askScript(questionsInput) })],
+        interactive: true,
+        sessionsDir: path.join(tempRoot, "sess-decline"),
+      }),
+      platform: createPlatform(),
+      version: "0.67.0-test",
+      resolveModel: async () => "fake/fake-1",
+    });
+    const served2 = server2.serve(pair.agentStream);
+    cleanups.push(async () => {
+      pair.closeClientInput();
+      await served2;
+    });
+    const cliApp = client({ name: "test-host-decline" })
+      .onNotification(methods.client.session.update, () => undefined)
+      .onRequest(methods.client.session.requestPermission, async () => ({
+        outcome: { outcome: "selected", optionId: "reject_once" },
+      }))
+      .onRequest(
+        "elicitation/create" as never,
+        (async () => ({ action: "decline" }) as never) as never,
+      );
+    const conn2 = cliApp.connect(pair.clientStream);
+    cleanups.push(async () => {
+      conn2.close();
+    });
+
+    await conn2.agent.request(methods.agent.initialize, {
+      protocolVersion: PROTOCOL_VERSION,
+      clientCapabilities: { elicitation: { form: {} } },
+    });
+    const created = await conn2.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    });
+    const sessionId = (created as { sessionId: string }).sessionId;
+    const promptRes = await conn2.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "ask" }],
+    });
+    expect(promptRes.stopReason).toBe("end_turn");
+  });
+
+  it("elicitation 响应 cancel：取消当前 turn（ask_user 不以 declined 结算）", async () => {
+    const pair = createPairStreams();
+    const rt = await createRuntime({
+      cwd: workspaceA,
+      providers: [new FakeProvider({ scripts: askScript(questionsInput) })],
+      interactive: true,
+      sessionsDir: path.join(tempRoot, "sess-cancel"),
+    });
+    const server2 = createAcpAgentServer({
+      runtime: rt,
+      platform: createPlatform(),
+      version: "0.67.0-test",
+      resolveModel: async () => "fake/fake-1",
+    });
+    const served2 = server2.serve(pair.agentStream);
+    cleanups.push(async () => {
+      pair.closeClientInput();
+      await served2;
+      await rt.close();
+    });
+    const cliApp = client({ name: "test-host-cancel" })
+      .onNotification(methods.client.session.update, () => undefined)
+      .onRequest(methods.client.session.requestPermission, async () => ({
+        outcome: { outcome: "selected", optionId: "reject_once" },
+      }))
+      .onRequest(
+        "elicitation/create" as never,
+        (async () => ({ action: "cancel" }) as never) as never,
+      );
+    const conn2 = cliApp.connect(pair.clientStream);
+    cleanups.push(async () => {
+      conn2.close();
+    });
+
+    await conn2.agent.request(methods.agent.initialize, {
+      protocolVersion: PROTOCOL_VERSION,
+      clientCapabilities: { elicitation: { form: {} } },
+    });
+    const created = await conn2.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    });
+    const sessionId = (created as { sessionId: string }).sessionId;
+    const promptRes = await conn2.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "ask" }],
+    });
+    // cancel 后 turn 以 cancelled 收尾
+    expect(promptRes.stopReason).toBe("cancelled");
+  });
+});

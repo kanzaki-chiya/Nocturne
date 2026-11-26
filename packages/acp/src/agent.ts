@@ -50,6 +50,7 @@ import {
   type PermissionReply,
   type PermissionSubject,
   type Platform,
+  type QuestionItem,
   type Runtime,
   type RuntimeEvent,
   type RuntimeSession,
@@ -724,6 +725,10 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
   let activeConnection: AgentConnection | undefined;
   let closing = false;
   let closePromise: Promise<void> | undefined;
+  // ADR-0127 第三阶段：initialize 时捕获的宿主 elicitation 能力。
+  // 仅当宿主显式声明 form 时才走结构化 elicitation；否则按文本退化路径
+  // 把问题作为 agent_message_chunk 展示、结算为 handoff_suspended 后交还控制。
+  let clientSupportsElicitationForm = false;
 
   const recordDiag = (record: AcpAgentDiagnostic): void => {
     diagnostics?.(record);
@@ -894,6 +899,194 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       detail: params.configId,
     });
     return { configOptions };
+  };
+
+  /**
+   * 把 Nocturne questions 映射为 ACP elicitation form 的 JSON Schema。
+   * 每个问题占一个 q1..qN 属性：选项题用 oneOf（title=label、description），
+   * 多选题用 array+anyOf；自由文本题用 string。
+   * multiSelect 单选都用 maxLength 2000 限制自由文本边界（与 ADR-0032 一致）。
+   */
+  const buildElicitationSchema = (questions: readonly QuestionItem[]) => {
+    const properties: Record<string, unknown> = {};
+    for (const [index, q] of questions.entries()) {
+      const key = `q${index + 1}`;
+      const title = q.header !== undefined && q.header !== "" ? q.header : q.question;
+      const base = {
+        title,
+        description: q.question,
+        maxLength: 2_000,
+      } as Record<string, unknown>;
+      if (q.options !== undefined && q.options.length > 0) {
+        if (q.multiSelect === true) {
+          const schema: Record<string, unknown> = {
+            ...base,
+            type: "array",
+            items: {
+              anyOf: q.options.map((opt) => ({
+                const: opt.label,
+                title: opt.label,
+                ...(opt.description !== undefined ? { description: opt.description } : {}),
+              })),
+            },
+          };
+          delete schema.maxLength;
+          properties[key] = schema;
+        } else {
+          const schema: Record<string, unknown> = {
+            ...base,
+            type: "string",
+            oneOf: q.options.map((opt) => ({
+              const: opt.label,
+              title: opt.label,
+              ...(opt.description !== undefined ? { description: opt.description } : {}),
+            })),
+          };
+          delete schema.maxLength;
+          properties[key] = schema;
+        }
+      } else {
+        properties[key] = {
+          ...base,
+          type: "string",
+        };
+      }
+    }
+    return {
+      type: "object" as const,
+      properties,
+    };
+  };
+
+  /** 把 elicitation accept.content 映射回 QuestionAnswer[]。 */
+  const elicitationAnswers = (
+    questions: readonly QuestionItem[],
+    content: Record<string, unknown> | null | undefined,
+  ) => {
+    return questions.map((q, index) => {
+      const key = `q${index + 1}`;
+      const raw = content?.[key];
+      if (q.options !== undefined && q.options.length > 0) {
+        if (q.multiSelect === true) {
+          const selected = Array.isArray(raw)
+            ? raw.filter((v): v is string => typeof v === "string")
+            : [];
+          return { selected };
+        }
+        return { selected: typeof raw === "string" && raw !== "" ? [raw] : [] };
+      }
+      return {
+        selected: [],
+        ...(typeof raw === "string" && raw.trim() !== "" ? { text: raw.trim() } : {}),
+      };
+    });
+  };
+
+  /** 人读的文本问题展示（文本退化路径）。 */
+  const formatTextQuestions = (questions: readonly QuestionItem[]): string => {
+    const lines: string[] = [];
+    for (const [index, q] of questions.entries()) {
+      const prefix =
+        questions.length > 1
+          ? `第 ${index + 1}/${questions.length} 题${q.header !== undefined ? ` [${q.header}]` : ""}`
+          : q.header !== undefined
+            ? `[${q.header}] `
+            : "";
+      lines.push(`? ${prefix}${q.question}`.replace(/\s+/u, " "));
+      if (q.options !== undefined) {
+        for (const [optIndex, opt] of q.options.entries()) {
+          const desc = opt.description !== undefined ? ` — ${opt.description}` : "";
+          lines.push(`  ${optIndex + 1}. ${opt.label}${desc}`);
+        }
+        if (q.multiSelect === true) {
+          lines.push("  （可多选；下一条消息里用编号或文字作答）");
+        } else {
+          lines.push("  （下一条消息里用编号或文字作答）");
+        }
+      } else {
+        lines.push("  （自由文本题；请在下一条消息里写出回答）");
+      }
+    }
+    lines.push("请在下一条消息里给出回答；agent 会等你的答复后再继续。");
+    return lines.join("\n");
+  };
+
+  const forwardQuestion = (
+    entry: ManagedSession,
+    requestId: string,
+    callId: string,
+    questions: readonly QuestionItem[],
+  ): void => {
+    if (!clientSupportsElicitationForm) {
+      // 文本退化路径：把问题完整展示给宿主用户（与现有流式文本同轨道），
+      // 然后以 handoff_suspended 结算——模型不依赖答案继续按假设执行。
+      const text = formatTextQuestions(questions);
+      entry.enqueueUpdate({
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: `${text}\n` },
+      });
+      void entry.session.questionSuspend(requestId).catch((err: unknown) => {
+        recordDiag({
+          event: "question_suspend_failed",
+          sessionId: entry.id,
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      });
+      return;
+    }
+
+    // 结构化路径：elicitation/create form。
+    void (async () => {
+      try {
+        await entry.flushUpdates();
+        if (isEntryStopped(entry)) return;
+        const message = questions.map((q) => q.question).join("\n");
+        const response = (await entry.client.request(
+          "elicitation/create" as never,
+          {
+            mode: "form",
+            sessionId: entry.id,
+            toolCallId: callId,
+            message,
+            requestedSchema: buildElicitationSchema(questions),
+          } as never,
+        )) as
+          | { action: "accept"; content?: Record<string, unknown> | null }
+          | { action: "decline" }
+          | { action: "cancel" };
+        if (isEntryStopped(entry)) return;
+        if (response.action === "accept") {
+          const answers = elicitationAnswers(questions, response.content);
+          await entry.session.respondQuestion(requestId, { answers }).catch((err: unknown) => {
+            recordDiag({
+              event: "question_respond_failed",
+              sessionId: entry.id,
+              detail: err instanceof Error ? err.message : String(err),
+            });
+          });
+          return;
+        }
+        if (response.action === "decline") {
+          await entry.session
+            .respondQuestion(requestId, {
+              answers: questions.map(() => ({ declined: true })),
+            })
+            .catch(() => undefined);
+          return;
+        }
+        // cancel / 未知动作：宿主取消本次提问——取消当前 turn，
+        // ask_user 以 cancelled 收尾，不写成「用户拒答」。
+        cancelEntry(entry);
+      } catch (err) {
+        // 宿主断连/超时/协议错误：不写成「用户拒答」，取消当前 turn
+        recordDiag({
+          event: "question_elicitation_failed",
+          sessionId: entry.id,
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        if (!isEntryStopped(entry)) cancelEntry(entry);
+      }
+    })();
   };
 
   const forwardPermission = (
@@ -1242,12 +1435,13 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       }
 
       case "question.requested": {
-        // ACP 首版未接问答交互；立即以 declined 结算，避免模型调用 ask_user 时无限挂起
-        void entry.session
-          .respondQuestion(event.payload.requestId, {
-            answers: event.payload.questions.map(() => ({ declined: true })),
-          })
-          .catch(() => undefined);
+        // ADR-0127 第三阶段：宿主能力分流。
+        // - 声明 elicitation.form：结构化提问，accept/decline/cancel 如实映射；
+        //   cancel 或宿主断连/超时走 interrupt（取消该 turn），绝不写成「用户拒答」。
+        // - 未声明：把完整问题与选项作为 agent_message_chunk 展示给宿主用户，
+        //   结算为 handoff_suspended 让当前轮以可见问题收尾；下一轮用户作答后继续。
+        const payload = event.payload;
+        forwardQuestion(entry, payload.requestId, payload.callId, payload.questions);
         return;
       }
 
@@ -1322,6 +1516,11 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
 
   const handleInitialize = (_params: InitializeRequest): InitializeResponse => {
     recordDiag({ event: "initialize", method: methods.agent.initialize });
+    // ADR-0127 第三阶段：仅当宿主显式声明 elicitation.form 时走结构化路径；
+    // Paseo 0.17.5 发送 clientCapabilities: {}（无 elicitation），按文本退化处理。
+    clientSupportsElicitationForm =
+      _params.clientCapabilities?.elicitation?.form !== null &&
+      _params.clientCapabilities?.elicitation?.form !== undefined;
     return {
       protocolVersion: PROTOCOL_VERSION,
       agentInfo: {
