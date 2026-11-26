@@ -335,6 +335,7 @@ export function createToolExecutor(
               : {}),
             ...(result.files?.length ? { files: result.files } : {}),
             ...(toolUi !== undefined ? { ui: toolUi } : {}),
+            ...(result.artifact !== undefined ? { artifact: result.artifact } : {}),
             ...(sensitiveForModel ? { sensitiveForModel: true as const } : {}),
             ...(result.usage === undefined
               ? {}
@@ -771,7 +772,10 @@ export function createToolExecutor(
       let result: ToolResult;
       let executionStatus: "error" | "cancelled" | undefined;
       const execStart = Date.now();
-      await scope.checkpoint?.("before", call.callId, outcome.subjects, scope.sessionId);
+      const trackFileCheckpoints = tool.traits.suppressFilesWrittenNotify !== true;
+      if (trackFileCheckpoints) {
+        await scope.checkpoint?.("before", call.callId, outcome.subjects, scope.sessionId);
+      }
       try {
         const execOutcome = await awaitWithAbortGrace(
           () => tool.execute(input, toolCtx),
@@ -809,7 +813,9 @@ export function createToolExecutor(
         }
       } finally {
         execTimeout?.dispose();
-        await scope.checkpoint?.("after", call.callId, outcome.subjects, scope.sessionId);
+        if (trackFileCheckpoints) {
+          await scope.checkpoint?.("after", call.callId, outcome.subjects, scope.sessionId);
+        }
       }
       if (executionStatus !== undefined) return finish(executionStatus, result);
       if (aborted(scope.signal)) {
@@ -823,6 +829,33 @@ export function createToolExecutor(
         durationMs: Date.now() - execStart,
         modelChars: result.modelContent.length,
       });
+
+      // 7.4 文件写入通知（ADR-0125）：按 edit 权限主体提取写入路径通知外部连接器（不按工具名分支）；
+      // 声明了 suppressFilesWrittenNotify 的工具自身已完成同步，不重复上报 agent.wrote。
+      if (
+        result.status === "ok" &&
+        tool.traits.suppressFilesWrittenNotify !== true &&
+        scope.onFilesWritten !== undefined
+      ) {
+        const written = [
+          ...new Set(
+            outcome.subjects
+              .filter((s) => s.kind === "edit")
+              .map((s) => s.resolved ?? s.target)
+              .filter((p) => p.length > 0),
+          ),
+        ];
+        if (written.length > 0) {
+          try {
+            await scope.onFilesWritten(written, scope.sessionId, scope.cwd);
+          } catch (e) {
+            scope.diagnostics?.record("tool.files_written_notify_failed", {
+              callId: call.callId,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+      }
 
       // 7.5 PostToolUse Hook（hooks.md）：观察结果、追加反馈；不修改结果本体
       if (scope.hooks !== undefined) {

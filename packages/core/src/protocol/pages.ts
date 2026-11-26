@@ -64,12 +64,14 @@ export interface PageLibraryProject {
   updatedAt: string;
 }
 
-/** 页面库中的页面条目（按来源去重后的最近副本，ADR-0114 §3–4；不含本机绝对路径） */
+/** 页面库中的页面条目（按来源去重后的最近副本，ADR-0114 §3–4、ADR-0125；不含本机绝对路径或回环 URL） */
 export interface PageLibraryItem {
-  /** 最近副本的引用：`<sessionId>/<page>` */
+  /** 条目种类：缺省或 "page" 为历史面板页面，"artifact" 为 Open Artifact 作品 */
+  kind?: "page" | "artifact" | undefined;
+  /** 最近副本的引用：旧页面为 `<sessionId>/<page>`，Open Artifact 为 `open-artifact://artifact/<id>` */
   ref: string;
   origin: PageOrigin;
-  /** 来源稳定键：`${origin.sessionId}/${origin.page}`，供去重与置顶存储使用 */
+  /** 来源稳定键：旧页面为 `${origin.sessionId}/${origin.page}`，Open Artifact 为 `artifact:<id>` */
   originKey: string;
   sessionId: string;
   sessionTitle: string;
@@ -81,6 +83,15 @@ export interface PageLibraryItem {
   updatedAt: string;
   projectKey: string;
   hasUnresolvedComments?: boolean | undefined;
+  /** Open Artifact 作品专属元数据（kind === "artifact" 时存在） */
+  artifact?:
+    | {
+        url: string;
+        id: string;
+        type: string;
+        summary?: string | undefined;
+      }
+    | undefined;
 }
 
 export interface PageLibraryListResult {

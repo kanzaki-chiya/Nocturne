@@ -17,6 +17,7 @@ export function createExecutionScope(
     readState: env.readState,
     events: call.events,
     checkpoint: env.checkpoint,
+    onFilesWritten: env.onFilesWritten,
     attachmentsDir: env.attachmentsDir,
     attachments: env.attachments,
     hooks: env.hooks,

@@ -7,7 +7,7 @@
 import type { EditToolKind, ToolSpec } from "../protocol/index.js";
 import type { ToolDefinition, ToolRegistry } from "./types.js";
 
-const NAME_PATTERN = /^[a-z][a-z0-9_]*(?:__[a-z0-9_]+)*$/;
+const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(?:__[A-Za-z0-9_]+)*$/;
 
 /** ADR-0035 §5：能力值未给出或工具未声明归属时工具可见 */
 function visible(tool: ToolDefinition, editTool: EditToolKind | undefined): boolean {

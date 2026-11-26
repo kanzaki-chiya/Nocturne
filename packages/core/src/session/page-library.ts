@@ -10,10 +10,12 @@ import {
   type WorkspaceProjectIdentity,
 } from "../platform/index.js";
 import {
+  deriveSessionArtifacts,
   deriveSessionPages,
   deriveSessionPanelPageSummaries,
   effectiveEvents,
   firstUserText,
+  formatOpenArtifactOriginKey,
   formatPageOriginKey,
   type DurableEvent,
   type FileAttachment,
@@ -22,6 +24,7 @@ import {
   type PageLibraryProject,
   type PageLibraryProjectsResult,
   type PageOrigin,
+  type SessionArtifact,
   type SessionPanelPageSummary,
 } from "../protocol/index.js";
 import { isSafeAttachmentFilename, readSessionAttachment } from "./attachment-read.js";
@@ -29,7 +32,7 @@ import { copyPageDataFile } from "./page-data.js";
 import { assertSafeSessionId, readLogReadonly } from "./readonly-log.js";
 import type { SessionStore, SessionSummary } from "./types.js";
 
-const PAGES_CACHE_VERSION = 2;
+const PAGES_CACHE_VERSION = 3;
 const SCAN_CONCURRENCY = 8;
 
 interface SessionPagesCacheFile {
@@ -37,6 +40,7 @@ interface SessionPagesCacheFile {
   mtimeMs: number;
   size: number;
   pages: SessionPanelPageSummary[];
+  artifacts: SessionArtifact[];
 }
 
 interface ScannedPageInstance {
@@ -45,6 +49,19 @@ interface ScannedPageInstance {
   sessionArchived?: boolean | undefined;
   project: WorkspaceProjectIdentity;
   summary: SessionPanelPageSummary;
+}
+
+interface ScannedArtifactInstance {
+  sessionId: string;
+  sessionTitle: string;
+  sessionArchived?: boolean | undefined;
+  project: WorkspaceProjectIdentity;
+  artifact: SessionArtifact;
+}
+
+interface ScannedSessionItems {
+  pages: ScannedPageInstance[];
+  artifacts: ScannedArtifactInstance[];
 }
 
 export interface PageLibraryDeps {
@@ -124,18 +141,35 @@ function isValidSummary(value: unknown): value is SessionPanelPageSummary {
   );
 }
 
+function isValidArtifact(value: unknown): value is SessionArtifact {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.url === "string" &&
+    v.url.trim() !== "" &&
+    typeof v.id === "string" &&
+    v.id.trim() !== "" &&
+    typeof v.title === "string" &&
+    typeof v.type === "string" &&
+    typeof v.seq === "number" &&
+    Number.isInteger(v.seq) &&
+    typeof v.updatedAt === "string" &&
+    (v.summary === undefined || typeof v.summary === "string")
+  );
+}
+
 function parseCacheFile(
   raw: unknown,
   expectedMtimeMs: number,
   expectedSize: number,
-): SessionPanelPageSummary[] | undefined {
+): { pages: SessionPanelPageSummary[]; artifacts: SessionArtifact[] } | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const obj = raw as Record<string, unknown>;
   if (obj.version !== PAGES_CACHE_VERSION) return undefined;
   if (obj.mtimeMs !== expectedMtimeMs || obj.size !== expectedSize) return undefined;
-  if (!Array.isArray(obj.pages)) return undefined;
-  if (!obj.pages.every(isValidSummary)) return undefined;
-  return obj.pages;
+  if (!Array.isArray(obj.pages) || !Array.isArray(obj.artifacts)) return undefined;
+  if (!obj.pages.every(isValidSummary) || !obj.artifacts.every(isValidArtifact)) return undefined;
+  return { pages: obj.pages, artifacts: obj.artifacts };
 }
 
 function deriveTitleFromEvents(events: readonly DurableEvent[]): string | undefined {
@@ -229,8 +263,17 @@ function resolveCanonicalOrigins(
   return canonical;
 }
 
+function compareArtifactsDesc(a: ScannedArtifactInstance, b: ScannedArtifactInstance): number {
+  const ta = parseTimeMs(a.artifact.updatedAt);
+  const tb = parseTimeMs(b.artifact.updatedAt);
+  if (tb !== ta) return tb - ta;
+  if (b.artifact.seq !== a.artifact.seq) return b.artifact.seq - a.artifact.seq;
+  return a.sessionId < b.sessionId ? 1 : a.sessionId > b.sessionId ? -1 : 0;
+}
+
 function mergeInstancesToLibraryItems(
   instances: readonly ScannedPageInstance[],
+  artifacts: readonly ScannedArtifactInstance[] = [],
 ): PageLibraryItem[] {
   const canonicalOrigins = resolveCanonicalOrigins(instances);
   const byOrigin = new Map<string, { origin: PageOrigin; best: ScannedPageInstance }>();
@@ -244,21 +287,56 @@ function mergeInstancesToLibraryItems(
     }
   }
 
-  const merged = [...byOrigin.entries()].map(([originKey, { origin, best }]) => ({
-    ref: `${best.sessionId}/${best.summary.page}`,
-    origin,
-    originKey,
+  const pageItems: PageLibraryItem[] = [...byOrigin.entries()].map(
+    ([originKey, { origin, best }]) => ({
+      kind: "page" as const,
+      ref: `${best.sessionId}/${best.summary.page}`,
+      origin,
+      originKey,
+      sessionId: best.sessionId,
+      sessionTitle: best.sessionTitle,
+      ...(best.sessionArchived ? { sessionArchived: true } : {}),
+      page: best.summary.page,
+      title: best.summary.title,
+      version: best.summary.version,
+      file: best.summary.file,
+      updatedAt: best.summary.updatedAt,
+      projectKey: best.project.key,
+      ...(best.summary.hasUnresolvedComments ? { hasUnresolvedComments: true } : {}),
+    }),
+  );
+
+  const byArtifactId = new Map<string, ScannedArtifactInstance>();
+  for (const inst of artifacts) {
+    const existing = byArtifactId.get(inst.artifact.id);
+    if (existing === undefined || compareArtifactsDesc(inst, existing) < 0) {
+      byArtifactId.set(inst.artifact.id, inst);
+    }
+  }
+
+  const artifactItems: PageLibraryItem[] = [...byArtifactId.values()].map((best) => ({
+    kind: "artifact" as const,
+    ref: best.artifact.url,
+    origin: { sessionId: best.sessionId, page: `artifact-${best.artifact.id}` },
+    originKey: formatOpenArtifactOriginKey(best.artifact.id),
     sessionId: best.sessionId,
     sessionTitle: best.sessionTitle,
     ...(best.sessionArchived ? { sessionArchived: true } : {}),
-    page: best.summary.page,
-    title: best.summary.title,
-    version: best.summary.version,
-    file: best.summary.file,
-    updatedAt: best.summary.updatedAt,
+    page: `artifact-${best.artifact.id}`,
+    title: best.artifact.title,
+    version: 1,
+    file: "",
+    updatedAt: best.artifact.updatedAt,
     projectKey: best.project.key,
-    ...(best.summary.hasUnresolvedComments ? { hasUnresolvedComments: true } : {}),
+    artifact: {
+      url: best.artifact.url,
+      id: best.artifact.id,
+      type: best.artifact.type,
+      ...(best.artifact.summary !== undefined ? { summary: best.artifact.summary } : {}),
+    },
   }));
+
+  const merged = [...pageItems, ...artifactItems];
 
   merged.sort((a, b) => {
     const ta = parseTimeMs(a.updatedAt);
@@ -288,6 +366,7 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
     mtimeMs: number,
     size: number,
     pages: SessionPanelPageSummary[],
+    artifacts: SessionArtifact[],
   ): Promise<void> {
     const target = cachePath(id);
     const temp = `${target}.${randomBytes(6).toString("hex")}.tmp`;
@@ -296,6 +375,7 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
       mtimeMs,
       size,
       pages,
+      artifacts,
     };
     try {
       await fs.writeFile(temp, JSON.stringify(payload));
@@ -307,13 +387,16 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
     }
   }
 
-  async function readSessionPanelPages(
-    summary: SessionSummary,
-  ): Promise<{ pages: SessionPanelPageSummary[]; sessionTitle: string }> {
+  async function readSessionLibraryItems(summary: SessionSummary): Promise<{
+    pages: SessionPanelPageSummary[];
+    artifacts: SessionArtifact[];
+    sessionTitle: string;
+  }> {
     const openEvents = deps.getOpenSessionEvents?.(summary.id);
     if (openEvents !== undefined) {
       return {
         pages: deriveSessionPanelPageSummaries(openEvents),
+        artifacts: deriveSessionArtifacts(openEvents),
         sessionTitle: deriveTitleFromEvents(openEvents) ?? summary.firstText ?? "",
       };
     }
@@ -325,9 +408,9 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
       stat = { mtimeMs: s.mtimeMs, size: s.size };
     } catch (error) {
       if (fsErrorCode(error) === "ENOENT") {
-        return { pages: [], sessionTitle: summary.firstText ?? "" };
+        return { pages: [], artifacts: [], sessionTitle: summary.firstText ?? "" };
       }
-      return { pages: [], sessionTitle: summary.firstText ?? "" };
+      return { pages: [], artifacts: [], sessionTitle: summary.firstText ?? "" };
     }
 
     const sidecar = cachePath(summary.id);
@@ -336,7 +419,11 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
         const parsed: unknown = JSON.parse(await fs.readTextFile(sidecar));
         const cached = parseCacheFile(parsed, stat.mtimeMs, stat.size);
         if (cached !== undefined) {
-          return { pages: cached, sessionTitle: summary.firstText ?? "" };
+          return {
+            pages: cached.pages,
+            artifacts: cached.artifacts,
+            sessionTitle: summary.firstText ?? "",
+          };
         }
       }
     } catch {
@@ -346,15 +433,16 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
     try {
       const readonly = await readLogReadonly(fs, file, summary.id);
       const pages = deriveSessionPanelPageSummaries(readonly.events);
-      await writeCache(summary.id, stat.mtimeMs, stat.size, pages);
-      return { pages, sessionTitle: summary.firstText ?? "" };
+      const artifacts = deriveSessionArtifacts(readonly.events);
+      await writeCache(summary.id, stat.mtimeMs, stat.size, pages, artifacts);
+      return { pages, artifacts, sessionTitle: summary.firstText ?? "" };
     } catch {
       // 单个坏日志不阻塞页面库
-      return { pages: [], sessionTitle: summary.firstText ?? "" };
+      return { pages: [], artifacts: [], sessionTitle: summary.firstText ?? "" };
     }
   }
 
-  async function scanTopLevelSessions(filterProjectKey?: string): Promise<ScannedPageInstance[]> {
+  async function scanTopLevelSessions(filterProjectKey?: string): Promise<ScannedSessionItems> {
     const summaries = (await store.list({ includeArchived: true })).filter(
       isTopLevelLibrarySession,
     );
@@ -370,20 +458,34 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
 
     const resolved = await mapWithConcurrency(summaries, SCAN_CONCURRENCY, async (summary) => {
       const project = await resolveProjectCached(summary.workspaceRoot);
-      if (filterProjectKey !== undefined && project.key !== filterProjectKey) return [];
-      const { pages, sessionTitle } = await readSessionPanelPages(summary);
-      return pages
-        .filter((page) => isSafeAttachmentFilename(page.file))
-        .map<ScannedPageInstance>((page) => ({
+      if (filterProjectKey !== undefined && project.key !== filterProjectKey) {
+        return { pages: [] as ScannedPageInstance[], artifacts: [] as ScannedArtifactInstance[] };
+      }
+      const { pages, artifacts, sessionTitle } = await readSessionLibraryItems(summary);
+      return {
+        pages: pages
+          .filter((page) => isSafeAttachmentFilename(page.file))
+          .map<ScannedPageInstance>((page) => ({
+            sessionId: summary.id,
+            sessionTitle,
+            ...(summary.archivedAt !== undefined ? { sessionArchived: true } : {}),
+            project,
+            summary: page,
+          })),
+        artifacts: artifacts.map<ScannedArtifactInstance>((artifact) => ({
           sessionId: summary.id,
           sessionTitle,
           ...(summary.archivedAt !== undefined ? { sessionArchived: true } : {}),
           project,
-          summary: page,
-        }));
+          artifact,
+        })),
+      };
     });
 
-    return resolved.flat();
+    return {
+      pages: resolved.flatMap((r) => r.pages),
+      artifacts: resolved.flatMap((r) => r.artifacts),
+    };
   }
 
   async function targetProjectKey(input?: {
@@ -401,20 +503,22 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
   return {
     async listPages(input) {
       const projectKey = await targetProjectKey(input);
-      const instances = await scanTopLevelSessions(projectKey);
+      const scanned = await scanTopLevelSessions(projectKey);
       return {
         projectKey,
-        items: mergeInstancesToLibraryItems(instances),
+        items: mergeInstancesToLibraryItems(scanned.pages, scanned.artifacts),
       };
     },
 
     async listPagesWithPaths(input) {
       const { items } = await this.listPages({ workspaceRoot: input.workspaceRoot });
       const realSessionsDir = await platform.resolveReal(sessionsDir);
-      return items.map((item) => ({
-        ...item,
-        path: paths.join(realSessionsDir, "attachments", item.sessionId, item.file),
-      }));
+      return items
+        .filter((item) => item.kind !== "artifact" && item.file !== "")
+        .map((item) => ({
+          ...item,
+          path: paths.join(realSessionsDir, "attachments", item.sessionId, item.file),
+        }));
     },
 
     async listProjects(input) {
@@ -423,23 +527,29 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
         nocturneHome,
         input?.workspaceRoot ?? defaultWorkspaceRoot,
       );
-      const instances = await scanTopLevelSessions();
+      const scanned = await scanTopLevelSessions();
       const byProject = new Map<
         string,
-        { identity: WorkspaceProjectIdentity; instances: ScannedPageInstance[] }
-      >();
-      for (const inst of instances) {
-        let bucket = byProject.get(inst.project.key);
-        if (bucket === undefined) {
-          bucket = { identity: inst.project, instances: [] };
-          byProject.set(inst.project.key, bucket);
+        {
+          identity: WorkspaceProjectIdentity;
+          pages: ScannedPageInstance[];
+          artifacts: ScannedArtifactInstance[];
         }
-        bucket.instances.push(inst);
-      }
+      >();
+      const ensureBucket = (identity: WorkspaceProjectIdentity) => {
+        let bucket = byProject.get(identity.key);
+        if (bucket === undefined) {
+          bucket = { identity, pages: [], artifacts: [] };
+          byProject.set(identity.key, bucket);
+        }
+        return bucket;
+      };
+      for (const inst of scanned.pages) ensureBucket(inst.project).pages.push(inst);
+      for (const inst of scanned.artifacts) ensureBucket(inst.project).artifacts.push(inst);
 
       const projects: PageLibraryProject[] = [];
-      for (const { identity, instances: projectInstances } of byProject.values()) {
-        const merged = mergeInstancesToLibraryItems(projectInstances);
+      for (const { identity, pages, artifacts } of byProject.values()) {
+        const merged = mergeInstancesToLibraryItems(pages, artifacts);
         if (merged.length === 0) continue;
         projects.push({
           key: identity.key,
@@ -462,10 +572,10 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
 
     async listProjectPanelPageFiles(input) {
       const current = await resolveWorkspaceProject(platform, nocturneHome, input.workspaceRoot);
-      const instances = await scanTopLevelSessions(current.key);
+      const scanned = await scanTopLevelSessions(current.key);
       const realSessionsDir = await platform.resolveReal(sessionsDir);
       const files = new Set<string>();
-      for (const inst of instances) {
+      for (const inst of scanned.pages) {
         if (input.excludeSessionId !== undefined && inst.sessionId === input.excludeSessionId) {
           continue;
         }
@@ -525,7 +635,7 @@ export function createPageLibrary(deps: PageLibraryDeps): PageLibrary {
       if (latest === undefined || !isSafeAttachmentFilename(latest.file.file)) return undefined;
 
       // 沿同项目血缘解析最终来源，确保跨多次续改/分叉后仍沿用最早来源
-      const projectInstances = await scanTopLevelSessions(currentProject.key);
+      const projectInstances = (await scanTopLevelSessions(currentProject.key)).pages;
       const canonicalOrigins = resolveCanonicalOrigins(projectInstances);
       const matchedInstance = projectInstances.find(
         (inst) => inst.sessionId === targetSessionId && inst.summary.page === targetPageId,

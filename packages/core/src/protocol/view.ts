@@ -48,6 +48,12 @@ import {
   reducePageComments,
   type SessionPage,
 } from "./pages.js";
+import {
+  appendSessionArtifactFromCompletion,
+  type OpenArtifactWakeSnapshot,
+  type SessionArtifact,
+  type ToolCompletedArtifact,
+} from "./open-artifact.js";
 import type { PageCommentsSnapshot } from "./page-comments.js";
 import type { MessageQuote } from "./quotes.js";
 import { effectiveEvents, rewindNotification, firstUserText } from "./rewind.js";
@@ -89,6 +95,8 @@ export interface SessionView {
   notes: NoteItem[];
   /** 当前会话有效页面及版本列表（ADR-0109）；从带有效 inline 标记的成功工具结果派生 */
   pages: SessionPage[];
+  /** 当前会话有效 Open Artifact 作品列表（ADR-0125）；从 tool.completed.artifact 派生 */
+  artifacts: SessionArtifact[];
   /** 每次归约 +1；不参与重放等价 */
   revision: number;
   meta:
@@ -185,6 +193,8 @@ export interface UserEntry {
   workMode?: WorkModeSnapshot | undefined;
   /** 面板页面评论快照（ADR-0113）：界面在消息里显示评论标签 */
   pageComments?: PageCommentsSnapshot | undefined;
+  /** Open Artifact 评论/请求唤醒快照（ADR-0125） */
+  openArtifactWake?: OpenArtifactWakeSnapshot | undefined;
   /** 引用回复片段（ADR-0116）：界面在消息正文上方显示引用 */
   quotes?: MessageQuote[] | undefined;
   descriptions?: AttachmentDescribedPayload[] | undefined;
@@ -318,6 +328,7 @@ export interface ToolEntry {
         attachments?: ImageAttachment[] | undefined;
         files?: FileAttachment[] | undefined;
         ui?: ToolCompletedUi | undefined;
+        artifact?: ToolCompletedArtifact | undefined;
         usage?: Usage | undefined;
         usageModel?: ModelRef | undefined;
         durationMs: number | undefined;
@@ -446,6 +457,7 @@ export function createSessionView(): SessionView {
     todos: [],
     notes: [],
     pages: [],
+    artifacts: [],
     backgroundShells: [],
     revision: 0,
     meta: undefined,
@@ -586,6 +598,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         view.todos = rebuilt.todos;
         view.notes = rebuilt.notes;
         view.pages = rebuilt.pages;
+        view.artifacts = rebuilt.artifacts;
         if (rebuilt.ensemble !== undefined) {
           view.ensemble = rebuilt.ensemble;
         } else if (event.payload.fork === true || view.ensemble?.status !== "active") {
@@ -694,6 +707,9 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
           : {}),
         ...(event.payload.pageComments !== undefined
           ? { pageComments: event.payload.pageComments }
+          : {}),
+        ...(event.payload.openArtifactWake !== undefined
+          ? { openArtifactWake: event.payload.openArtifactWake }
           : {}),
         ...(event.payload.quotes?.length ? { quotes: event.payload.quotes } : {}),
         ...(event.payload.attachments !== undefined
@@ -856,6 +872,7 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         ...(p.attachments !== undefined ? { attachments: p.attachments } : {}),
         ...(p.files !== undefined ? { files: p.files } : {}),
         ...(p.ui !== undefined ? { ui: p.ui } : {}),
+        ...(p.artifact !== undefined ? { artifact: p.artifact } : {}),
         ...(p.usage !== undefined ? { usage: p.usage } : {}),
         ...(p.usageModel !== undefined ? { usageModel: p.usageModel } : {}),
         durationMs: p.durationMs,
@@ -885,6 +902,9 @@ function reduceDurable(view: SessionView, event: DurableEvent, rebuilding = fals
         }
       } else {
         delete entry.inlineFiles;
+      }
+      if (p.status === "ok" && p.artifact !== undefined) {
+        appendSessionArtifactFromCompletion(view.artifacts, p.artifact, event.seq, event.time);
       }
       b.attachments.set(event.seq, entry);
       // ADR-0032 §3：待回答的提问随对应调用的结算清除

@@ -251,6 +251,10 @@ import type {
   MemorySettings,
   ModelPricing,
   ModelRef,
+  OpenArtifactHostEvent,
+  OpenArtifactTheme,
+  OpenArtifactViewTicket,
+  OpenArtifactWakeSnapshot,
   PageModelInput,
   PagePermissionReply,
   PendingInputMode,
@@ -289,6 +293,7 @@ import {
   DEFAULT_GIT_CONFIG,
   DEFAULT_LOOP_GUARD,
   DEFAULT_WORKTREE_CONFIG,
+  deriveSessionArtifacts,
   deriveSessionPages,
   isMemoryScope,
   isValidMemoryName,
@@ -440,6 +445,10 @@ import {
   type McpServerConfig,
   type McpServerStatus,
   type McpSession,
+  type OpenArtifactConnector,
+  type OpenArtifactSessionAccess,
+  type OpenArtifactWakeDelivery,
+  type OpenArtifactWakeResult,
   type PermissionGate,
   type PluginMcpCacheKey,
   type ScheduleAccess,
@@ -546,6 +555,8 @@ export interface RuntimeOptions {
   shell?: { background: boolean } | undefined;
   /** ADR-0049：外部 agent 连接器；Core 只负责委派、权限和共享并发限制。 */
   externalAgents?: ExternalAgentConnector | undefined;
+  /** ADR-0125：Open Artifact 连接器（Core 不依赖上游 SDK，装配方注入） */
+  openArtifact?: OpenArtifactConnector | undefined;
   /** ADR-0100：随发行包分发的内置插件目录（宿主显式传入；缺省时无内置插件） */
   builtinPluginsDir?: string | undefined;
   /** ADR-0096 第二期：注入 Codex / Claude 插件根目录（测试与嵌入方用） */
@@ -671,6 +682,8 @@ export interface SubmitInput {
   workMode?: WorkModeName | undefined;
   /** 面板页面评论（ADR-0113）：随用户消息持久化并追加英文评论块给模型 */
   pageComments?: PageCommentsInput | undefined;
+  /** Open Artifact 评论/请求唤醒快照（ADR-0125）：由 Runtime 唤醒路由注入 */
+  openArtifactWake?: OpenArtifactWakeSnapshot | undefined;
   /** 引用回复片段（ADR-0116）：随用户消息持久化并在 content 最前面加入引用文本块 */
   quotes?: MessageQuote[] | undefined;
 }
@@ -1207,6 +1220,26 @@ export interface Runtime {
   listPageProjects(input?: {
     workspaceRoot?: string | undefined;
   }): Promise<PageLibraryProjectsResult>;
+  /** Open Artifact 本机视图打开（ADR-0125；仅限本机客户端调用，不发往远程设备） */
+  openArtifactView(
+    url: string,
+    options?: { theme?: OpenArtifactTheme | undefined },
+  ): Promise<OpenArtifactViewTicket>;
+  /** Open Artifact 本机地址解析（供本机终端提供可用入口，不创建编辑器视图票据） */
+  resolveLocalArtifactUrl(url: string): Promise<{
+    url: string;
+    viewUrl: string;
+    title?: string | undefined;
+    type?: string | undefined;
+  }>;
+  /** Open Artifact daemon 声明的允许加载源列表（仅本机） */
+  openArtifactEmbedOrigins(): Promise<string[]>;
+  /** 同步桌面主题到已打开的 Open Artifact 编辑器视图（仅本机） */
+  setOpenArtifactTheme(theme: OpenArtifactTheme): Promise<void>;
+  /** 关闭指定视图票据对应的 Open Artifact 宿主通道（仅本机） */
+  closeOpenArtifactView(view: string): void;
+  /** 订阅 Open Artifact 宿主事件（打开请求、来源更新、Shell 事件、非所有者通知、作品变更） */
+  onOpenArtifactEvent(listener: (event: OpenArtifactHostEvent) => void): () => void;
   /** 已配置 Provider 声明的模型清单（含已加载的可信项目层）；input.workspaceRoot 见上 */
   listModels(input?: {
     workspaceRoot?: string | undefined;
@@ -1655,8 +1688,55 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     suiteCoordinatorBusy?(): boolean;
     /** 广播到本会话失败时的提示出口 */
     applyFailed(scope: string, error: unknown): void;
+    /** Open Artifact 所有者评论唤醒投递（空闲立即开 Turn，忙时排队） */
+    deliverOpenArtifactWake?(
+      text: string,
+      snapshot: OpenArtifactWakeSnapshot,
+    ): OpenArtifactWakeResult;
+    /** Open Artifact 非所有者评论/系统通知：以通知展示，不作为用户轮次 */
+    emitOpenArtifactNotice?(summary: string): void;
   }
   const openSessions = new Map<string, OpenSessionHooks>();
+  /** 因 Open Artifact 评论唤醒而从磁盘临时恢复的会话：若客户端随后 resumeSession 直接交接，否则空闲后自动关闭释放锁 */
+  const wakeOpenedSessions = new Map<string, RuntimeSession>();
+  const openArtifactConnector = options.openArtifact;
+  const openArtifactEventListeners = new Set<(event: OpenArtifactHostEvent) => void>();
+  const emitOpenArtifactHostEvent = (event: OpenArtifactHostEvent): void => {
+    for (const listener of openArtifactEventListeners) {
+      try {
+        listener(event);
+      } catch {
+        // 单个监听异常不影响其他监听
+      }
+    }
+  };
+  /** 重连补投去重表（保留最近 500 条已投递键） */
+  const deliveredOpenArtifactWakes = new Map<string, number>();
+  const recordDeliveredWake = (dedupeKey: string): void => {
+    deliveredOpenArtifactWakes.set(dedupeKey, Date.now());
+    if (deliveredOpenArtifactWakes.size > 500) {
+      const oldest = deliveredOpenArtifactWakes.keys().next().value;
+      if (oldest !== undefined) deliveredOpenArtifactWakes.delete(oldest);
+    }
+  };
+  const openArtifactAccessFor = (input: {
+    sessionId: string;
+    workspace: string;
+    title?: string | undefined;
+    permissionPreset: string;
+    isSubagent: boolean;
+  }): OpenArtifactSessionAccess => {
+    const readOnly = input.permissionPreset === "read-only";
+    return {
+      sessionId: input.sessionId,
+      workspace: input.workspace,
+      ...(input.title !== undefined && input.title.trim() !== "" ? { title: input.title } : {}),
+      role: readOnly ? "read-only" : input.isSubagent ? "subagent" : "main",
+      may: readOnly
+        ? { create: false, modify: false, remove: false, reply: false }
+        : { create: true, modify: true, remove: true, reply: true },
+    };
+  };
   const pageLibrary = createPageLibrary({
     platform,
     store,
@@ -2613,6 +2693,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         continue;
       tools.register(tool);
     }
+    if (openArtifactConnector !== undefined && meta.schedule === undefined && !isSuiteCoordinator) {
+      const mainSession = meta.parent === undefined;
+      if (residentChild?.preset !== "explore") {
+        for (const tool of openArtifactConnector.tools({ mainSession })) {
+          tools.register(tool);
+        }
+      }
+    }
     if (residentChild !== undefined) {
       for (const extra of residentChild.extraTools) {
         tools.unregister(extra.name);
@@ -2735,6 +2823,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                     }
                   : {}),
               });
+              void syncOpenArtifactSession();
               policy = buildPolicy(session.state().config.permissionPreset);
             }
             void touchManagedWorktree(sessionsDir, realTarget, session.id).catch(() => undefined);
@@ -3206,6 +3295,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const execEnv: ExecutionEnvironment = {
       currentDirectory: () => ({ cwd: currentCwd(), workspaceRoot: currentWorkspaceRoot() }),
       checkpoint: createCheckpointRecorder(session, platform, sessionsDir),
+      ...(openArtifactConnector !== undefined
+        ? {
+            onFilesWritten: (writtenPaths: readonly string[], sid: string, cwdPath: string) =>
+              openArtifactConnector.notifyFilesWritten(writtenPaths, {
+                sessionId: sid,
+                workspace: cwdPath,
+              }),
+          }
+        : {}),
       platform,
       gate,
       readState: createReadStateStore(paths),
@@ -3233,6 +3331,39 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       // ADR-0109：读取当前会话有效历史页面列表
       pages: () => session.state().pages,
     };
+    const syncOpenArtifactSession = async (opts?: { ensure?: boolean }): Promise<void> => {
+      if (
+        openArtifactConnector === undefined ||
+        meta.schedule !== undefined ||
+        isSuiteCoordinator
+      ) {
+        return;
+      }
+      const st = session.state();
+      let sessionTitle: string | undefined;
+      for (const ev of session.durableEvents()) {
+        if (ev.type === "session.titled") sessionTitle = ev.payload.title;
+      }
+      await openArtifactConnector
+        .syncSession(
+          openArtifactAccessFor({
+            sessionId: session.id,
+            workspace: currentCwd(),
+            title: sessionTitle,
+            permissionPreset: st.config.permissionPreset,
+            isSubagent: meta.parent !== undefined,
+          }),
+          opts,
+        )
+        .catch(() => undefined);
+    };
+    if (openArtifactConnector !== undefined && meta.schedule === undefined && !isSuiteCoordinator) {
+      const hasExistingArtifacts = deriveSessionArtifacts(session.durableEvents()).length > 0;
+      void syncOpenArtifactSession({ ensure: hasExistingArtifacts });
+      teardown.push(() => {
+        void openArtifactConnector.detachSession(session.id, currentCwd()).catch(() => undefined);
+      });
+    }
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
       if (src?.maxSteps !== undefined) turnConfig.maxSteps = src.maxSteps;
@@ -4757,6 +4888,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ...(skillInvocation !== undefined ? { skillInvocation } : {}),
         ...(delegation !== undefined ? { delegate: delegation } : {}),
         ...(workMode !== undefined ? { workMode } : {}),
+        ...(input.openArtifactWake !== undefined
+          ? { openArtifactWake: input.openArtifactWake }
+          : {}),
         ...(quotes !== undefined ? { quotes } : {}),
       };
       if (workMode !== undefined) workModeStarts.add(prepared);
@@ -4843,6 +4977,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await session.emit("session.config_changed", { permissionPreset: name, plan });
       policy = buildPolicy(name);
       warnMissingReviewer();
+      void syncOpenArtifactSession();
     };
     /** 退出计划模式时恢复的预设：进入前就是只读时改用 default */
     const planExitPreset = (plan: PlanConfig): string =>
@@ -4879,6 +5014,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (started === "ensemble") {
         ensembleTurnStarting = true;
         syncEnsembleTools();
+      }
+      if (started === "artifact") {
+        await syncOpenArtifactSession({ ensure: true });
       }
       installGoalTool();
     };
@@ -5464,6 +5602,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               session.state().config.reasoningEffort,
               model.model.capabilities.reasoningEffort,
             ) ?? "off";
+          void openArtifactConnector
+            ?.setSessionStatus(session.id, currentCwd(), "running")
+            .catch(() => undefined);
           reason = await runTurn(
             deps,
             preparedContent(prepared),
@@ -5481,7 +5622,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             prepared.pageComments,
             prepared.pageCommentScreenshotIndices,
             prepared.quotes,
+            prepared.openArtifactWake,
           );
+          void openArtifactConnector
+            ?.setSessionStatus(session.id, currentCwd(), "idle")
+            .catch(() => undefined);
           if (ensembleTurnStarting) {
             ensembleTurnStarting = false;
             syncEnsembleTools();
@@ -5820,6 +5965,38 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         if (meta.parent !== undefined)
           throw new RuntimeCommandError("invalid_command", "子会话不能改名");
         await session.emit("session.titled", { title, source: "user" });
+        void openArtifactConnector
+          ?.renameSession(session.id, currentCwd(), title)
+          .catch(() => undefined);
+      },
+      deliverOpenArtifactWake: (text, snapshot) => {
+        if (closing || session.health !== "ok") return { status: "failed" };
+        if (meta.parent !== undefined || isSuiteCoordinator) return { status: "failed" };
+        const visibleText = snapshot.summary.trim() !== "" ? snapshot.summary.trim() : text;
+        const prepared: PreparedInput = {
+          content: [{ type: "text", text: visibleText }],
+          appended: visibleText !== text ? [{ type: "text", text }] : [],
+          openArtifactWake: snapshot,
+        };
+        if (busy() || compacting() || pendingInputStore.snapshot().paused) {
+          pendingInputStore.add("queue", prepared);
+          return { status: "queued" };
+        }
+        const ac = new AbortController();
+        void startTurns(ac, () => Promise.resolve(prepared)).catch((cause: unknown) => {
+          session.emitEphemeral("runtime.warning", {
+            code: "open_artifact_wake_failed",
+            message: `作品评论投递失败：${cause instanceof Error ? cause.message : String(cause)}`,
+          });
+        });
+        return { status: "delivered" };
+      },
+      emitOpenArtifactNotice: (summary) => {
+        if (closing || session.health !== "ok") return;
+        session.emitEphemeral("runtime.warning", {
+          code: "open_artifact_notice",
+          message: summary,
+        });
       },
       applyFailed: (scope, error) => {
         const reason = error instanceof Error ? error.message : String(error);
@@ -6467,6 +6644,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         await session.emit("session.config_changed", { permissionPreset: name });
         policy = buildPolicy(name);
         warnMissingReviewer();
+        void syncOpenArtifactSession();
       },
       shellInfo() {
         const res = shellResolver.current();
@@ -7351,7 +7529,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     stopScheduler: () => scheduler.stop(),
     close: async () => {
-      await Promise.all([scheduler.stop(), imageProcessor.close()]);
+      const wakeSessions = [...wakeOpenedSessions.values()];
+      wakeOpenedSessions.clear();
+      await Promise.all([
+        scheduler.stop(),
+        imageProcessor.close(),
+        ...wakeSessions.map((s) => s.close().catch(() => undefined)),
+        Promise.resolve(openArtifactConnector?.close()).catch(() => undefined),
+      ]);
     },
     describeMcpServers: (input = {}) =>
       requireMcpConfig().describeMcpServers(
@@ -8533,6 +8718,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       // 本身可能打开尚未在用的成员会话。是否为合格顶层会话正是 validate 的职责，
       // 不能由快路径截胡。无 validate 的调用方（桌面等）保持共享行为不变。
       if (resumeOpts?.validate === undefined) {
+        const wakeOwned = wakeOpenedSessions.get(id);
+        if (wakeOwned !== undefined) {
+          wakeOpenedSessions.delete(id);
+          return wakeOwned;
+        }
         for (const hooks of openSessions.values()) {
           const sharedMember = await hooks.ensembleMember?.(id);
           if (sharedMember !== undefined) return sharedMember;
@@ -8599,6 +8789,39 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       searchSessions(platform, store, sessionsDir, query, options),
     listPages: (input) => pageLibrary.listPages(input),
     listPageProjects: (input) => pageLibrary.listProjects(input),
+    openArtifactView(url, opts) {
+      if (openArtifactConnector === undefined) {
+        return Promise.reject(
+          new RuntimeCommandError("invalid_command", "Open Artifact 运行时不可用"),
+        );
+      }
+      return openArtifactConnector.openView(url, opts);
+    },
+    resolveLocalArtifactUrl(url) {
+      if (openArtifactConnector === undefined) {
+        return Promise.reject(
+          new RuntimeCommandError("invalid_command", "Open Artifact 运行时不可用"),
+        );
+      }
+      return openArtifactConnector.resolveLocalUrl(url);
+    },
+    openArtifactEmbedOrigins() {
+      if (openArtifactConnector === undefined) return Promise.resolve([]);
+      return openArtifactConnector.getEmbedOrigins();
+    },
+    setOpenArtifactTheme(theme) {
+      if (openArtifactConnector === undefined) return Promise.resolve();
+      return openArtifactConnector.setTheme(theme);
+    },
+    closeOpenArtifactView(view) {
+      openArtifactConnector?.closeView(view);
+    },
+    onOpenArtifactEvent(listener) {
+      openArtifactEventListeners.add(listener);
+      return () => {
+        openArtifactEventListeners.delete(listener);
+      };
+    },
     cancelSubagent(input) {
       if (!backgroundSubagents.cancel(input.parentSessionId, input.childSessionId))
         return Promise.reject(new RuntimeCommandError("invalid_command", "没有运行中的后台子代理"));
@@ -9031,6 +9254,118 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ? config.setPreference(key, value)
         : Promise.reject(new Error("未注入 RuntimeConfig，无法保存偏好")),
   };
+  if (openArtifactConnector?.bindRuntime !== undefined) {
+    openArtifactConnector.bindRuntime({
+      onHostEvent: emitOpenArtifactHostEvent,
+      onWake: async (wake: OpenArtifactWakeDelivery): Promise<OpenArtifactWakeResult> => {
+        if (deliveredOpenArtifactWakes.has(wake.dedupeKey)) {
+          return { status: "delivered" };
+        }
+        // 安全边界（ADR-0125 / 上游 wake.md）：仅 owner 来源可成为用户轮次；
+        // collaborator / system 及其他来源一律保留为通知，不进入用户角色。
+        if (wake.fromKind !== "owner") {
+          recordDeliveredWake(wake.dedupeKey);
+          const who = wake.fromName ? `${wake.fromName}（${wake.fromKind}）` : wake.fromKind;
+          const noticeText = `作品「${wake.title || wake.artifactId}」收到来自 ${who} 的消息：${wake.summary}`;
+          if (wake.sessionId !== null) {
+            openSessions.get(wake.sessionId)?.emitOpenArtifactNotice?.(noticeText);
+          }
+          emitOpenArtifactHostEvent({
+            kind: "notice",
+            sessionId: wake.sessionId,
+            artifactUrl: wake.artifactUrl,
+            title: wake.title,
+            fromKind: wake.fromKind,
+            ...(wake.fromName !== undefined ? { fromName: wake.fromName } : {}),
+            summary: wake.summary,
+            text: wake.text,
+          });
+          return { status: "delivered" };
+        }
+
+        const targetSessionId = wake.sessionId;
+        if (targetSessionId === null || targetSessionId.trim() === "") {
+          return { status: "failed" };
+        }
+        const snapshot: OpenArtifactWakeSnapshot = {
+          artifactUrl: wake.artifactUrl,
+          artifactId: wake.artifactId,
+          title: wake.title,
+          reason: wake.reason,
+          fromKind: wake.fromKind,
+          ...(wake.fromName !== undefined ? { fromName: wake.fromName } : {}),
+          summary: wake.summary,
+          ...(wake.threads !== undefined && wake.threads.length > 0
+            ? { threads: wake.threads }
+            : {}),
+        };
+
+        const deliverToOpen = (
+          hooks: OpenSessionHooks,
+          resumed: boolean,
+        ): OpenArtifactWakeResult => {
+          if (hooks.deliverOpenArtifactWake === undefined) return { status: "failed" };
+          const result = hooks.deliverOpenArtifactWake(wake.text, snapshot);
+          if (result.status !== "failed") {
+            recordDeliveredWake(wake.dedupeKey);
+            notifySessionsChanged();
+            return resumed && result.status === "delivered"
+              ? { status: "resumed", ...(result.session ? { session: result.session } : {}) }
+              : result;
+          }
+          return result;
+        };
+
+        const existing = openSessions.get(targetSessionId);
+        if (existing !== undefined) {
+          return deliverToOpen(existing, false);
+        }
+
+        // 会话未在内存中打开（已空闲关闭或应用重启）：尝试恢复原会话并投递
+        const summaries = await store.list({ includeArchived: true }).catch(() => []);
+        if (!summaries.some((s) => s.id === targetSessionId)) {
+          return { status: "failed" };
+        }
+        let resumedSession: RuntimeSession;
+        try {
+          resumedSession = await runtime.resumeSession(targetSessionId);
+        } catch {
+          return { status: "failed" };
+        }
+        const reopened = openSessions.get(targetSessionId);
+        if (reopened === undefined) {
+          await resumedSession.close().catch(() => undefined);
+          return { status: "failed" };
+        }
+        wakeOpenedSessions.set(targetSessionId, resumedSession);
+        const result = deliverToOpen(reopened, true);
+        if (result.status === "failed") {
+          if (wakeOpenedSessions.get(targetSessionId) === resumedSession) {
+            wakeOpenedSessions.delete(targetSessionId);
+            await resumedSession.close().catch(() => undefined);
+          }
+          return result;
+        }
+        const releaseIfUnclaimed = (): void => {
+          if (wakeOpenedSessions.get(targetSessionId) !== resumedSession) return;
+          if (!resumedSession.isIdle()) return;
+          wakeOpenedSessions.delete(targetSessionId);
+          unsubIdle();
+          void resumedSession
+            .close()
+            .catch(() => undefined)
+            .finally(() => {
+              notifySessionsChanged();
+            });
+        };
+        const unsubIdle = resumedSession.onIdle(releaseIfUnclaimed);
+        if (resumedSession.isIdle()) {
+          releaseIfUnclaimed();
+        }
+        return result;
+      },
+    });
+  }
   // 调度器在 Runtime 装配完成后启动（启动时先做一次补跑检查）；失败只警告，不让 createRuntime 失败
   if (options.scheduler === true) {
     await scheduler.start().catch((e: unknown) => {
@@ -9178,6 +9513,10 @@ export type {
   McpServerStatus,
   McpSession,
   McpToolDiff,
+  OpenArtifactConnector,
+  OpenArtifactSessionAccess,
+  OpenArtifactWakeDelivery,
+  OpenArtifactWakeResult,
   PluginMcpCacheKey,
   ToolContext,
   ToolDefinition,
@@ -9294,4 +9633,5 @@ export {
   type McpSearchMatch,
   type McpSearchOutput,
   type ToolDispatchResult,
+  type ToolScope,
 } from "./tools/index.js";

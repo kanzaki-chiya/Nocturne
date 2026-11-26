@@ -74,6 +74,9 @@ export class PendingInputs {
             },
           }
         : {}),
+      ...(entry.input.openArtifactWake !== undefined
+        ? { openArtifactWake: entry.input.openArtifactWake }
+        : {}),
       ...(entry.input.quotes?.length ? { quotes: entry.input.quotes } : {}),
     }));
     return { items, paused: items.length > 0 && items.every((item) => item.paused) };

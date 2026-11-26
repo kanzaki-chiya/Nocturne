@@ -423,6 +423,27 @@ const payloadSchemas = {
       .optional(),
     // ADR-0113：面板页面评论快照；兼容扩展，旧版本按普通用户消息读取
     pageComments: pageCommentsSchema.optional(),
+    // ADR-0125：Open Artifact 评论/请求唤醒快照；兼容扩展，旧版本按普通用户消息读取
+    openArtifactWake: z
+      .object({
+        artifactUrl: z.string(),
+        artifactId: z.string(),
+        title: z.string(),
+        reason: z.string(),
+        fromKind: z.string(),
+        fromName: z.string().optional(),
+        summary: z.string(),
+        threads: z
+          .array(
+            z.object({
+              id: z.string(),
+              where: z.string().optional(),
+              text: z.string(),
+            }),
+          )
+          .optional(),
+      })
+      .optional(),
     // ADR-0116：引用回复片段；兼容扩展，旧版本按普通用户消息读取
     quotes: z.array(messageQuoteSchema).optional(),
   }),
@@ -509,6 +530,17 @@ const payloadSchemas = {
         serverId: z.string(),
         resourceUri: z.string(),
         surface: z.string().optional(),
+      })
+      .optional(),
+    artifact: z
+      .object({
+        url: z.string(),
+        id: z.string(),
+        title: z.string(),
+        type: z.string(),
+        summary: z.string().optional(),
+        open: z.boolean().optional(),
+        removed: z.boolean().optional(),
       })
       .optional(),
     sensitiveForModel: z.literal(true).optional(),

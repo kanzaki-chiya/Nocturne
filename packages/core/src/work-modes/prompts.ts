@@ -75,12 +75,21 @@ function ensembleBody(context: WorkModeContext): string {
   ].join("\n");
 }
 
+const ARTIFACT = [
+  "Open Artifact mode: create or update an editable artifact for the request above using the Open Artifact tools (`Artifact`, `ArtifactData`, `ArtifactComments`).",
+  "- Do NOT use `render_html` for editable artifacts, pages, dashboards, widgets, or multi-artboard designs; `render_html` is strictly for inline read-only charts.",
+  '- When creating a new artifact, call `Artifact` with `action: "quickstart"` first to see the available native types (including `design` for clickable multi-artboard HTML designs and `page` for standalone runnable HTML pages) and their authoring instructions.',
+  "- To preserve manual user edits on an existing artifact, read the latest files or store state before editing and apply minimal targeted updates instead of overwriting unchanged parts.",
+  "- When addressing user comments from the editor, read the relevant thread/files first, make the requested updates, and reply/resolve using `ArtifactComments`.",
+].join("\n");
+
 const BODIES: Record<WorkModeName, (context: WorkModeContext) => string> = {
   "grill-me": () => GRILL_ME,
   goal: () => GOAL,
   plan: () => PLAN,
   fugue: fugueBody,
   ensemble: ensembleBody,
+  artifact: () => ARTIFACT,
 };
 
 /** 用户批准计划后开新 Turn 的说明（ADR-0076 §5） */

@@ -5,8 +5,13 @@ import type {
   InlinePageMeta,
   ExternalAgentProbeResult,
   McpProbeResult,
+  OpenArtifactHostEvent,
+  OpenArtifactTheme,
+  OpenArtifactViewTicket,
+  OpenArtifactWakeThread,
   PageOrigin,
   SessionPage,
+  ToolCompletedArtifact,
   ToolCompletedUi,
 } from "../protocol/index.js";
 /**
@@ -88,6 +93,12 @@ export interface ToolTraits {
    * 缺省按可能改动文件处理；拿不准的工具不要声明。
    */
   fileEffects?: "none" | undefined;
+  /**
+   * 工具的 `edit` 权限主体仅作目录/作用域权限闸门（如 Open Artifact 原生工具），
+   * 不代表单文件落盘编辑：执行器跳过单文件 checkpoint 快照，也不将其重复经
+   * `onFilesWritten` 上报。
+   */
+  suppressFilesWrittenNotify?: boolean | undefined;
   /** 能否与其他 concurrencySafe 调用并行执行 */
   concurrencySafe: boolean;
   /** 默认超时（毫秒） */
@@ -159,6 +170,8 @@ export type ToolResult<Output = unknown> =
       attachments?: ToolResultAttachment[] | undefined;
       files?: FileAttachment[] | undefined;
       savedImages?: ImageAttachment[] | undefined;
+      /** Open Artifact 作品元数据（ADR-0125；仅稳定 open-artifact:// 标识） */
+      artifact?: ToolCompletedArtifact | undefined;
       /** 工具执行期间产生的辅助模型用量（ADR-0119 §7）；由执行器透传到 tool.completed */
       usage?: Usage | undefined;
       /** 产生 `usage` 的辅助模型（用于跨会话按模型拆分用量与费用，省略时回落会话当前模型） */
@@ -171,6 +184,7 @@ export type ToolResult<Output = unknown> =
       attachments?: ToolResultAttachment[] | undefined;
       files?: FileAttachment[] | undefined;
       savedImages?: ImageAttachment[] | undefined;
+      artifact?: ToolCompletedArtifact | undefined;
       /** 工具执行期间产生的辅助模型用量（ADR-0119 §7）；由执行器透传到 tool.completed */
       usage?: Usage | undefined;
       /** 产生 `usage` 的辅助模型（用于跨会话按模型拆分用量与费用，省略时回落会话当前模型） */
@@ -605,9 +619,82 @@ export interface McpConnector {
   ): Promise<readonly McpAppToolMeta[] | undefined>;
 }
 
+export interface OpenArtifactSessionAccess {
+  sessionId: string;
+  workspace: string;
+  title?: string | undefined;
+  role: "main" | "subagent" | "read-only";
+  may: {
+    create: boolean;
+    modify: boolean;
+    remove: boolean;
+    reply: boolean;
+  };
+}
+
+export interface OpenArtifactWakeDelivery {
+  sessionId: string | null;
+  workspace: string | null;
+  artifactUrl: string;
+  artifactId: string;
+  title: string;
+  text: string;
+  reason: "comment" | "request" | "task" | (string & {});
+  fromKind: "owner" | "collaborator" | "system" | (string & {});
+  fromName?: string | undefined;
+  summary: string;
+  threads?: OpenArtifactWakeThread[] | undefined;
+  dedupeKey: string;
+}
+
+export interface OpenArtifactWakeResult {
+  status: "delivered" | "resumed" | "queued" | "drafted" | "failed";
+  session?: string | undefined;
+}
+
+/**
+ * RuntimeOptions.openArtifact 注入点（ADR-0125）：
+ * Core 不依赖 @open-artifact/harness-kit；packages/open-artifact 提供实现，由 CLI/桌面后台装配。
+ */
+export interface OpenArtifactConnector {
+  tools(scope: { mainSession: boolean }): ToolDefinition[];
+  bindRuntime?(handlers: {
+    onWake: (wake: OpenArtifactWakeDelivery) => Promise<OpenArtifactWakeResult>;
+    onHostEvent: (event: OpenArtifactHostEvent) => void;
+  }): void;
+  syncSession(access: OpenArtifactSessionAccess, options?: { ensure?: boolean }): Promise<void>;
+  setSessionStatus(sessionId: string, workspace: string, status: "running" | "idle"): Promise<void>;
+  renameSession(sessionId: string, workspace: string, title: string): Promise<void>;
+  detachSession(sessionId: string, workspace: string): Promise<void>;
+  notifyFilesWritten(
+    paths: readonly string[],
+    caller: { sessionId: string; workspace: string },
+  ): Promise<void>;
+  readSelectionContext(
+    url: string,
+    caller: { sessionId: string; workspace: string },
+  ): Promise<string | undefined>;
+  openView(
+    url: string,
+    options?: { theme?: OpenArtifactTheme | undefined },
+  ): Promise<OpenArtifactViewTicket>;
+  resolveLocalUrl(url: string): Promise<{
+    url: string;
+    viewUrl: string;
+    title?: string | undefined;
+    type?: string | undefined;
+  }>;
+  getEmbedOrigins(): Promise<string[]>;
+  setTheme(theme: OpenArtifactTheme): Promise<void>;
+  closeView(view: string): void;
+  close(): Promise<void> | void;
+}
+
 /** Agent Loop 提供给 Executor 的运行环境；工具看不到它 */
 export interface ExecutionScope extends ToolScope {
   checkpoint?: ExecutionEnvironment["checkpoint"];
+  /** 写文件类工具成功完成后的统一通知（按 edit 主体提取真实路径，不按工具名分支） */
+  onFilesWritten?: ExecutionEnvironment["onFilesWritten"];
   sessionId: string;
   turnId: string;
   /** Turn 级中断信号 */
@@ -667,6 +754,10 @@ export interface ExecutionEnvironment {
         subjects: readonly PermissionSubject[],
         sessionId: string,
       ) => Promise<void>)
+    | undefined;
+  /** 写文件类工具成功完成后的统一通知（按 edit 主体提取真实路径，供 Open Artifact agent.wrote 使用） */
+  onFilesWritten?:
+    | ((paths: readonly string[], sessionId: string, cwd: string) => Promise<void> | void)
     | undefined;
   platform: Platform;
   gate: PermissionGate;

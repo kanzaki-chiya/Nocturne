@@ -26,6 +26,7 @@ import type {
   ImageAttachment,
   LoopGuardConfig,
   MessageQuote,
+  OpenArtifactWakeSnapshot,
   PageCommentsSnapshot,
   PermissionReviewedPayload,
   RuntimeStatus,
@@ -116,6 +117,7 @@ export async function runTurn(
   pageComments?: PageCommentsSnapshot,
   pageCommentScreenshotIndices?: ReadonlySet<number>,
   quotes?: MessageQuote[],
+  openArtifactWake?: OpenArtifactWakeSnapshot,
 ): Promise<TurnEndReason | "failed"> {
   const { session, signal, config } = deps;
   const counters = { message: 0, call: 0 };
@@ -189,6 +191,7 @@ export async function runTurn(
         ...(item.suiteReport !== undefined ? { suiteReport: item.suiteReport } : {}),
         ...(item.workMode !== undefined ? { workMode: item.workMode } : {}),
         ...(item.pageComments !== undefined ? { pageComments: item.pageComments } : {}),
+        ...(item.openArtifactWake !== undefined ? { openArtifactWake: item.openArtifactWake } : {}),
         ...(item.quotes?.length ? { quotes: item.quotes } : {}),
         steer: true,
       },
@@ -411,6 +414,7 @@ export async function runTurn(
         ...(delegate ? { delegate } : {}),
         ...(workMode ? { workMode } : {}),
         ...(pageComments ? { pageComments } : {}),
+        ...(openArtifactWake ? { openArtifactWake } : {}),
         ...(quotes?.length ? { quotes } : {}),
       },
       { turnId, pageCommentScreenshotIndices },

@@ -26,6 +26,7 @@ import type {
 } from "./suite.js";
 import type { GoalConfig, PlanConfig, WorkModeSnapshot } from "./work-modes.js";
 import type { PageCommentsSnapshot } from "./page-comments.js";
+import type { OpenArtifactWakeSnapshot, ToolCompletedArtifact } from "./open-artifact.js";
 import type { MessageQuote } from "./quotes.js";
 import type {
   AgentDelegation,
@@ -179,6 +180,11 @@ export interface MessageUserPayload {
    * 兼容扩展，旧版本按普通用户消息读取，不提升 formatVersion。
    */
   pageComments?: PageCommentsSnapshot | undefined;
+  /**
+   * Open Artifact 评论/请求唤醒快照（ADR-0125 第二批）：供界面展示来源作品与位置，正文保留完整上下文。
+   * 兼容扩展，旧版本按普通用户消息读取，不提升 formatVersion。
+   */
+  openArtifactWake?: OpenArtifactWakeSnapshot | undefined;
   /**
    * 引用回复（ADR-0116）：记录用户选中的消息片段与来源持久事件序号，content 最前面同时含 `> ` 引用文本块。
    * 兼容扩展，旧版本按普通用户消息读取，不提升 formatVersion。
@@ -340,6 +346,8 @@ export interface ToolCompletedPayload {
   files?: FileAttachment[] | undefined;
   /** 插件工具声明了 _meta.ui.resourceUri 时附带的页面定位信息（ADR-0101） */
   ui?: ToolCompletedUi | undefined;
+  /** Open Artifact 作品元数据（ADR-0125 第二批；仅稳定 open-artifact:// 标识，不含回环地址） */
+  artifact?: ToolCompletedArtifact | undefined;
   /** 凭据或授权数据类主体，独立目标核对只读取工具名与状态。 */
   sensitiveForModel?: true | undefined;
   /** 工具执行期间产生的辅助模型用量。 */

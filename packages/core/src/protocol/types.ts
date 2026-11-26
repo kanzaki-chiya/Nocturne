@@ -3,6 +3,7 @@ import type { SkillSnapshot } from "./skills.js";
 import type { EnsemblePostDelivery } from "./ensemble.js";
 import type { SuiteReportDelivery } from "./suite.js";
 import type { PageCommentsSnapshot, PageCommentsSummary } from "./page-comments.js";
+import type { OpenArtifactWakeSnapshot } from "./open-artifact.js";
 import type { MessageQuote } from "./quotes.js";
 /**
  * 公共数据类型（docs/protocols/events.md 第 4 节）。
@@ -808,6 +809,8 @@ export interface PendingInputItem {
   workMode?: string | undefined;
   /** 面板页面评论摘要（ADR-0113）：界面在待发条目显示标签 */
   pageComments?: PageCommentsSummary | undefined;
+  /** Open Artifact 评论/请求唤醒快照（ADR-0125） */
+  openArtifactWake?: OpenArtifactWakeSnapshot | undefined;
   /** 引用回复片段（ADR-0116）：编辑文本时原样保留 */
   quotes?: MessageQuote[] | undefined;
 }

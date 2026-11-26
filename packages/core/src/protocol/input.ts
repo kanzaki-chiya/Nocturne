@@ -16,6 +16,7 @@ import type {
 import type { SkillInvocation, SkillSnapshot } from "./skills.js";
 import type { WorkModeSnapshot } from "./work-modes.js";
 import type { PageCommentsSnapshot } from "./page-comments.js";
+import type { OpenArtifactWakeSnapshot } from "./open-artifact.js";
 import type { MessageQuote } from "./quotes.js";
 
 export interface PreparedInput {
@@ -44,6 +45,8 @@ export interface PreparedInput {
   /** 面板页面评论快照。写入用户消息时分配 ID 并生成英文块。 */
   pageComments?: PageCommentsSnapshot | undefined;
   pageCommentScreenshotIndices?: ReadonlySet<number> | undefined;
+  /** Open Artifact 评论/请求唤醒快照（ADR-0125） */
+  openArtifactWake?: OpenArtifactWakeSnapshot | undefined;
   /** 引用回复片段（ADR-0116）；首块文本在 prepended 里 */
   quotes?: MessageQuote[] | undefined;
 }
