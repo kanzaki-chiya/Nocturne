@@ -916,6 +916,9 @@ export interface ResumeSessionOptions {
    * 校验抛错则关闭会话、释放锁，不向宿主绑定任何工具。校验与恢复在同一把锁内，
    * 读取到的 `state()` 即最终恢复所用的同一份会话状态（无读改竞态）。
    * 用于按宿主归属/工作区决定是否允许恢复，ACP `session/load` 经此拒绝外来会话。
+   * 携带本回调的恢复要求独占并校验目标：从进入 Core 起只走取锁、校验、包装的路径，
+   * 不查询、打开或借用活动合奏/组曲的共享成员（那些快路径返回的是托管 proxy，
+   * 会绕过本校验，且解析本身可能打开尚未在用的成员会话）。
    */
   validate?: ((state: SessionState) => void | Promise<void>) | undefined;
 }
@@ -8408,11 +8411,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     async resumeSession(id, resumeOpts) {
-      for (const hooks of openSessions.values()) {
-        const sharedMember = await hooks.ensembleMember?.(id);
-        if (sharedMember !== undefined) return sharedMember;
-        const sharedThread = await hooks.suiteThread?.(id);
-        if (sharedThread !== undefined) return sharedThread;
+      // 携带 validate 的恢复要求独占并校验目标：从进入 Core 起只走取锁、校验、
+      // 包装的路径，不查询/打开/借用共享成员（ADR-0127 第二阶段收尾）——共享成员
+      // 快路径返回的是托管 proxy，会跳过 validate；且 openOrGetMemberBySessionId
+      // 本身可能打开尚未在用的成员会话。是否为合格顶层会话正是 validate 的职责，
+      // 不能由快路径截胡。无 validate 的调用方（桌面等）保持共享行为不变。
+      if (resumeOpts?.validate === undefined) {
+        for (const hooks of openSessions.values()) {
+          const sharedMember = await hooks.ensembleMember?.(id);
+          if (sharedMember !== undefined) return sharedMember;
+          const sharedThread = await hooks.suiteThread?.(id);
+          if (sharedThread !== undefined) return sharedThread;
+        }
       }
       const session = await store.load(id, { force: resumeOpts?.force });
       try {

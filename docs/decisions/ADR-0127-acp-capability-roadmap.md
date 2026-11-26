@@ -54,6 +54,10 @@
 - 归属、子会话与工作区校验原先在 `resumeSession` 返回完整会话之后才做，Core 会先取锁、装配宿主 MCP 并包装会话，可能在拒绝前误关闭借来的会话或启动宿主工具。修正为把这三项校验放进 `resumeSession` 新增的 `validate` 回调：在取得会话锁、读取持久化状态之后，装配宿主 MCP、绑定工具或投递历史之前执行；校验失败关闭会话、释放锁，宿主工具从未绑定，且与最终恢复读取同一份会话状态（无读改竞态）。id 格式、`cwd` 合法性等不依赖持久化状态的校验仍在锁前完成。
 - 工作区比较原先对所有平台一律 `.toLowerCase()` 并替换反斜杠，会把 POSIX 上大小写或反斜杠不同的独立目录误判为相同。修正为用平台真实路径语义（`paths.equals` 按平台大小写规则 canonicalize）：POSIX 保持区分，Windows 等价路径仍正常匹配；会话工作目录 realpath 失败时拒绝恢复，不再回退到未经验证的字符串比较。
 
+收尾修正（2026-11-27，本阶段验收后）：受校验恢复的入口唯一化——
+
+- `resumeSession` 对活动合奏/组曲成员本有共享快路径（`ensembleMember`/`suiteThread`，命中即返回 Runtime 托管的借用 proxy），原先在 `validate` 之前执行，命中会跳过校验。修正为：携带 `validate` 的恢复从进入 Core 起只走取锁、校验、包装这一条路径，整体跳过共享快路径——不查询、不打开、不借用共享成员。是否为合格顶层会话正是 `validate` 的职责，不能由快路径截胡；且 `openOrGetMemberBySessionId` 可能懒打开尚未在用的成员，校验中的恢复不应触发这种副作用。活动成员会话因被 Runtime 托管持锁，受校验恢复在取锁时以 `session_locked` 拒绝——这是预期结果：宁可不恢复，也不返回绕过资格校验的借用会话。未携带 `validate` 的调用方（桌面端等）共享行为不变。合成 Core fixture 对比见 `packages/core/test/ensemble-member-close.test.ts` 的「受校验恢复与普通恢复的共享成员分流」。
+
 版本：Nocturne 0.68.0（开发分支）、ACP SDK `@agentclientprotocol/sdk` 1.7.0（Nocturne 侧）/ 1.9.0（Paseo 侧捆绑）、Paseo daemon 与 `@getpaseo/plugin` 0.17.5。Paseo 0.17.5 无需插件改动：其 acp-internal 连接在 `agentCapabilities.loadSession` 时自动广告 `session.persistence`，`session.open` 带 persistence 时调用 `loadSession` 并在 ready 前消费回放。
 
 验收结果：
