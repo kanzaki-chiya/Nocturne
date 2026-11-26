@@ -18,6 +18,9 @@ import type {
   UpdateSuiteInput,
 } from "@nocturne/core";
 import type {
+  OpenArtifactHostEvent,
+  OpenArtifactTheme,
+  OpenArtifactViewTicket,
   PageLibraryListResult,
   PageLibraryProjectsResult,
   PageModelInput,
@@ -565,6 +568,36 @@ export interface RpcMethods {
   "runtime.listPageProjects": {
     params: { workspaceRoot?: string | undefined };
     result: PageLibraryProjectsResult;
+  };
+  /** Open Artifact 本机视图打开（ADR-0125；仅本机连接，绝不开放远程） */
+  "openArtifact.openView": {
+    params: { url: string; theme?: OpenArtifactTheme | undefined };
+    result: OpenArtifactViewTicket;
+  };
+  /** Open Artifact 本机 Shell 地址解析（仅本机连接，供终端打开入口） */
+  "openArtifact.resolveLocalUrl": {
+    params: { url: string };
+    result: {
+      url: string;
+      viewUrl: string;
+      title?: string | undefined;
+      type?: string | undefined;
+    };
+  };
+  /** Open Artifact daemon 声明的本机允许加载源列表（仅本机连接） */
+  "openArtifact.embedOrigins": {
+    params: Record<string, never>;
+    result: { origins: string[] };
+  };
+  /** 同步主题到已打开的 Open Artifact 视图（仅本机连接） */
+  "openArtifact.setTheme": {
+    params: { theme: OpenArtifactTheme };
+    result: null;
+  };
+  /** 关闭指定视图票据的 Open Artifact 宿主通道（仅本机连接） */
+  "openArtifact.closeView": {
+    params: { view: string };
+    result: null;
   };
   "runtime.usageStats": { params: { days?: number }; result: UsageStats };
   /**
@@ -1173,6 +1206,8 @@ export interface RpcServerNotifications {
   "grants.changed": GrantsChangedPayload;
   /** 登录会话完成或失败（含取消）；绝不先于对应 login.start/startDraft 的响应到达 */
   "login.completed": LoginCompleted;
+  /** Open Artifact 本机宿主事件（ADR-0125；仅推送给 origin === "local" 的本机连接） */
+  "openArtifact.event": OpenArtifactHostEvent;
 }
 
 const METHOD_TABLE: Record<RpcMethodName, true> = {
@@ -1217,6 +1252,11 @@ const METHOD_TABLE: Record<RpcMethodName, true> = {
   "runtime.searchSessions": true,
   "runtime.listPages": true,
   "runtime.listPageProjects": true,
+  "openArtifact.openView": true,
+  "openArtifact.resolveLocalUrl": true,
+  "openArtifact.embedOrigins": true,
+  "openArtifact.setTheme": true,
+  "openArtifact.closeView": true,
   "runtime.usageStats": true,
   "runtime.createSession": true,
   "runtime.resumeSession": true,

@@ -1668,6 +1668,56 @@ class Connection implements HubPeer {
           ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
         });
       },
+      "openArtifact.openView": async (p) => {
+        const url = reqString(p, "url");
+        const rawTheme = p.theme;
+        let theme: { scheme: "light" | "dark"; accent?: string | undefined } | undefined;
+        if (rawTheme !== undefined && rawTheme !== null) {
+          if (typeof rawTheme !== "object" || Array.isArray(rawTheme)) {
+            throw new InvalidParamsError("theme 必须是对象");
+          }
+          const t = rawTheme as Record<string, unknown>;
+          if (t.scheme !== "light" && t.scheme !== "dark") {
+            throw new InvalidParamsError("theme.scheme 必须是 light 或 dark");
+          }
+          const accent = typeof t.accent === "string" ? t.accent : undefined;
+          theme = { scheme: t.scheme, ...(accent !== undefined ? { accent } : {}) };
+        }
+        return this.runtime().openArtifactView(url, theme !== undefined ? { theme } : undefined);
+      },
+      "openArtifact.resolveLocalUrl": async (p) => {
+        const url = reqString(p, "url");
+        return this.runtime().resolveLocalArtifactUrl(url);
+      },
+      "openArtifact.embedOrigins": async () => {
+        const origins = await this.runtime().openArtifactEmbedOrigins();
+        return { origins };
+      },
+      "openArtifact.setTheme": async (p) => {
+        const rawTheme = p.theme;
+        if (
+          rawTheme === undefined ||
+          rawTheme === null ||
+          typeof rawTheme !== "object" ||
+          Array.isArray(rawTheme)
+        ) {
+          throw new InvalidParamsError("theme 必须是对象");
+        }
+        const t = rawTheme as Record<string, unknown>;
+        if (t.scheme !== "light" && t.scheme !== "dark") {
+          throw new InvalidParamsError("theme.scheme 必须是 light 或 dark");
+        }
+        const accent = typeof t.accent === "string" ? t.accent : undefined;
+        await this.runtime().setOpenArtifactTheme({
+          scheme: t.scheme,
+          ...(accent !== undefined ? { accent } : {}),
+        });
+        return null;
+      },
+      "openArtifact.closeView": (p) => {
+        this.runtime().closeOpenArtifactView(reqString(p, "view"));
+        return null;
+      },
       "runtime.usageStats": (p) => {
         const days = p.days;
         if (

@@ -407,6 +407,15 @@ export interface RpcRuntime {
   listPageProjects(
     input?: RpcParams<"runtime.listPageProjects">,
   ): Promise<RpcResult<"runtime.listPageProjects">>;
+  openArtifactView(
+    input: RpcParams<"openArtifact.openView">,
+  ): Promise<RpcResult<"openArtifact.openView">>;
+  resolveLocalArtifactUrl(
+    input: RpcParams<"openArtifact.resolveLocalUrl">,
+  ): Promise<RpcResult<"openArtifact.resolveLocalUrl">>;
+  openArtifactEmbedOrigins(): Promise<RpcResult<"openArtifact.embedOrigins">>;
+  setOpenArtifactTheme(input: RpcParams<"openArtifact.setTheme">): Promise<void>;
+  closeOpenArtifactView(input: RpcParams<"openArtifact.closeView">): Promise<void>;
   workspaceBranches: Runtime["workspaceBranches"];
   switchBranch: Runtime["switchBranch"];
   usageStats(input: { days?: number }): Promise<UsageStats>;
@@ -1235,6 +1244,15 @@ export function createRpcClient(transport: LineTransport, options: RpcClientOpti
     searchSessions: (input) => call("runtime.searchSessions", input),
     listPages: (input) => call("runtime.listPages", input ?? {}),
     listPageProjects: (input) => call("runtime.listPageProjects", input ?? {}),
+    openArtifactView: (input) => call("openArtifact.openView", input),
+    resolveLocalArtifactUrl: (input) => call("openArtifact.resolveLocalUrl", input),
+    openArtifactEmbedOrigins: () => call("openArtifact.embedOrigins", {}),
+    setOpenArtifactTheme: async (input) => {
+      await call("openArtifact.setTheme", input);
+    },
+    closeOpenArtifactView: async (input) => {
+      await call("openArtifact.closeView", input);
+    },
     workspaceBranches: (input) => call("workspace.branches", input),
     switchBranch: async (input) => {
       await call("workspace.switchBranch", input);

@@ -119,6 +119,17 @@ describe("远程白名单（ADR-0052 修订 2026-10-15）", () => {
     ]) {
       expect(REMOTE_METHODS as readonly string[]).toContain(allowed);
     }
+    for (const localOnly of [
+      "openArtifact.openView",
+      "openArtifact.resolveLocalUrl",
+      "openArtifact.embedOrigins",
+      "openArtifact.setTheme",
+      "openArtifact.closeView",
+    ]) {
+      expect(denied).toContain(localOnly);
+      expect(AGENT_READONLY_METHODS).not.toContain(localOnly);
+      expect(AGENT_RUN_METHODS).not.toContain(localOnly);
+    }
   });
 
   it("手机可操作绑定页面，项目级批准被拦且请求仍可单次批准，agent 无页面权限", async () => {

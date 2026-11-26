@@ -110,6 +110,7 @@ export class Hub {
   private unsubscribeComputer: (() => void) | undefined;
   private unsubscribeAppPermissions: (() => void) | undefined;
   private unsubscribeMemory: (() => void) | undefined;
+  private unsubscribeOpenArtifact: (() => void) | undefined;
 
   get available(): boolean {
     return this.handle !== undefined && !this.stopping;
@@ -258,6 +259,16 @@ export class Hub {
     this.unsubscribeSchedule?.();
     this.unsubscribeSchedule = handle.runtime.onScheduleChanged((payload) => {
       this.notifyScheduleChanged(payload);
+    });
+    this.unsubscribeOpenArtifact?.();
+    this.unsubscribeOpenArtifact = handle.runtime.onOpenArtifactEvent((event) => {
+      if (this.stopping) return;
+      for (const peer of this.peers) {
+        // ADR-0125：绝不向远程设备发送宿主的回环链接或视图票据，仅推送给本机连接
+        if (peer.initialized && peer.origin === "local") {
+          peer.send({ jsonrpc: "2.0", method: "openArtifact.event", params: event });
+        }
+      }
     });
     this.unsubscribeComputer?.();
     this.unsubscribeComputer = handle.computer?.subscribe(() => {
@@ -536,6 +547,8 @@ export class Hub {
     this.unsubscribeAppPermissions = undefined;
     this.unsubscribeMemory?.();
     this.unsubscribeMemory = undefined;
+    this.unsubscribeOpenArtifact?.();
+    this.unsubscribeOpenArtifact = undefined;
     clearTimeout(this.sessionsChangedTimer);
     this.sessionsChangedTimer = undefined;
     for (const session of sessions) session.interrupt();
