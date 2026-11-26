@@ -72,7 +72,7 @@ import type { FocusSource, MouseSource } from "./mouse.js";
 import { createClickTracker } from "./click.js";
 import { inlinePageTitle } from "./attachment-line.js";
 import { writeInlinePageShell } from "./inline-page-open.js";
-import { BROWSER_OPEN_FAILED, openLocalFile } from "./provider-login.js";
+import { BROWSER_OPEN_FAILED, openLocalFile, openLoginBrowser } from "./provider-login.js";
 import type { DialogMouseFrame } from "./components/dialog/mouse.js";
 import { createPasteStore } from "./paste.js";
 import { resumeLabel } from "./resume-label.js";
@@ -1577,6 +1577,27 @@ function SessionApp({
     }
   }, []);
 
+  /** 单击 Open Artifact 作品行或 /artifact open：解析本机编辑地址并交给系统浏览器（ADR-0125） */
+  const openArtifactUrl = useCallback(
+    (url: string, notify?: (line: string) => void): void => {
+      void (async () => {
+        const resolved = await runtime.resolveLocalArtifactUrl(url);
+        const ok = await openLoginBrowser(resolved.viewUrl);
+        if (ok) {
+          notify?.(`已在浏览器打开：${resolved.title ?? url}（${resolved.viewUrl}）`);
+        } else {
+          notify?.(`本机打开地址：${resolved.viewUrl}`);
+          flashNote(`! ${BROWSER_OPEN_FAILED}`);
+        }
+      })().catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (notify) notify(`! 无法打开 Open Artifact 作品：${msg}`);
+        else flashNote(`! 无法打开作品：${msg}`);
+      });
+    },
+    [runtime, flashNote],
+  );
+
   /** 单击内嵌页面行：写外壳文件后交给系统浏览器（ADR-0088 第二版第 2 节） */
   const openInlinePage = useCallback(
     (file: string): void => {
@@ -1713,6 +1734,10 @@ function SessionApp({
             openInlinePage(clicked.slice("page:".length));
             return;
           }
+          if (clicked.startsWith("artifact:")) {
+            openArtifactUrl(clicked.slice("artifact:".length));
+            return;
+          }
           const toggle = g.visible.lines.find((line) => line.toggle?.id === clicked)?.toggle;
           const source = sourceRef.current;
           if (toggle === undefined || source === undefined) return;
@@ -1784,6 +1809,7 @@ function SessionApp({
     moveScroll,
     width,
     openInlinePage,
+    openArtifactUrl,
   ]);
 
   // 跨会话或本会话搜索命中条目定位：在新会话块表与展开态提交后一次算出滚动位置
@@ -3518,6 +3544,52 @@ function SessionApp({
         : parseExternalAgentSlash(expanded, catalogReady ? externalAgents : [], skills);
       if (delegate?.task.trim() === "") {
         pushLine(`用法：/${delegate.agent} 任务`);
+        return;
+      }
+      // ADR-0125：本机终端 Open Artifact 作品入口（/artifact list、/artifact open [url]）
+      const artifactSub = /^\s*\/artifact\s+(list|open)(?:\s+(.*))?$/i.exec(expanded);
+      if (artifactSub !== null) {
+        clearInput();
+        const sub = (artifactSub[1] ?? "").toLowerCase();
+        const arg = (artifactSub[2] ?? "").trim();
+        if (sub === "list") {
+          const ws = view.meta?.workspaceRoot;
+          void runtime
+            .listPages(ws !== undefined ? { workspaceRoot: ws } : undefined)
+            .then((res) => {
+              const artifacts = res.items.filter((item) => item.kind === "artifact");
+              if (artifacts.length === 0) {
+                pushLine("当前项目还没有 Open Artifact 作品；用 /artifact <需求> 创建。");
+                return;
+              }
+              pushLine("Open Artifact 作品：");
+              for (const item of artifacts) {
+                const kind = item.artifact?.type ?? "artifact";
+                pushLine(`  ▣ ${item.title} [${kind}]  ${item.ref}`);
+              }
+              pushLine("用 /artifact open <open-artifact://...> 在本机浏览器打开。");
+            })
+            .catch((e: unknown) => {
+              pushLine(`! ${modelErrorText(e)}`);
+            });
+          return;
+        }
+        let targetUrl = arg;
+        if (targetUrl === "") {
+          const events = session.durableEvents();
+          for (let i = events.length - 1; i >= 0; i -= 1) {
+            const ev = events[i];
+            if (ev?.type === "tool.completed" && ev.payload.artifact !== undefined) {
+              targetUrl = ev.payload.artifact.url;
+              break;
+            }
+          }
+        }
+        if (targetUrl === "") {
+          pushLine("当前会话还没有 Open Artifact 作品；用法：/artifact open <open-artifact://...>");
+          return;
+        }
+        openArtifactUrl(targetUrl, pushLine);
         return;
       }
       // ADR-0076：执行方式命令带任务正文提交；运行中一律排队（不能作为插话）

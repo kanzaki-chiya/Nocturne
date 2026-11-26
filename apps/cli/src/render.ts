@@ -107,6 +107,12 @@ function toolCompletedLines(p: ToolCompletedPayload): string[] {
   }
   const todos = todoItemsFromCompletion(p);
   if (todos !== undefined) lines.push(...todoSnapshotLines(todos).map((line) => `  ${line}`));
+  if (p.artifact !== undefined) {
+    lines.push(
+      `  ${style("cyan", "▣")} ${p.artifact.title} [${p.artifact.type}]  ${p.artifact.url}`,
+    );
+    lines.push(`    本机浏览器打开：/artifact open ${p.artifact.url}`);
+  }
   if (p.truncated === true) {
     lines.push(
       p.spillPath !== undefined

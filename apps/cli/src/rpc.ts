@@ -17,6 +17,7 @@ import {
   type RuntimeMcpSource,
 } from "@nocturne/mcp";
 import { createRpcServer, createStdioTransport } from "@nocturne/rpc/server";
+import { createOpenArtifactConnector } from "@nocturne/open-artifact";
 
 import type { CliArgs } from "./args.js";
 import { resolveBuiltinPluginsDir } from "./builtin-plugins.js";
@@ -126,6 +127,16 @@ export async function runRpcStdio(options: RunRpcOptions): Promise<number> {
           permissions: { autoApproveAsk: false },
           mcp: createMcpConnector({ runtimeServers }),
           externalAgents: createAcpConnector(platform),
+          openArtifact: createOpenArtifactConnector({
+            embedMode: "view",
+            ...(debugEnabled
+              ? {
+                  log: (line) => {
+                    io.stderr.write(`[open-artifact] ${line}\n`);
+                  },
+                }
+              : {}),
+          }),
           ...(builtinPluginsDir !== undefined ? { builtinPluginsDir } : {}),
           debug: {
             enabled: debugEnabled,

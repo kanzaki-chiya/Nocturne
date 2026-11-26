@@ -69,6 +69,12 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     cli: "<任务> 建立常驻成员与留言板协作；/ensemble end 结束",
     task: true,
   },
+  {
+    name: "/artifact",
+    summary: "Open Artifact 作品",
+    cli: "<需求> 创建或编辑作品；/artifact open [url] 在浏览器打开；/artifact list 列出作品",
+    task: true,
+  },
   { name: "/suite", summary: "组曲", tuiOnly: true },
   { name: "/resume", summary: "切换会话", cli: "列出会话或按 id 切换" },
   { name: "/search", summary: "搜索会话", tuiOnly: true },

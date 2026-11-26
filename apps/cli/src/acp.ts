@@ -20,6 +20,7 @@ import {
   type RuntimeConfig,
 } from "@nocturne/core";
 import { createMcpConnector } from "@nocturne/mcp";
+import { createOpenArtifactConnector } from "@nocturne/open-artifact";
 
 import type { CliArgs } from "./args.js";
 import { resolveBuiltinPluginsDir } from "./builtin-plugins.js";
@@ -187,6 +188,7 @@ export async function runAcpStdio(options: RunAcpOptions): Promise<number> {
       permissions: { autoApproveAsk: false },
       mcp: createMcpConnector(),
       externalAgents: createAcpConnector(platform),
+      openArtifact: createOpenArtifactConnector({ embedMode: "none" }),
       ...(builtinPluginsDir !== undefined ? { builtinPluginsDir } : {}),
       debug: {
         enabled: debugEnabled,

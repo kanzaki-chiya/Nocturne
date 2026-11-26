@@ -18,6 +18,7 @@ import {
   type RuntimeSession,
 } from "@nocturne/core";
 import { createMcpConnector } from "@nocturne/mcp";
+import { createOpenArtifactConnector } from "@nocturne/open-artifact";
 
 import { runAcpStdio } from "./acp.js";
 import { HELP_TEXT, parseArgs, resolveUiMode, UsageError, type CliArgs } from "./args.js";
@@ -199,6 +200,7 @@ async function main(): Promise<number> {
         permissions: { autoApproveAsk: args.yes },
         mcp: createMcpConnector(),
         externalAgents: createAcpConnector(platform),
+        openArtifact: createOpenArtifactConnector({ embedMode: "none" }),
         ...(builtinPluginsDir !== undefined ? { builtinPluginsDir } : {}),
         debug: {
           enabled: debugEnabled,
@@ -319,6 +321,7 @@ async function main(): Promise<number> {
         permissions: { autoApproveAsk: args.yes },
         mcp: createMcpConnector(),
         externalAgents: createAcpConnector(platform),
+        openArtifact: createOpenArtifactConnector({ embedMode: "none" }),
         ...(builtinPluginsDir !== undefined ? { builtinPluginsDir } : {}),
         debug: {
           enabled: debugEnabled,
@@ -393,6 +396,7 @@ async function main(): Promise<number> {
     permissions: { autoApproveAsk: args.yes },
     mcp: createMcpConnector(),
     externalAgents: createAcpConnector(platform),
+    openArtifact: createOpenArtifactConnector({ embedMode: "none" }),
     ...(builtinPluginsDir !== undefined ? { builtinPluginsDir } : {}),
     debug: {
       enabled: debugEnabled,

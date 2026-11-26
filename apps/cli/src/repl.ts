@@ -33,6 +33,7 @@ import {
   type RuntimeEvent,
 } from "@nocturne/core/protocol";
 import { completeLine, skillCompletionLines } from "./completer.js";
+import { openLoginBrowser } from "@nocturne/tui/provider-login";
 import { parseExternalAgentSlash, type ExternalSlashAgent } from "@nocturne/tui/slash-catalog";
 
 import { runSlashCommand, type CommandDeps } from "./commands.js";
@@ -725,6 +726,70 @@ export async function runRepl(
         if (delegate?.task.trim() === "") {
           out.line("stdout", `用法：/${delegate.agent} 任务`);
           prompt();
+          return;
+        }
+        // ADR-0125：本机终端 Open Artifact 作品入口（/artifact list、/artifact open [url]）
+        const artifactSub = /^\s*\/artifact\s+(list|open)(?:\s+(.*))?$/i.exec(line);
+        if (artifactSub !== null) {
+          const sub = (artifactSub[1] ?? "").toLowerCase();
+          const arg = (artifactSub[2] ?? "").trim();
+          busy = true;
+          const runOp = async (): Promise<void> => {
+            if (sub === "list") {
+              const first = session.durableEvents().find((e) => e.type === "session.created");
+              const ws =
+                first?.type === "session.created" ? first.payload.workspaceRoot : undefined;
+              const res = await runtime.listPages(
+                ws !== undefined ? { workspaceRoot: ws } : undefined,
+              );
+              const artifacts = res.items.filter((item) => item.kind === "artifact");
+              if (artifacts.length === 0) {
+                out.line("stdout", "当前项目还没有 Open Artifact 作品；用 /artifact <需求> 创建。");
+                return;
+              }
+              out.line("stdout", "Open Artifact 作品：");
+              for (const item of artifacts) {
+                const kind = item.artifact?.type ?? "artifact";
+                out.line("stdout", `  ▣ ${item.title} [${kind}]  ${item.ref}`);
+              }
+              out.line("stdout", "用 /artifact open <open-artifact://...> 在本机浏览器打开。");
+              return;
+            }
+            let targetUrl = arg;
+            if (targetUrl === "") {
+              const events = session.durableEvents();
+              for (let i = events.length - 1; i >= 0; i -= 1) {
+                const ev = events[i];
+                if (ev?.type === "tool.completed" && ev.payload.artifact !== undefined) {
+                  targetUrl = ev.payload.artifact.url;
+                  break;
+                }
+              }
+            }
+            if (targetUrl === "") {
+              out.line(
+                "stdout",
+                "当前会话还没有 Open Artifact 作品；用法：/artifact open <open-artifact://...>",
+              );
+              return;
+            }
+            const resolved = await runtime.resolveLocalArtifactUrl(targetUrl);
+            const opened = await openLoginBrowser(resolved.viewUrl);
+            out.line(
+              "stdout",
+              opened
+                ? `已在浏览器打开：${resolved.title ?? targetUrl}（${resolved.viewUrl}）`
+                : `本机打开地址：${resolved.viewUrl}`,
+            );
+          };
+          activeTurn = runOp()
+            .catch((e: unknown) => {
+              out.line("stderr", `! ${e instanceof Error ? e.message : String(e)}`);
+            })
+            .finally(() => {
+              busy = false;
+              prompt();
+            });
           return;
         }
         // ADR-0076：执行方式命令带任务正文提交

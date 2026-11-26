@@ -221,6 +221,27 @@ export function ToolRow({
       </Box>
     );
   }
+  const completedArtifact = entry.result?.artifact;
+  if (completedArtifact !== undefined) {
+    const prefix = env.ascii ? "[] " : "▣ ";
+    const tail = ` [${completedArtifact.type}] · ${completedArtifact.url}`;
+    return (
+      <Box flexDirection="column">
+        {review}
+        <Text wrap="truncate">
+          <Text color={theme.secondary}>{prefix}</Text>
+          <Text>
+            {truncateLine(
+              completedArtifact.title || completedArtifact.id,
+              Math.max(4, width - 4 - tail.length),
+              g.ellipsis,
+            )}
+          </Text>
+          <Text dimColor>{tail}</Text>
+        </Text>
+      </Box>
+    );
+  }
   const grantSuffix = entry.permission?.source === "grant" ? "（已授权）" : "";
   return (
     <Box flexDirection="column">

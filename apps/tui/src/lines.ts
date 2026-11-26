@@ -533,6 +533,37 @@ function layoutEntryBody(
         });
         return [...review, ...inlineLines];
       }
+      const completedArtifact = entry.result?.artifact;
+      if (completedArtifact !== undefined && !diffExpanded) {
+        const prefix = ascii ? "[] " : "▣ ";
+        const typeSuffix = ` [${completedArtifact.type}]`;
+        const hintSuffix = options.fullscreen ? " · 点击打开" : ` · ${completedArtifact.url}`;
+        const tail = `${typeSuffix}${hintSuffix}`;
+        const maxTitleCols = Math.max(4, budget(width) - 4 - tail.length);
+        const title = truncateLine(
+          completedArtifact.title || completedArtifact.id,
+          maxTitleCols,
+          ascii ? "..." : "...",
+        );
+        const key = `${entry.key}:artifact`;
+        const segments = [
+          { text: prefix, color: theme.secondary },
+          { text: title },
+          { text: typeSuffix, dim: true },
+          { text: hintSuffix, dim: true },
+        ];
+        return [
+          ...review,
+          {
+            key,
+            ...(options.fullscreen
+              ? { toggle: { id: `artifact:${completedArtifact.url}`, anchor: key } }
+              : {}),
+            text: `${prefix}${title}${tail}`,
+            segments,
+          },
+        ];
+      }
       const shownName = entry.target?.name ?? entry.name;
       const shownInput = entry.target !== undefined ? entry.target.input : entry.input;
       const notStarted = subagentStartRejected(entry);

@@ -25,6 +25,7 @@
     "@nocturne/core": "workspace:*",
     "@nocturne/mcp": "workspace:*",
     "@nocturne/mcp-server": "workspace:*",
+    "@nocturne/open-artifact": "workspace:*",
     "@nocturne/rpc": "workspace:*",
     "@nocturne/tui": "workspace:*"
   }
