@@ -20,6 +20,8 @@ import {
   type ContentBlock as AcpContentBlock,
   type InitializeRequest,
   type InitializeResponse,
+  type LoadSessionRequest,
+  type LoadSessionResponse,
   type McpServer as AcpMcpServer,
   type NewSessionRequest,
   type NewSessionResponse,
@@ -55,6 +57,7 @@ import {
   type SubagentPendingPermission,
   type TurnEndReason,
 } from "@nocturne/core";
+import { effectiveEvents, userEntryText } from "@nocturne/core/protocol";
 
 const MAX_TOOL_PROGRESS_CHARS = 32_768;
 const MAX_TITLE_TARGET_CHARS = 80;
@@ -1327,7 +1330,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         version,
       },
       agentCapabilities: {
-        loadSession: false,
+        loadSession: true,
         promptCapabilities: {
           image: false,
           audio: false,
@@ -1343,6 +1346,59 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         },
       },
     };
+  };
+
+  /**
+   * 登记一个已打开的 Core 会话为本连接的受管会话（session/new 与 session/load 共用）。
+   * 订阅事件、建立 MCP 凭据归属、注册到会话表。
+   */
+  const adoptSession = (
+    session: RuntimeSession,
+    cwd: string,
+    realCwd: string,
+    credentialsMap: Map<string, string>,
+    client: AgentContext,
+  ): ManagedSession => {
+    const entry: ManagedSession = {
+      id: session.id,
+      cwd,
+      realCwd,
+      session,
+      unsubscribe: () => undefined,
+      credentialsMap,
+      client,
+      busy: false,
+      closing: false,
+      closePromise: undefined,
+      cancelRequested: false,
+      turnAbort: undefined,
+      turnPromise: undefined,
+      turnError: undefined,
+      notifyQueue: Promise.resolve(),
+      plannedTools: new Map(),
+      activeTools: new Map(),
+      streamedTextMessages: new Set(),
+      streamedReasoningMessages: new Set(),
+      pendingPermissions: new Map(),
+      pendingSubagentPermissions: new Map(),
+      enqueueUpdate: (update) => {
+        if (entry.closing || isServerClosing()) return;
+        entry.notifyQueue = entry.notifyQueue
+          .then(() =>
+            entry.client.notify(methods.client.session.update, {
+              sessionId: entry.id,
+              update,
+            }),
+          )
+          .catch(() => undefined);
+      },
+      flushUpdates: () => entry.notifyQueue,
+    };
+    entry.unsubscribe = session.subscribe((event) => {
+      handleSessionEvent(entry, event);
+    });
+    sessions.set(session.id, entry);
+    return entry;
   };
 
   const handleNewSession = async (
@@ -1444,6 +1500,9 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
             ? { permissionPreset: options.permissionPreset }
             : {}),
           ...(translatedMcp !== undefined ? { sessionMcp: translatedMcp.injection } : {}),
+          // ADR-0127 第二阶段：ACP 会话归属标记——session/load 只接受带此标记的会话，
+          // 避免恢复接口成为打开任意本地会话的入口
+          client: { kind: "agent", name: "acp", deviceId: "acp" },
         });
       } catch (err) {
         credentialsMap.clear();
@@ -1469,48 +1528,253 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       }
 
       const session = createdSession;
-      const entry: ManagedSession = {
-        id: session.id,
-        cwd: params.cwd,
-        realCwd,
-        session,
-        unsubscribe: () => undefined,
-        credentialsMap,
-        client,
-        busy: false,
-        closing: false,
-        closePromise: undefined,
-        cancelRequested: false,
-        turnAbort: undefined,
-        turnPromise: undefined,
-        turnError: undefined,
-        notifyQueue: Promise.resolve(),
-        plannedTools: new Map(),
-        activeTools: new Map(),
-        streamedTextMessages: new Set(),
-        streamedReasoningMessages: new Set(),
-        pendingPermissions: new Map(),
-        pendingSubagentPermissions: new Map(),
-        enqueueUpdate: (update) => {
-          if (entry.closing || isServerClosing()) return;
-          entry.notifyQueue = entry.notifyQueue
-            .then(() =>
-              entry.client.notify(methods.client.session.update, {
-                sessionId: entry.id,
-                update,
-              }),
-            )
-            .catch(() => undefined);
-        },
-        flushUpdates: () => entry.notifyQueue,
-      };
-      entry.unsubscribe = session.subscribe((event) => {
-        handleSessionEvent(entry, event);
-      });
-      sessions.set(session.id, entry);
+      const entry = adoptSession(session, params.cwd, realCwd, credentialsMap, client);
       recordDiag({ event: "session_new", sessionId: session.id });
       const configOptions = buildSessionConfigOptions(entry);
       return { sessionId: session.id, configOptions };
+    } finally {
+      inFlightCreations.delete(tracked);
+      finishTracked(undefined);
+    }
+  };
+
+  /**
+   * ADR-0127 第二阶段：把已持久化的会话历史投影为 ACP 更新流。
+   *
+   * 规则：
+   * - 只投影有效事件（effectiveEvents——回退后的历史，与 SessionView 同一口径）；
+   * - 用户消息按 userEntryText 去快照块后发 user_message_chunk（整文一块）；
+   * - 助手消息按 content 顺序发 agent_message_chunk / agent_thought_chunk；
+   * - 工具调用按最终持久状态发单个 tool_call（终态+内容），不重放审批、不重复执行；
+   * - turn/config/权限事件不投影——它们是执行痕迹，不是对话内容；
+   * - 全部更新在 loadSession 响应之前发出（协议：历史在响应前流完）。
+   */
+  const replayHistory = (entry: ManagedSession): void => {
+    const events = effectiveEvents(entry.session.durableEvents());
+    const toolStarted = new Map<string, { name: string; input: unknown }>();
+    const pendingTools = new Map<string, { name: string; input: unknown }>();
+
+    const flushTool = (callId: string, ev: RuntimeEvent & { type: "tool.completed" }): void => {
+      const started = toolStarted.get(callId);
+      const name = started?.name ?? ev.payload.name;
+      const input = started?.input;
+      const status = mapToolCompletedStatus(ev.payload.status);
+      const text = ev.payload.modelContent.length > 0
+        ? ev.payload.modelContent
+        : (ev.payload.error?.message ?? "");
+      const content: ToolCallContent[] | undefined =
+        text.length > 0 ? [{ type: "content", content: { type: "text", text } }] : undefined;
+      entry.enqueueUpdate({
+        sessionUpdate: "tool_call",
+        toolCallId: callId,
+        name,
+        title: name,
+        kind: "other",
+        status,
+        ...(content !== undefined ? { content } : {}),
+        ...(input !== undefined ? { rawInput: input } : {}),
+        rawOutput: ev.payload.output ?? ev.payload.error ?? ev.payload.modelContent,
+      });
+      toolStarted.delete(callId);
+    };
+
+    for (const ev of events) {
+      switch (ev.type) {
+        case "message.user": {
+          const p = ev.payload;
+          // 后台子代理结果、合奏/组曲投递、运行时工作模式消息不是用户对话——跳过投递类
+          if (p.subagent !== undefined || p.ensemble !== undefined || p.suiteReport !== undefined) break;
+          if (p.ensembleQuietReminder === true) break;
+          const text = userEntryText({
+            content: p.content,
+            quotes: p.quotes,
+            fileRefs: p.fileRefs,
+            skill: p.skill,
+            delegate: p.delegate,
+            files: p.files,
+            workMode: p.workMode,
+            pageComments: p.pageComments,
+          });
+          if (text.trim().length === 0) break;
+          entry.enqueueUpdate({
+            sessionUpdate: "user_message_chunk",
+            messageId: p.messageId,
+            content: { type: "text", text },
+          });
+          break;
+        }
+        case "message.assistant": {
+          const p = ev.payload;
+          for (const tc of p.toolCalls) {
+            pendingTools.set(tc.callId, { name: tc.name, input: tc.input });
+          }
+          for (const block of p.content) {
+            if (block.text.length === 0) continue;
+            entry.enqueueUpdate({
+              sessionUpdate: block.type === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk",
+              messageId: p.messageId,
+              content: { type: "text", text: block.text },
+            });
+          }
+          break;
+        }
+        case "tool.started": {
+          const planned = pendingTools.get(ev.payload.callId);
+          toolStarted.set(ev.payload.callId, {
+            name: ev.payload.target?.name ?? ev.payload.name,
+            input: ev.payload.target?.input ?? ev.payload.input ?? planned?.input,
+          });
+          break;
+        }
+        case "tool.completed": {
+          flushTool(ev.payload.callId, ev as RuntimeEvent & { type: "tool.completed" });
+          pendingTools.delete(ev.payload.callId);
+          break;
+        }
+        default:
+          break;
+      }
+    }
+  };
+
+  /**
+   * ADR-0127 第二阶段：session/load——按已知 ID 恢复此前通过 ACP 创建的会话。
+   *
+   * 校验链（任一失败即拒绝，不碰锁）：
+   * 1. 会话已在本连接受管 → invalid_request（重复 load）；
+   * 2. cwd 必须是绝对路径、存在且为目录（与 session/new 同一校验）；
+   * 3. 会话日志必须存在且归属 ACP（session.created.client.name === "acp"）——
+   *    不是 ACP 创建的会话一律 resourceNotFound，恢复接口不成为任意本地会话入口；
+   * 4. 请求 cwd 必须匹配会话当前执行目录（考虑 worktree 切换后的 current）；
+   * 5. 锁被占用（别的进程持有）→ 明确拒绝，不 force。
+   * 恢复后回放历史（响应之前），新轮使用本连接的宿主 MCP 与审批桥。
+   */
+  const handleLoadSession = async (
+    params: LoadSessionRequest,
+    client: AgentContext,
+    signal: AbortSignal,
+  ): Promise<LoadSessionResponse> => {
+    if (isCreationAborted(signal)) {
+      throw RequestError.invalidRequest(undefined, "ACP 连接正在关闭");
+    }
+    const sessionId = params.sessionId;
+    if (typeof sessionId !== "string" || !/^[A-Za-z0-9_-]+$/.test(sessionId)) {
+      throw RequestError.invalidParams({ sessionId }, "无效的会话 ID");
+    }
+    if (sessions.has(sessionId)) {
+      throw RequestError.invalidRequest(
+        { code: "session_already_loaded", sessionId },
+        "会话已在当前连接中打开",
+      );
+    }
+    if (!isAbsolutePath(platform, params.cwd)) {
+      throw RequestError.invalidParams({ cwd: params.cwd }, `cwd 必须是绝对路径：${params.cwd}`);
+    }
+    if (params.additionalDirectories !== undefined && params.additionalDirectories.length > 0) {
+      throw RequestError.invalidParams(
+        { additionalDirectories: params.additionalDirectories },
+        "当前 ACP 不支持 additionalDirectories",
+      );
+    }
+
+    const stat = await platform.fs.stat(params.cwd).catch(() => undefined);
+    if (stat?.type !== "directory") {
+      throw RequestError.invalidParams(
+        { cwd: params.cwd },
+        `工作目录不存在或不是目录：${params.cwd}`,
+      );
+    }
+    let realCwd: string;
+    try {
+      realCwd = await platform.resolveReal(params.cwd);
+    } catch (err) {
+      throw RequestError.invalidParams(
+        { cwd: params.cwd },
+        `无法解析工作目录：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const translatedMcp = translateHostMcpServers(params.mcpServers);
+    const credentialsMap = translatedMcp?.credentialsMap ?? new Map<string, string>();
+
+    const { promise: tracked, resolve: finishTracked } = Promise.withResolvers<undefined>();
+    inFlightCreations.add(tracked);
+    let resumed: RuntimeSession | undefined;
+    try {
+      try {
+        resumed = await runtime.resumeSession(sessionId, {
+          ...(translatedMcp !== undefined ? { sessionMcp: translatedMcp.injection } : {}),
+        });
+      } catch (err) {
+        credentialsMap.clear();
+        if (err instanceof RuntimeCommandError) {
+          throw RequestError.internalError({ code: err.code }, err.message);
+        }
+        const code = (err as { code?: string } | undefined)?.code;
+        if (code === "session_locked") {
+          throw RequestError.invalidRequest(
+            { code: "session_locked", sessionId },
+            "会话被另一个进程占用",
+          );
+        }
+        if (code === "invalid_model") {
+          throw RequestError.internalError(
+            { code: "invalid_model", sessionId },
+            "会话记录的模型在当前配置中不可用，无法恢复",
+          );
+        }
+        throw RequestError.resourceNotFound(sessionId);
+      }
+
+      if (isCreationAborted(signal)) {
+        await resumed.close().catch(() => undefined);
+        credentialsMap.clear();
+        throw RequestError.invalidRequest(undefined, "ACP 连接已关闭");
+      }
+
+      // 归属校验：只接受 ACP 创建的会话（session/new 写入的 client 标记）
+      const meta = resumed.state().meta;
+      if (meta.client?.kind !== "agent" || meta.client.name !== "acp") {
+        await resumed.close().catch(() => undefined);
+        credentialsMap.clear();
+        recordDiag({ event: "session_load_rejected_foreign", sessionId });
+        throw RequestError.resourceNotFound(sessionId);
+      }
+      // 子会话（subagent）不是可交互会话，拒绝
+      if (meta.parent !== undefined) {
+        await resumed.close().catch(() => undefined);
+        credentialsMap.clear();
+        throw RequestError.resourceNotFound(sessionId);
+      }
+      // 工作区校验：请求 cwd 必须匹配会话当前执行目录（worktree 切换后取 current）
+      const config = resumed.state().config;
+      const currentExec = config.worktree?.current ?? meta.cwd;
+      const realExec = await platform.resolveReal(currentExec).catch(() => currentExec);
+      const normReq = realCwd.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+      const normExec = realExec.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+      if (normReq !== normExec) {
+        await resumed.close().catch(() => undefined);
+        credentialsMap.clear();
+        recordDiag({
+          event: "session_load_rejected_cwd",
+          sessionId,
+          detail: `${normReq} != ${normExec}`,
+        });
+        throw RequestError.invalidParams(
+          { code: "workspace_mismatch", sessionId },
+          `工作区不匹配：会话属于 ${currentExec}`,
+        );
+      }
+
+      const entry = adoptSession(resumed, params.cwd, realCwd, credentialsMap, client);
+      recordDiag({ event: "session_load", sessionId: resumed.id });
+
+      // 历史回放在响应之前全部发出（协议时序）——不重新执行工具、不重放审批
+      replayHistory(entry);
+      await entry.flushUpdates();
+
+      const configOptions = buildSessionConfigOptions(entry);
+      return { configOptions };
     } finally {
       inFlightCreations.delete(tracked);
       finishTracked(undefined);
@@ -1614,6 +1878,9 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     .onRequest(methods.agent.initialize, (ctx) => handleInitialize(ctx.params))
     .onRequest(methods.agent.session.new, (ctx) =>
       handleNewSession(ctx.params, ctx.client, ctx.signal),
+    )
+    .onRequest(methods.agent.session.load, (ctx) =>
+      handleLoadSession(ctx.params, ctx.client, ctx.signal),
     )
     .onRequest(methods.agent.session.prompt, (ctx) => handlePrompt(ctx.params, ctx.signal))
     .onRequest(methods.agent.session.setConfigOption, (ctx) => handleSetConfigOption(ctx.params))

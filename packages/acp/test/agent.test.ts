@@ -26,7 +26,7 @@ import {
   type RuntimeSession,
 } from "@nocturne/core";
 import { createRuntimeStub } from "@nocturne/core/testing";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
 import {
   createAcpAgentServer,
@@ -227,7 +227,7 @@ describe("ACP Agent 协议与能力契约（ADR-0120 §1–3）", () => {
       version: "0.67.0-test",
     });
     expect(res.agentCapabilities).toEqual({
-      loadSession: false,
+      loadSession: true,
       promptCapabilities: {
         image: false,
         audio: false,
@@ -1246,5 +1246,301 @@ describe("session/new configOptions 与 session/set_config_option（ADR-0127 第
         value: "fake/fake-1",
       }),
     ).rejects.toMatchObject({ code: -32002 });
+  });
+});
+
+describe("session/load 跨进程恢复（ADR-0127 第二阶段）", () => {
+  async function initAndCreate(
+    h: Awaited<ReturnType<typeof startHarness>>,
+    cwd: string,
+    promptText?: string,
+  ) {
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const created = await h.conn.agent.request(methods.agent.session.new, { cwd, mcpServers: [] });
+    const sessionId = (created as { sessionId: string }).sessionId;
+    if (promptText !== undefined) {
+      await h.conn.agent.request(methods.agent.session.prompt, {
+        sessionId,
+        prompt: [{ type: "text", text: promptText }],
+      });
+    }
+    return sessionId;
+  }
+
+  it("initialize 广告 loadSession: true", async () => {
+    const h = await startHarness();
+    const res = await h.conn.agent.request(methods.agent.initialize, {
+      protocolVersion: PROTOCOL_VERSION,
+    });
+    expect((res as { agentCapabilities: { loadSession: boolean } }).agentCapabilities.loadSession).toBe(true);
+  });
+
+  it("session/new 创建的会话带 ACP 归属标记（session.created.client.name === acp）", async () => {
+    const h = await startHarness();
+    const sessionId = await initAndCreate(h, workspaceA);
+    const entry = (h.runtime as unknown as { sessionsDir?: string });
+    void entry;
+    // 直接读日志首行验证归属事件
+    const sessionsDir = path.join(tempRoot, "sessions");
+    const firstLine = (await fs.readFile(path.join(sessionsDir, `${sessionId}.jsonl`), "utf8")).split("\n")[0] ?? "";
+    const created = JSON.parse(firstLine) as { payload: { client?: { kind: string; name: string } } };
+    expect(created.payload.client).toMatchObject({ kind: "agent", name: "acp" });
+  });
+
+  it("无效 ID、相对 cwd、不存在目录、additionalDirectories 在触碰锁之前拒绝", async () => {
+    const h = await startHarness();
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+
+    await expect(
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId: "../evil",
+        cwd: workspaceA,
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    await expect(
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId: "202601010000-abcdef01",
+        cwd: "relative/path",
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    await expect(
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId: "202601010000-abcdef01",
+        cwd: path.join(tempRoot, "no-such-dir"),
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    await expect(
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId: "202601010000-abcdef01",
+        cwd: workspaceA,
+        additionalDirectories: [workspaceB],
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+  });
+
+  it("不存在的会话 ID 返回 resourceNotFound 且不创建锁文件", async () => {
+    const h = await startHarness();
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    await expect(
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId: "202601010000-abcdef01",
+        cwd: workspaceA,
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32002 });
+    const sessionsDir = path.join(tempRoot, "sessions");
+    const files = await fs.readdir(sessionsDir).catch(() => [] as string[]);
+    expect(files.filter((f) => f.includes("abcdef01"))).toEqual([]);
+  });
+
+  it("非 ACP 会话（无 client 标记）拒绝恢复——不成为任意本地会话入口", async () => {
+    // 先用裸 Runtime 直接创建一个没有 ACP 标记的会话
+    const provider = new FakeProvider({ id: "fake", scripts: [textScript("x")] });
+    const rt = await createRuntime({
+      cwd: workspaceA,
+      providers: [provider],
+      interactive: true,
+      sessionsDir: path.join(tempRoot, "sessions"),
+    });
+    const foreign = await rt.createSession({ model: "fake/fake-1", cwd: workspaceA, workspaceRoot: workspaceA });
+    const foreignId = foreign.id;
+    await foreign.close();
+
+    const h = await startHarness();
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    await expect(
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId: foreignId,
+        cwd: workspaceA,
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32002 });
+    await rt.close();
+  });
+
+  it("工作区不匹配拒绝恢复（workspace_mismatch）", async () => {
+    const h = await startHarness();
+    const sessionId = await initAndCreate(h, workspaceA, "first");
+    // 关闭受管会话释放锁
+    await h.conn.agent.request(methods.agent.session.close, { sessionId });
+    await expect(
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId,
+        cwd: workspaceB,
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32602, message: expect.stringContaining("工作区") });
+  });
+
+  it("同一连接重复 load 同一会话拒绝（session_already_loaded）", async () => {
+    const h = await startHarness();
+    const sessionId = await initAndCreate(h, workspaceA, "hello");
+    // 会话仍在受管状态（未 close）——直接 load 同一 ID
+    await expect(
+      h.conn.agent.request(methods.agent.session.load, {
+        sessionId,
+        cwd: workspaceA,
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32600 });
+  });
+
+  it("并发 load 同一会话：至多一个成功，锁不泄漏", async () => {
+    const h = await startHarness();
+    const sessionId = await initAndCreate(h, workspaceA, "concurrent base");
+    await h.conn.agent.request(methods.agent.session.close, { sessionId });
+
+    // 同帧发出两个 load（JSON-RPC 允许并发请求）
+    const results = await Promise.allSettled([
+      h.conn.agent.request(methods.agent.session.load, { sessionId, cwd: workspaceA, mcpServers: [] }),
+      h.conn.agent.request(methods.agent.session.load, { sessionId, cwd: workspaceA, mcpServers: [] }),
+    ]);
+    const ok = results.filter((r) => r.status === "fulfilled").length;
+    expect(ok).toBeLessThanOrEqual(1);
+    // 锁文件不泄漏：管理内会话关闭后无残留锁
+    await h.conn.agent.request(methods.agent.session.close, { sessionId }).catch(() => undefined);
+    const sessionsDir = path.join(tempRoot, "sessions");
+    const files = await fs.readdir(sessionsDir);
+    expect(files.filter((f) => f === `${sessionId}.lock`)).toEqual([]);
+  });
+
+  it("恢复后历史恰一份：用户/助手/工具各按协议时序投影一次，无审批重放", async () => {
+    // 第一幕：创建会话，跑一轮带工具的对话
+    const h1 = await startHarness({
+      scripts: [
+        [
+          { type: "text_delta", text: "decision is DELTA-9" },
+          { type: "tool_call", toolCallId: "tc-1", name: "read", input: { path: "a.txt" } },
+          { type: "finish", reason: "stop" },
+        ],
+        [{ type: "text_delta", text: "file content noted" }, { type: "finish", reason: "stop" }],
+      ],
+    });
+    const sessionId = await initAndCreate(h1, workspaceA, "remember DELTA-9");
+    // 等待工具轮完成（tool_call 触发第二轮模型请求）
+    await vi.waitFor(
+      () => {
+        const done = h1.updates.filter(
+          (u) => u.update.sessionUpdate === "tool_call_update" || u.update.sessionUpdate === "tool_call",
+        );
+        if (done.length === 0) throw new Error("tool updates not yet arrived");
+      },
+      { timeout: 8000 },
+    );
+
+    const liveCount = h1.updates.length;
+    expect(liveCount).toBeGreaterThan(0);
+
+    // 关闭第一幕的受管会话（模拟进程结束前的正常收尾）
+    await h1.conn.agent.request(methods.agent.session.close, { sessionId });
+    const liveUpdatesAfterClose = h1.updates.length;
+
+    // 第二幕：新 server（模拟新进程）加载同一 ID
+    const h2 = await startHarness({
+      scripts: [textScript("restored ok")],
+    });
+    await h2.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const loadRes = await h2.conn.agent.request(methods.agent.session.load, {
+      sessionId,
+      cwd: workspaceA,
+      mcpServers: [],
+    });
+    expect((loadRes as { configOptions?: unknown }).configOptions).toBeDefined();
+
+    // 历史回放：h2.updates 只含回放帧
+    const replayed = h2.updates;
+    const userChunks = replayed.filter((u) => u.update.sessionUpdate === "user_message_chunk");
+    const agentChunks = replayed.filter((u) => u.update.sessionUpdate === "agent_message_chunk");
+    const toolCalls = replayed.filter((u) => u.update.sessionUpdate === "tool_call");
+
+    // 用户消息恰一条（"remember DELTA-9"）
+    expect(userChunks.length).toBe(1);
+    const userText = ((userChunks[0]?.update ?? {}) as { content?: { text: string } }).content?.text ?? "";
+    expect(userText).toContain("remember DELTA-9");
+
+    // 助手消息含决定文本
+    const agentText = agentChunks
+      .map((u) => (u.update as { content: { text: string } }).content.text)
+      .join("");
+    expect(agentText).toContain("DELTA-9");
+
+    // 工具调用投影为终态 tool_call（completed/failed），无 pending/in_progress 复活
+    for (const tc of toolCalls) {
+      const status = (tc.update as { status?: string }).status;
+      expect(["completed", "failed"]).toContain(status);
+    }
+    // 无权限请求转发给新宿主（不重放旧审批）
+    expect(h2.permissions.length).toBe(0);
+    void liveUpdatesAfterClose;
+  });
+
+  it("恢复后新轮正常：模型上下文含历史决定（恰一份）", async () => {
+    const marker = "ZEBRA-UNIQUE-77";
+    const h1 = await startHarness({
+      scripts: [
+        [{ type: "text_delta", text: `the code is ${marker}` }, { type: "finish", reason: "stop" }],
+      ],
+    });
+    const sessionId = await initAndCreate(h1, workspaceA, `remember the code`);
+    await h1.conn.agent.request(methods.agent.session.close, { sessionId });
+
+    // 新进程：handler 捕获发给模型的请求
+    const captured: string[] = [];
+    const h2 = await startHarness({
+      handler: (req) => {
+        captured.push(JSON.stringify(req.messages));
+        return textScript("next turn done");
+      },
+    });
+    await h2.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    await h2.conn.agent.request(methods.agent.session.load, {
+      sessionId,
+      cwd: workspaceA,
+      mcpServers: [],
+    });
+    const res = await h2.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "what was the code?" }],
+    });
+    expect(res).toEqual({ stopReason: "end_turn" });
+
+    // 模型请求中标记恰出现一次（历史不重复计入）
+    const joined = captured.join("\n");
+    const occurrences = joined.split(marker).length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  it("加载占用中会话（别的进程持锁）拒绝 session_locked 且不force", async () => {
+    const h1 = await startHarness();
+    const sessionId = await initAndCreate(h1, workspaceA, "locked base");
+    // h1 仍持有锁（会话受管未关）
+    const h2 = await startHarness();
+    await h2.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    await expect(
+      h2.conn.agent.request(methods.agent.session.load, {
+        sessionId,
+        cwd: workspaceA,
+        mcpServers: [],
+      }),
+    ).rejects.toMatchObject({ code: -32600 });
+  });
+
+  it("session/new 流程不受 loadSession 影响（旧宿主兼容）", async () => {
+    const h = await startHarness({
+      handler: async () => textScript("ok"),
+    });
+    const sessionId = await initAndCreate(h, workspaceA, "compat check");
+    const res = await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "second turn" }],
+    });
+    expect(res).toEqual({ stopReason: "end_turn" });
   });
 });

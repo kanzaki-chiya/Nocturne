@@ -908,6 +908,8 @@ export interface ResumeSessionOptions {
   model?: string | ModelRef | undefined;
   /** --force-unlock：先删除锁文件再走正常打开流程（ADR-0009） */
   force?: boolean | undefined;
+  /** 仅本会话有效的宿主注入 MCP 服务器（ADR-0120 §3、ADR-0127 第二阶段；进程内使用，RPC 不暴露） */
+  sessionMcp?: SessionMcpInjection | undefined;
 }
 
 export interface Runtime {
@@ -8406,7 +8408,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
       const session = await store.load(id, { force: resumeOpts?.force });
       try {
-        return await wrapSession(session, { modelOverride: resumeOpts?.model });
+        return await wrapSession(
+          session,
+          { modelOverride: resumeOpts?.model },
+          false,
+          undefined,
+          resumeOpts?.sessionMcp,
+        );
       } catch (e) {
         await session.close().catch(() => undefined);
         throw e;
