@@ -22,6 +22,7 @@ import {
 } from "@nocturne/rpc/client";
 
 import type { ComposerSubmit } from "./Composer";
+import { CompactionFeedbackStore, runSessionCompaction } from "./compaction-feedback";
 import { validateDraftAttachments } from "./draft-attachments";
 import {
   acceptOutgoing,
@@ -234,6 +235,9 @@ export class Conversations {
    */
   private agentSessions: ReadonlySet<string> = new Set();
 
+  /** 桌面手动 `/compact` 反馈与耗时（ADR-0123），按会话 id 归属并在空闲关闭后保留 */
+  readonly compaction: CompactionFeedbackStore;
+
   constructor(
     private readonly pool: ConversationBackendPool,
     private readonly plainWorkspace: () => string | null,
@@ -248,7 +252,10 @@ export class Conversations {
      * 只认本次运行实时到达的事件。
      */
     private readonly onEvent?: (sessionId: string, event: RuntimeEvent, live: boolean) => void,
-  ) {}
+    compaction: CompactionFeedbackStore = new CompactionFeedbackStore(),
+  ) {
+    this.compaction = compaction;
+  }
 
   get selected(): OpenConversation | undefined {
     return this.selectedId === null ? undefined : this.opened.get(this.selectedId);
@@ -328,6 +335,8 @@ export class Conversations {
               event.payload.callId,
               event.payload.ruleSuggestion !== undefined,
             );
+          } else if (event.type === "context.compacted") {
+            this.compaction.reconcile(entry.session.id, entry.view.entries);
           }
           this.syncOutgoing(entry);
           if (entry.replaying !== true) {
@@ -346,6 +355,7 @@ export class Conversations {
       );
       subscribed = true;
       entry.replaying = false;
+      this.compaction.reconcile(entry.session.id, entry.view.entries);
       void syncShellSnapshot(entry.session, entry.view)
         .then(() => {
           if (entry.dead === true) return;
@@ -986,20 +996,32 @@ export class Conversations {
     });
   }
 
-  async compact(): Promise<void> {
+  startCompact(): { sessionId: string; done: Promise<void> } {
     const entry = this.selected;
     if (entry === undefined) throw new Error("请先打开会话");
     if (entry.dead === true) throw new Error("会话所在的后台已退出，请先重启后台");
-    if (conversationStatus(entry) !== "idle") throw new Error("会话正在运行");
-    entry.busy = true;
-    this.changed();
-    try {
-      await entry.session.compact();
-    } finally {
-      entry.busy = false;
-      this.changed();
-      await this.serial(() => this.closeIfIdle(entry));
+    if (this.compaction.isRunning(entry.session.id) || entry.view.status === "compacting") {
+      throw new Error("已有压缩在进行中");
     }
+    if (conversationStatus(entry) !== "idle") throw new Error("会话正在运行");
+    const sessionId = entry.session.id;
+    entry.busy = true;
+    const { done } = runSessionCompaction(
+      this.compaction,
+      entry.session,
+      () => entry.view.entries,
+      async () => {
+        entry.busy = false;
+        this.changed();
+        await this.serial(() => this.closeIfIdle(entry));
+      },
+    );
+    this.changed();
+    return { sessionId, done };
+  }
+
+  async compact(): Promise<void> {
+    await this.startCompact().done;
   }
 
   interrupt(): void {

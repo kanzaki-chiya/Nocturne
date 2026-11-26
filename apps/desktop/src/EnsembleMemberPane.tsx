@@ -9,6 +9,12 @@ import type { RpcClient } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "./attachment-images";
 import { parseSlash } from "./commands";
+import {
+  runSessionCompaction,
+  useCompactionFeedback,
+  useCompactionFeedbackStore,
+  type CompactionFeedbackStore,
+} from "./compaction-feedback";
 import { Composer, type ComposerSubmit, type FileRefSource } from "./Composer";
 import { Conversation, QuestionCard, type FileLinkHooks } from "./Conversation";
 import type { DesktopHost } from "./host";
@@ -42,6 +48,7 @@ export interface EnsembleMemberPaneProps {
   fileLinks?: FileLinkHooks | undefined;
   prefs?: PrefsStore | undefined;
   pickImages: DesktopHost["pickImages"];
+  compactionStore?: CompactionFeedbackStore | undefined;
 }
 
 export function EnsembleMemberPane({
@@ -56,7 +63,10 @@ export function EnsembleMemberPane({
   fileLinks,
   prefs,
   pickImages,
+  compactionStore,
 }: EnsembleMemberPaneProps) {
+  const store = useCompactionFeedbackStore(compactionStore);
+  const compaction = useCompactionFeedback(store, childSessionId);
   const state = useEnsembleMemberSession({
     ensureClient,
     childSessionId,
@@ -70,10 +80,12 @@ export function EnsembleMemberPane({
   const readyPending = state.status === "ready" ? state.pendingInputs : undefined;
   // 视图对象原地更新：用 version 驱动重新对齐，否则新条目到达时不会重算
   const readyVersion = state.status === "ready" ? state.version : 0;
+  const compactionStatus = compaction?.active?.status;
   useEffect(() => {
     if (readyView === undefined || readyPending === undefined) return;
     setOutgoing((book) => reconcileOutgoing(book, readyView.entries, readyPending));
-  }, [readyView, readyPending, readyVersion]);
+    store.reconcile(childSessionId, readyView.entries);
+  }, [store, childSessionId, readyView, readyPending, readyVersion, compactionStatus]);
   const frozen =
     ensembleStatus !== "active" || memberStatus === undefined || memberStatus === "removed";
   const recipientLabel = `@${memberName}`;
@@ -124,6 +136,7 @@ export function EnsembleMemberPane({
           subscribeEvents={state.subscribeEvents}
           images={images}
           busy={false}
+          compaction={compaction}
           fileLinks={fileLinks}
           ensembleRecipientLabel={recipientLabel}
         />
@@ -131,8 +144,9 @@ export function EnsembleMemberPane({
     );
   }
 
+  const compactionRunning = compaction?.active?.status === "running";
   const hasLocalTurn = outgoing.items.some((item) => item.place === "turn");
-  const showRunning = running || hasLocalTurn;
+  const showRunning = running || hasLocalTurn || compactionRunning;
 
   const track = (input: ComposerSubmit, place: "turn" | "pending", mode: "steer" | "queue") => {
     const local: LocalOutgoing = {
@@ -220,11 +234,17 @@ export function EnsembleMemberPane({
     }
   };
 
-  const handleSlash = async (line: string): Promise<boolean> => {
+  const handleSlash = (line: string): boolean => {
     const parsed = parseSlash(line, "session", skills, externalAgents);
     if (parsed?.kind === "command" && parsed.name === "/compact") {
-      await session.recordInputHistory(line);
-      await session.compact();
+      if (compactionRunning || view.status === "compacting") {
+        throw new Error("已有压缩在进行中");
+      }
+      if (showRunning || state.busy) {
+        throw new Error("会话正在运行");
+      }
+      void session.recordInputHistory(line).catch(() => undefined);
+      void runSessionCompaction(store, session, () => view.entries);
       return true;
     }
     return false;
@@ -242,6 +262,7 @@ export function EnsembleMemberPane({
         subscribeEvents={state.subscribeEvents}
         images={images}
         busy={showRunning}
+        compaction={compaction}
         fileLinks={fileLinks}
         ensembleRecipientLabel={recipientLabel}
         localEntries={localTurnEntries(outgoing, (key, data, mimeType) => {

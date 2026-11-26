@@ -74,6 +74,11 @@ import {
   pendingInputCount,
   type CreateSessionChoice,
 } from "./conversations";
+import {
+  CompactionFeedbackContext,
+  useCompactionFeedback,
+  useCompactionFeedbackStore,
+} from "./compaction-feedback";
 import { parseSlash } from "./commands";
 import { openForkedSession } from "./fork-session";
 import { hasPrimaryMod, hasPrimaryModOrMetaOnOther, isMacOS } from "./platform";
@@ -1675,12 +1680,16 @@ export function App({ host }: { host: DesktopHost }) {
   const runSlash = async (line: string): Promise<boolean> => {
     const parsed = parseSlash(line);
     if (parsed?.kind !== "command") return false;
-    await conversations.selected?.session.recordInputHistory(line);
     if (parsed.name === "/compact") {
-      await conversations.compact();
-      await refresh();
+      const { sessionId, done } = conversations.startCompact();
+      const target = conversations.opened.get(sessionId);
+      if (target !== undefined) {
+        void target.session.recordInputHistory(line).catch(() => undefined);
+      }
+      void done.then(() => refresh()).catch(() => undefined);
       return true;
     }
+    await conversations.selected?.session.recordInputHistory(line);
     if (parsed.name === "/review") {
       const client = await pool.ensure();
       const target = line.trim().slice("/review".length).trim();
@@ -2256,1031 +2265,1051 @@ export function App({ host }: { host: DesktopHost }) {
 
   return (
     <ImageViewerProvider>
-      <div
-        className={`body${page !== null ? " settings-mode" : ""}${sidePanel.bodyClass}`}
-        ref={sidePanel.bodyRef}
-      >
-        <Sidebar
-          tree={tree}
-          pinnedIds={pinnedIds}
-          selectedId={selectedId}
-          collapsed={collapsed}
-          enabledScheduleCount={enabledScheduleCount}
-          schedulesOpen={schedulesOpen}
-          suites={sidebarSuites}
-          suiteNeedsAttentionCount={suiteNeedsAttentionCount}
-          suitesOpen={suitesOpen}
-          pagesOpen={pagesOpen}
-          onSearch={() => {
-            setSearchOpen(true);
-          }}
-          onOpenSchedules={() => {
-            setPage(null);
-            setSuitesOpen(false);
-            setPagesOpen(false);
-            setSchedulesOpen(true);
-          }}
-          onOpenSuites={() => {
-            setPage(null);
-            setSchedulesOpen(false);
-            setPagesOpen(false);
-            setSuitesOpen(true);
-          }}
-          onOpenPages={() => {
-            setPage(null);
-            setSchedulesOpen(false);
-            setSuitesOpen(false);
-            setPagesOpen(true);
-          }}
-          onSelectSuite={(id) => {
-            void selectSuite(id);
-          }}
-          onExpandScheduled={() => {
-            setScheduledLimit((n) => n + EXPAND_STEP);
-          }}
-          onCollapseScheduled={() => {
-            setScheduledLimit(DEFAULT_LIMIT);
-          }}
-          onSelectSession={(id) => {
-            const summary = displayedSessions.find((s) => s.id === id);
-            if (summary !== undefined) {
+      <CompactionFeedbackContext.Provider value={conversations.compaction}>
+        <div
+          className={`body${page !== null ? " settings-mode" : ""}${sidePanel.bodyClass}`}
+          ref={sidePanel.bodyRef}
+        >
+          <Sidebar
+            tree={tree}
+            pinnedIds={pinnedIds}
+            selectedId={selectedId}
+            collapsed={collapsed}
+            enabledScheduleCount={enabledScheduleCount}
+            schedulesOpen={schedulesOpen}
+            suites={sidebarSuites}
+            suiteNeedsAttentionCount={suiteNeedsAttentionCount}
+            suitesOpen={suitesOpen}
+            pagesOpen={pagesOpen}
+            onSearch={() => {
+              setSearchOpen(true);
+            }}
+            onOpenSchedules={() => {
+              setPage(null);
+              setSuitesOpen(false);
+              setPagesOpen(false);
+              setSchedulesOpen(true);
+            }}
+            onOpenSuites={() => {
+              setPage(null);
+              setSchedulesOpen(false);
+              setPagesOpen(false);
+              setSuitesOpen(true);
+            }}
+            onOpenPages={() => {
+              setPage(null);
+              setSchedulesOpen(false);
+              setSuitesOpen(false);
+              setPagesOpen(true);
+            }}
+            onSelectSuite={(id) => {
+              void selectSuite(id);
+            }}
+            onExpandScheduled={() => {
+              setScheduledLimit((n) => n + EXPAND_STEP);
+            }}
+            onCollapseScheduled={() => {
+              setScheduledLimit(DEFAULT_LIMIT);
+            }}
+            onSelectSession={(id) => {
+              const summary = displayedSessions.find((s) => s.id === id);
+              if (summary !== undefined) {
+                setPage(null);
+                setSchedulesOpen(false);
+                setSuitesOpen(false);
+                setPagesOpen(false);
+                void selectSession(summary.id, summary.cwd);
+              }
+            }}
+            onToggleCollapse={(key) => {
+              setCollapsed((s) => toggleIn(s, key));
+            }}
+            onExpandProject={(key) => {
+              setProjectLimits((map) => {
+                const next = new Map(map);
+                next.set(key, (next.get(key) ?? DEFAULT_LIMIT) + EXPAND_STEP);
+                return next;
+              });
+            }}
+            onCollapseProject={(key) => {
+              setProjectLimits((map) => {
+                const next = new Map(map);
+                next.delete(key);
+                return next;
+              });
+            }}
+            onExpandChats={() => {
+              setChatsLimit((n) => n + EXPAND_STEP);
+            }}
+            onCollapseChats={() => {
+              setChatsLimit(DEFAULT_LIMIT);
+            }}
+            projectSort={p.projectSort}
+            hiddenProjects={p.hidden.map((path) => ({ path, name: projectName(path) }))}
+            onSetSort={(sort) => {
+              prefs.update({ projectSort: sort });
+              bumpPrefs();
+            }}
+            onMoveProject={(key, toIndex) => {
+              const cur = prefs.get();
+              const visible = tree.projects.map((project) => project.key);
+              prefs.update({
+                projectOrder: moveProjectKey(cur.projectOrder ?? [], visible, key, toIndex),
+              });
+              bumpPrefs();
+            }}
+            onPin={(id) => {
+              const cur = prefs.get();
+              prefs.update({ pinned: cur.pinned.includes(id) ? cur.pinned : [id, ...cur.pinned] });
+              bumpPrefs();
+            }}
+            onUnpin={(id) => {
+              const cur = prefs.get();
+              prefs.update({ pinned: cur.pinned.filter((x) => x !== id) });
+              bumpPrefs();
+            }}
+            onRename={async (id, title) => {
+              const client = pool.get();
+              if (!client) throw new Error("后台尚未连接");
+              await client.runtime.renameSession(id, title);
+              await refresh();
+            }}
+            onArchive={(id) => archiveSession(id)}
+            archiveBlocked={archiveBlocked}
+            onHideProject={(path) => {
+              const cur = prefs.get();
+              const key = projectKey(path);
+              prefs.update({
+                hidden: cur.hidden.some((h) => projectKey(h) === key)
+                  ? cur.hidden
+                  : [...cur.hidden, path],
+              });
+              bumpPrefs();
+            }}
+            onRestoreProject={(path) => {
+              const cur = prefs.get();
+              const key = projectKey(path);
+              prefs.update({ hidden: cur.hidden.filter((h) => projectKey(h) !== key) });
+              bumpPrefs();
+            }}
+            onOpenProject={() => void openProject()}
+            onNewSession={(workspace) => {
               setPage(null);
               setSchedulesOpen(false);
               setSuitesOpen(false);
               setPagesOpen(false);
-              void selectSession(summary.id, summary.cwd);
-            }
-          }}
-          onToggleCollapse={(key) => {
-            setCollapsed((s) => toggleIn(s, key));
-          }}
-          onExpandProject={(key) => {
-            setProjectLimits((map) => {
-              const next = new Map(map);
-              next.set(key, (next.get(key) ?? DEFAULT_LIMIT) + EXPAND_STEP);
-              return next;
-            });
-          }}
-          onCollapseProject={(key) => {
-            setProjectLimits((map) => {
-              const next = new Map(map);
-              next.delete(key);
-              return next;
-            });
-          }}
-          onExpandChats={() => {
-            setChatsLimit((n) => n + EXPAND_STEP);
-          }}
-          onCollapseChats={() => {
-            setChatsLimit(DEFAULT_LIMIT);
-          }}
-          projectSort={p.projectSort}
-          hiddenProjects={p.hidden.map((path) => ({ path, name: projectName(path) }))}
-          onSetSort={(sort) => {
-            prefs.update({ projectSort: sort });
-            bumpPrefs();
-          }}
-          onMoveProject={(key, toIndex) => {
-            const cur = prefs.get();
-            const visible = tree.projects.map((project) => project.key);
-            prefs.update({
-              projectOrder: moveProjectKey(cur.projectOrder ?? [], visible, key, toIndex),
-            });
-            bumpPrefs();
-          }}
-          onPin={(id) => {
-            const cur = prefs.get();
-            prefs.update({ pinned: cur.pinned.includes(id) ? cur.pinned : [id, ...cur.pinned] });
-            bumpPrefs();
-          }}
-          onUnpin={(id) => {
-            const cur = prefs.get();
-            prefs.update({ pinned: cur.pinned.filter((x) => x !== id) });
-            bumpPrefs();
-          }}
-          onRename={async (id, title) => {
-            const client = pool.get();
-            if (!client) throw new Error("后台尚未连接");
-            await client.runtime.renameSession(id, title);
-            await refresh();
-          }}
-          onArchive={(id) => archiveSession(id)}
-          archiveBlocked={archiveBlocked}
-          onHideProject={(path) => {
-            const cur = prefs.get();
-            const key = projectKey(path);
-            prefs.update({
-              hidden: cur.hidden.some((h) => projectKey(h) === key)
-                ? cur.hidden
-                : [...cur.hidden, path],
-            });
-            bumpPrefs();
-          }}
-          onRestoreProject={(path) => {
-            const cur = prefs.get();
-            const key = projectKey(path);
-            prefs.update({ hidden: cur.hidden.filter((h) => projectKey(h) !== key) });
-            bumpPrefs();
-          }}
-          onOpenProject={() => void openProject()}
-          onNewSession={(workspace) => {
-            setPage(null);
-            setSchedulesOpen(false);
-            setSuitesOpen(false);
-            setPagesOpen(false);
-            void newSession(workspace);
-          }}
-          page={page}
-          onOpenPage={(target) => {
-            setSchedulesOpen(false);
-            setSuitesOpen(false);
-            setPagesOpen(false);
-            setPage(target);
-          }}
-          onLeaveSettings={() => {
-            setPage(null);
-          }}
-        />
-        <div className={`main${sidePanel.mainClass}`} hidden={sidePanel.maximized}>
-          {sidePanel.mainOverlays}
-          {(backendExit !== null || startupError !== null) && (
-            <div className="banner">
-              {backendExit !== null && (
-                <div className="crash">
-                  <div className="t">
-                    后台已退出（退出码 {backendExit.code ?? "未知"}）
-                    <span className="acts">
-                      <Button
-                        onClick={() => {
-                          setPage("logs");
-                        }}
-                      >
-                        查看日志
-                      </Button>
-                      <Button
-                        variant="primary"
-                        disabled={backendExit.restarting === true}
-                        onClick={() => void restartBackend()}
-                      >
-                        {backendExit.restarting === true ? "重启中…" : "重启后台"}
-                      </Button>
-                    </span>
-                  </div>
-                  {backendExit.stderr.length > 0 && (
-                    <>
-                      <pre>
-                        {(backendExit.expanded === true
-                          ? backendExit.stderr
-                          : backendExit.stderr.slice(-CRASH_STDERR_PREVIEW)
-                        ).join("\n")}
-                      </pre>
-                      {backendExit.stderr.length > CRASH_STDERR_PREVIEW && (
+              void newSession(workspace);
+            }}
+            page={page}
+            onOpenPage={(target) => {
+              setSchedulesOpen(false);
+              setSuitesOpen(false);
+              setPagesOpen(false);
+              setPage(target);
+            }}
+            onLeaveSettings={() => {
+              setPage(null);
+            }}
+          />
+          <div className={`main${sidePanel.mainClass}`} hidden={sidePanel.maximized}>
+            {sidePanel.mainOverlays}
+            {(backendExit !== null || startupError !== null) && (
+              <div className="banner">
+                {backendExit !== null && (
+                  <div className="crash">
+                    <div className="t">
+                      后台已退出（退出码 {backendExit.code ?? "未知"}）
+                      <span className="acts">
                         <Button
-                          variant="ghost"
-                          size="sm"
-                          className="logmore"
                           onClick={() => {
-                            setBackendExit((cur) =>
-                              cur === null ? cur : { ...cur, expanded: cur.expanded !== true },
-                            );
+                            setPage("logs");
                           }}
                         >
-                          {backendExit.expanded === true
-                            ? "收起"
-                            : `展开全部（${backendExit.stderr.length} 行）`}
+                          查看日志
                         </Button>
-                      )}
-                    </>
-                  )}
-                  {backendExit.restartError !== undefined && (
-                    <div className="fail">重启失败：{backendExit.restartError}</div>
-                  )}
-                  {backendExit.sessionErrors?.map(({ id, message, code }) => (
-                    <div className="fail" key={id}>
-                      会话「
-                      {conversations.opened.get(id)?.view.title ??
-                        sessions.find((s) => s.id === id)?.firstText ??
-                        id}
-                      」
-                      {code === "invalid_model"
-                        ? "用的模型已不可用，点开它选一个模型继续"
-                        : `恢复失败：${message}`}
+                        <Button
+                          variant="primary"
+                          disabled={backendExit.restarting === true}
+                          onClick={() => void restartBackend()}
+                        >
+                          {backendExit.restarting === true ? "重启中…" : "重启后台"}
+                        </Button>
+                      </span>
                     </div>
-                  ))}
-                </div>
-              )}
-              {startupError !== null && (
-                <div className="crash">
-                  <div className="t">
-                    {startupError.message}
-                    <Button onClick={() => void boot()}>重试</Button>
+                    {backendExit.stderr.length > 0 && (
+                      <>
+                        <pre>
+                          {(backendExit.expanded === true
+                            ? backendExit.stderr
+                            : backendExit.stderr.slice(-CRASH_STDERR_PREVIEW)
+                          ).join("\n")}
+                        </pre>
+                        {backendExit.stderr.length > CRASH_STDERR_PREVIEW && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="logmore"
+                            onClick={() => {
+                              setBackendExit((cur) =>
+                                cur === null ? cur : { ...cur, expanded: cur.expanded !== true },
+                              );
+                            }}
+                          >
+                            {backendExit.expanded === true
+                              ? "收起"
+                              : `展开全部（${backendExit.stderr.length} 行）`}
+                          </Button>
+                        )}
+                      </>
+                    )}
+                    {backendExit.restartError !== undefined && (
+                      <div className="fail">重启失败：{backendExit.restartError}</div>
+                    )}
+                    {backendExit.sessionErrors?.map(({ id, message, code }) => (
+                      <div className="fail" key={id}>
+                        会话「
+                        {conversations.opened.get(id)?.view.title ??
+                          sessions.find((s) => s.id === id)?.firstText ??
+                          id}
+                        」
+                        {code === "invalid_model"
+                          ? "用的模型已不可用，点开它选一个模型继续"
+                          : `恢复失败：${message}`}
+                      </div>
+                    ))}
                   </div>
-                </div>
-              )}
-            </div>
-          )}
-          {schedulesOpen && page === null && (
-            <div className="settings-over">
-              <PaneErrorBoundary key="schedules">
-                <SchedulePage
-                  api={pageClient?.runtime}
-                  workspaces={scheduleWorkspaces}
-                  target={scheduleTarget}
-                  onOpenSession={async (sessionId) => {
-                    const summary =
-                      sessions.find((item) => item.id === sessionId) ??
-                      (await refresh()).find((item) => item.id === sessionId);
-                    if (summary === undefined) return false;
-                    setSchedulesOpen(false);
-                    await selectSession(summary.id, summary.cwd);
-                    return true;
-                  }}
-                  onChanged={() => {
-                    void refresh();
-                  }}
-                />
-              </PaneErrorBoundary>
-            </div>
-          )}
-          {suitesOpen && page === null && (
-            <div className="settings-over">
-              <PaneErrorBoundary key="suites">
-                <SuitesPage
-                  client={pageClient}
-                  workspaces={suiteWorkspaces}
-                  version={suitesVersion}
-                  needsAttentionBySuite={needsAttentionBySuite}
-                  onOpenSuite={(id) => {
-                    void selectSuite(id);
-                  }}
-                  onChanged={() => {
-                    void refreshSuites();
-                  }}
-                />
-              </PaneErrorBoundary>
-            </div>
-          )}
-          {pagesOpen && page === null && (
-            <div className="settings-over">
-              <PaneErrorBoundary key="pages">
-                <PageLibraryPage
-                  api={pageClient?.runtime}
-                  currentWorkspaceRoot={
-                    active?.workspace ?? selected?.cwd ?? effectiveWorkspace ?? undefined
-                  }
-                  version={pagesVersion}
-                  pinnedOriginKeys={pinnedPageOriginKeys}
-                  onPin={(originKey) => {
-                    const cur = prefs.get().pinnedPages ?? [];
-                    prefs.update({
-                      pinnedPages: cur.includes(originKey) ? cur : [originKey, ...cur],
-                    });
-                    bumpPrefs();
-                  }}
-                  onUnpin={(originKey) => {
-                    const next = (prefs.get().pinnedPages ?? []).filter((k) => k !== originKey);
-                    prefs.update({
-                      pinnedPages: next.length > 0 ? next : undefined,
-                    });
-                    bumpPrefs();
-                  }}
-                  onOpenPage={openLibraryPage}
-                />
-              </PaneErrorBoundary>
-            </div>
-          )}
-          <SettingsDeck page={page} client={pageClient} version={providersVersion}>
-            {(settingsPage, settingsVersion) => (
-              <div className="settings-over" ref={page === settingsPage ? settingsRef : undefined}>
-                {settingsPage === "providers" ? (
-                  <PaneErrorBoundary key="providers">
-                    <ProvidersPage
-                      client={pageClient}
-                      currentProvider={active?.view.config.model?.provider}
-                      currentModel={active?.view.config.model?.model}
-                      inUse={providersInUse}
-                      openUrl={(url) => void host.openUrl(url)}
-                      providersVersion={settingsVersion}
-                    />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "mcp" ? (
-                  <PaneErrorBoundary key="mcp">
-                    <McpPage
-                      client={pageClient}
-                      workspaceRoot={effectiveWorkspace ?? undefined}
-                      version={settingsVersion}
-                      onChanged={() => {
-                        void refresh();
-                      }}
-                      loadLive={loadLiveMcp}
-                      liveRevision={liveMcpRevision}
-                      onOpenPlugin={(id) => {
-                        setPluginJump((prev) => ({ id, seq: (prev?.seq ?? 0) + 1 }));
-                        setPage("plugins");
-                      }}
-                    />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "plugins" ? (
-                  <PaneErrorBoundary key="plugins">
-                    <PluginsPage
-                      client={pageClient}
-                      workspaceRoot={effectiveWorkspace ?? undefined}
-                      version={settingsVersion}
-                      openPlugin={pluginJump}
-                      pickFolder={
-                        typeof host.pickFolder === "function" ? () => host.pickFolder() : undefined
-                      }
-                      onTrySkill={(skillName) => {
-                        void tryPluginSkill(skillName);
-                      }}
-                      openDirectory={(path) =>
-                        host.invoke("open_skill_directory", {
-                          path,
-                          create: false,
-                        }) as Promise<void>
-                      }
-                    />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "hooks" ? (
-                  <PaneErrorBoundary key="hooks">
-                    <HooksPage
-                      client={pageClient}
-                      workspaceRoot={
-                        active?.view.meta?.workspaceRoot ?? effectiveWorkspace ?? undefined
-                      }
-                      version={settingsVersion}
-                      onOpenPlugin={(id) => {
-                        setPluginJump((prev) => ({ id, seq: (prev?.seq ?? 0) + 1 }));
-                        setPage("plugins");
-                      }}
-                    />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "grants" ? (
-                  <PaneErrorBoundary key="grants">
-                    <GrantsPage
-                      client={pageClient}
-                      plainWorkspace={effectiveWorkspace ?? undefined}
-                      version={settingsVersion}
-                    />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "agents" ? (
-                  <PaneErrorBoundary key="agents">
-                    <ExternalAgentsPage
-                      client={pageClient}
-                      workspaceRoot={
-                        active?.view.meta?.workspaceRoot ?? effectiveWorkspace ?? undefined
-                      }
-                      version={settingsVersion}
-                    />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "browser" ? (
-                  <PaneErrorBoundary key="browser">
-                    <BrowserSettingsPage
-                      prefs={prefs}
-                      agentBrowser={host.agentBrowser}
-                      browsingData={browsingData}
-                      relaunch={requestRestart}
-                      version={settingsVersion}
-                    />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "computer" ? (
-                  <PaneErrorBoundary key="computer">
-                    <ComputerSettingsPage
-                      computer={pageClient?.computer}
-                      prefs={prefs}
-                      version={settingsVersion}
-                      pickExecutable={host.pickExecutable}
-                      hotkeyBound={computerHotkeyBound}
-                    />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "remote" ? (
-                  <PaneErrorBoundary key="remote">
-                    <RemotePage client={pageClient} />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "memory" ? (
-                  <PaneErrorBoundary key="memory">
-                    <MemoryPage
-                      client={pageClient}
-                      workspaceRoot={effectiveWorkspace ?? undefined}
-                      version={settingsVersion}
-                      openDirectory={(path) =>
-                        host.invoke("open_skill_directory", {
-                          path,
-                          create: false,
-                        }) as Promise<void>
-                      }
-                      openUrl={openReplyLink}
-                    />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "skills" ? (
-                  <PaneErrorBoundary key="skills">
-                    <SkillsPage
-                      client={pageClient}
-                      workspaceRoot={
-                        active?.view.meta?.workspaceRoot ??
-                        conversations.draftWorkspace ??
-                        effectiveWorkspace ??
-                        undefined
-                      }
-                      version={settingsVersion}
-                      openDirectory={(path, create) =>
-                        host.invoke("open_skill_directory", {
-                          path,
-                          create: create ?? false,
-                        }) as Promise<void>
-                      }
-                      openUrl={host.openUrl}
-                      pickFolder={() => host.pickFolder()}
-                    />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "archive" ? (
-                  <PaneErrorBoundary key="archive">
-                    <ArchivePage
-                      sessions={treeSessions}
-                      plainWorkspaces={archivePlainWorkspaces}
-                      onOpen={openArchivedSession}
-                      onRestore={(id) => {
-                        void restoreSession(id);
-                      }}
-                    />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "usage" ? (
-                  <PaneErrorBoundary key="usage">
-                    <UsagePage client={pageClient} version={settingsVersion} />
-                  </PaneErrorBoundary>
-                ) : settingsPage === "logs" ? (
-                  <PaneErrorBoundary key="logs">
-                    <BackendLogsPage
-                      backends={logTargets}
-                      version={settingsVersion}
-                      fetchStderr={(backendId) =>
-                        backendId === EXIT_LOG_ID
-                          ? Promise.resolve(backendExit?.stderr ?? [])
-                          : backendId === KEY_DIAG_ID
-                            ? (host.invoke("key_diag_log") as Promise<string[]>)
-                            : backendId === SHELL_LOG_ID
-                              ? (host.invoke("shell_log") as Promise<string[]>)
-                              : (host.invoke("backend_stderr", { backendId }) as Promise<string[]>)
-                      }
-                    />
-                  </PaneErrorBoundary>
-                ) : (
-                  <PaneErrorBoundary key="settings">
-                    <SettingsPage
-                      section={settingsPage}
-                      client={pageClient}
-                      theme={p.theme ?? "system"}
-                      fileOpener={p.fileOpener ?? "panel"}
-                      editors={editors}
-                      onFileOpenerChange={(opener) => {
-                        prefs.update({ fileOpener: opener === "panel" ? undefined : opener });
-                        bumpPrefs();
-                        return prefs.persistent;
-                      }}
-                      workspace={effectiveWorkspace}
-                      defaultWorkspace={defaultWorkspace}
-                      workspaceOverridden={p.plainWorkspace !== undefined}
-                      downloads={browserDownloads}
-                      prefs={prefs}
-                      update={{
-                        autoUpdate: p.autoUpdate !== false,
-                        onAutoUpdateChange: (enabled) => {
-                          // 默认开：开启时清掉显式值，关闭才写 false
-                          prefs.update({ autoUpdate: enabled ? undefined : false });
+                )}
+                {startupError !== null && (
+                  <div className="crash">
+                    <div className="t">
+                      {startupError.message}
+                      <Button onClick={() => void boot()}>重试</Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {schedulesOpen && page === null && (
+              <div className="settings-over">
+                <PaneErrorBoundary key="schedules">
+                  <SchedulePage
+                    api={pageClient?.runtime}
+                    workspaces={scheduleWorkspaces}
+                    target={scheduleTarget}
+                    onOpenSession={async (sessionId) => {
+                      const summary =
+                        sessions.find((item) => item.id === sessionId) ??
+                        (await refresh()).find((item) => item.id === sessionId);
+                      if (summary === undefined) return false;
+                      setSchedulesOpen(false);
+                      await selectSession(summary.id, summary.cwd);
+                      return true;
+                    }}
+                    onChanged={() => {
+                      void refresh();
+                    }}
+                  />
+                </PaneErrorBoundary>
+              </div>
+            )}
+            {suitesOpen && page === null && (
+              <div className="settings-over">
+                <PaneErrorBoundary key="suites">
+                  <SuitesPage
+                    client={pageClient}
+                    workspaces={suiteWorkspaces}
+                    version={suitesVersion}
+                    needsAttentionBySuite={needsAttentionBySuite}
+                    onOpenSuite={(id) => {
+                      void selectSuite(id);
+                    }}
+                    onChanged={() => {
+                      void refreshSuites();
+                    }}
+                  />
+                </PaneErrorBoundary>
+              </div>
+            )}
+            {pagesOpen && page === null && (
+              <div className="settings-over">
+                <PaneErrorBoundary key="pages">
+                  <PageLibraryPage
+                    api={pageClient?.runtime}
+                    currentWorkspaceRoot={
+                      active?.workspace ?? selected?.cwd ?? effectiveWorkspace ?? undefined
+                    }
+                    version={pagesVersion}
+                    pinnedOriginKeys={pinnedPageOriginKeys}
+                    onPin={(originKey) => {
+                      const cur = prefs.get().pinnedPages ?? [];
+                      prefs.update({
+                        pinnedPages: cur.includes(originKey) ? cur : [originKey, ...cur],
+                      });
+                      bumpPrefs();
+                    }}
+                    onUnpin={(originKey) => {
+                      const next = (prefs.get().pinnedPages ?? []).filter((k) => k !== originKey);
+                      prefs.update({
+                        pinnedPages: next.length > 0 ? next : undefined,
+                      });
+                      bumpPrefs();
+                    }}
+                    onOpenPage={openLibraryPage}
+                  />
+                </PaneErrorBoundary>
+              </div>
+            )}
+            <SettingsDeck page={page} client={pageClient} version={providersVersion}>
+              {(settingsPage, settingsVersion) => (
+                <div
+                  className="settings-over"
+                  ref={page === settingsPage ? settingsRef : undefined}
+                >
+                  {settingsPage === "providers" ? (
+                    <PaneErrorBoundary key="providers">
+                      <ProvidersPage
+                        client={pageClient}
+                        currentProvider={active?.view.config.model?.provider}
+                        currentModel={active?.view.config.model?.model}
+                        inUse={providersInUse}
+                        openUrl={(url) => void host.openUrl(url)}
+                        providersVersion={settingsVersion}
+                      />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "mcp" ? (
+                    <PaneErrorBoundary key="mcp">
+                      <McpPage
+                        client={pageClient}
+                        workspaceRoot={effectiveWorkspace ?? undefined}
+                        version={settingsVersion}
+                        onChanged={() => {
+                          void refresh();
+                        }}
+                        loadLive={loadLiveMcp}
+                        liveRevision={liveMcpRevision}
+                        onOpenPlugin={(id) => {
+                          setPluginJump((prev) => ({ id, seq: (prev?.seq ?? 0) + 1 }));
+                          setPage("plugins");
+                        }}
+                      />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "plugins" ? (
+                    <PaneErrorBoundary key="plugins">
+                      <PluginsPage
+                        client={pageClient}
+                        workspaceRoot={effectiveWorkspace ?? undefined}
+                        version={settingsVersion}
+                        openPlugin={pluginJump}
+                        pickFolder={
+                          typeof host.pickFolder === "function"
+                            ? () => host.pickFolder()
+                            : undefined
+                        }
+                        onTrySkill={(skillName) => {
+                          void tryPluginSkill(skillName);
+                        }}
+                        openDirectory={(path) =>
+                          host.invoke("open_skill_directory", {
+                            path,
+                            create: false,
+                          }) as Promise<void>
+                        }
+                      />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "hooks" ? (
+                    <PaneErrorBoundary key="hooks">
+                      <HooksPage
+                        client={pageClient}
+                        workspaceRoot={
+                          active?.view.meta?.workspaceRoot ?? effectiveWorkspace ?? undefined
+                        }
+                        version={settingsVersion}
+                        onOpenPlugin={(id) => {
+                          setPluginJump((prev) => ({ id, seq: (prev?.seq ?? 0) + 1 }));
+                          setPage("plugins");
+                        }}
+                      />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "grants" ? (
+                    <PaneErrorBoundary key="grants">
+                      <GrantsPage
+                        client={pageClient}
+                        plainWorkspace={effectiveWorkspace ?? undefined}
+                        version={settingsVersion}
+                      />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "agents" ? (
+                    <PaneErrorBoundary key="agents">
+                      <ExternalAgentsPage
+                        client={pageClient}
+                        workspaceRoot={
+                          active?.view.meta?.workspaceRoot ?? effectiveWorkspace ?? undefined
+                        }
+                        version={settingsVersion}
+                      />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "browser" ? (
+                    <PaneErrorBoundary key="browser">
+                      <BrowserSettingsPage
+                        prefs={prefs}
+                        agentBrowser={host.agentBrowser}
+                        browsingData={browsingData}
+                        relaunch={requestRestart}
+                        version={settingsVersion}
+                      />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "computer" ? (
+                    <PaneErrorBoundary key="computer">
+                      <ComputerSettingsPage
+                        computer={pageClient?.computer}
+                        prefs={prefs}
+                        version={settingsVersion}
+                        pickExecutable={host.pickExecutable}
+                        hotkeyBound={computerHotkeyBound}
+                      />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "remote" ? (
+                    <PaneErrorBoundary key="remote">
+                      <RemotePage client={pageClient} />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "memory" ? (
+                    <PaneErrorBoundary key="memory">
+                      <MemoryPage
+                        client={pageClient}
+                        workspaceRoot={effectiveWorkspace ?? undefined}
+                        version={settingsVersion}
+                        openDirectory={(path) =>
+                          host.invoke("open_skill_directory", {
+                            path,
+                            create: false,
+                          }) as Promise<void>
+                        }
+                        openUrl={openReplyLink}
+                      />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "skills" ? (
+                    <PaneErrorBoundary key="skills">
+                      <SkillsPage
+                        client={pageClient}
+                        workspaceRoot={
+                          active?.view.meta?.workspaceRoot ??
+                          conversations.draftWorkspace ??
+                          effectiveWorkspace ??
+                          undefined
+                        }
+                        version={settingsVersion}
+                        openDirectory={(path, create) =>
+                          host.invoke("open_skill_directory", {
+                            path,
+                            create: create ?? false,
+                          }) as Promise<void>
+                        }
+                        openUrl={host.openUrl}
+                        pickFolder={() => host.pickFolder()}
+                      />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "archive" ? (
+                    <PaneErrorBoundary key="archive">
+                      <ArchivePage
+                        sessions={treeSessions}
+                        plainWorkspaces={archivePlainWorkspaces}
+                        onOpen={openArchivedSession}
+                        onRestore={(id) => {
+                          void restoreSession(id);
+                        }}
+                      />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "usage" ? (
+                    <PaneErrorBoundary key="usage">
+                      <UsagePage client={pageClient} version={settingsVersion} />
+                    </PaneErrorBoundary>
+                  ) : settingsPage === "logs" ? (
+                    <PaneErrorBoundary key="logs">
+                      <BackendLogsPage
+                        backends={logTargets}
+                        version={settingsVersion}
+                        fetchStderr={(backendId) =>
+                          backendId === EXIT_LOG_ID
+                            ? Promise.resolve(backendExit?.stderr ?? [])
+                            : backendId === KEY_DIAG_ID
+                              ? (host.invoke("key_diag_log") as Promise<string[]>)
+                              : backendId === SHELL_LOG_ID
+                                ? (host.invoke("shell_log") as Promise<string[]>)
+                                : (host.invoke("backend_stderr", { backendId }) as Promise<
+                                    string[]
+                                  >)
+                        }
+                      />
+                    </PaneErrorBoundary>
+                  ) : (
+                    <PaneErrorBoundary key="settings">
+                      <SettingsPage
+                        section={settingsPage}
+                        client={pageClient}
+                        theme={p.theme ?? "system"}
+                        fileOpener={p.fileOpener ?? "panel"}
+                        editors={editors}
+                        onFileOpenerChange={(opener) => {
+                          prefs.update({ fileOpener: opener === "panel" ? undefined : opener });
                           bumpPrefs();
                           return prefs.persistent;
-                        },
-                        onCheck: async () => {
-                          const result = await updateSvc.manualCheck();
-                          if (result.kind === "update") {
-                            dismissedUpdateVersionRef.current = null;
-                            setUpdateFlow(null);
-                            setUpdateNotice(result.notice);
-                          }
-                          return result;
-                        },
-                      }}
-                      onThemeChange={(theme) => {
-                        prefs.update({ theme: theme === "system" ? undefined : theme });
-                        runThemeTransition(() => {
-                          flushSync(() => {
+                        }}
+                        workspace={effectiveWorkspace}
+                        defaultWorkspace={defaultWorkspace}
+                        workspaceOverridden={p.plainWorkspace !== undefined}
+                        downloads={browserDownloads}
+                        prefs={prefs}
+                        update={{
+                          autoUpdate: p.autoUpdate !== false,
+                          onAutoUpdateChange: (enabled) => {
+                            // 默认开：开启时清掉显式值，关闭才写 false
+                            prefs.update({ autoUpdate: enabled ? undefined : false });
                             bumpPrefs();
-                          });
-                        });
-                        return prefs.persistent;
-                      }}
-                      onWorkspaceChange={changePlainWorkspace}
-                      pickFolder={() => host.pickFolder()}
-                      providersVersion={settingsVersion}
-                      onConfigSaved={() => {
-                        setProvidersVersion((version) => version + 1);
-                        void refresh();
-                        // 通知开关就写在这份设置里：保存后立刻按新值判定（ADR-0056）
-                        void refreshNotifyPrefs();
-                      }}
-                      onOpenSubagents={() => {
-                        setPage("agents");
-                      }}
-                      onOpenModels={() => {
-                        setPage("models");
-                      }}
-                      onOpenDirectory={(dirPath) => host.openPath(dirPath)}
-                      onOpenSession={(sessionId, projectPath) => {
-                        setPage(null);
-                        void selectSession(sessionId, projectPath);
-                      }}
-                      appearance={{
-                        uiFont: p.uiFont,
-                        codeFont: p.codeFont,
-                        fontSize: p.fontSize ?? FONT_SIZE_DEFAULT,
-                        themePreset: p.themePreset ?? "workbench",
-                        customThemes,
-                        onPresetChange: (id: string) => {
-                          const activeCustom = PRESETS.some((preset) => preset.id === id)
-                            ? undefined
-                            : (customThemes.find((entry) => entry.id === id) ??
-                              (p.customTheme?.id === id ? p.customTheme : undefined));
-                          prefs.update({ themePreset: id, customTheme: activeCustom });
+                            return prefs.persistent;
+                          },
+                          onCheck: async () => {
+                            const result = await updateSvc.manualCheck();
+                            if (result.kind === "update") {
+                              dismissedUpdateVersionRef.current = null;
+                              setUpdateFlow(null);
+                              setUpdateNotice(result.notice);
+                            }
+                            return result;
+                          },
+                        }}
+                        onThemeChange={(theme) => {
+                          prefs.update({ theme: theme === "system" ? undefined : theme });
                           runThemeTransition(() => {
                             flushSync(() => {
                               bumpPrefs();
                             });
                           });
-                          void pageClient?.runtime
-                            .updateSettings({ "appearance.themePreset": id })
-                            .catch((error: unknown) => {
-                              console.error("主题保存失败", error);
-                            });
-                        },
-                        onCustomThemesChange: (nextThemes, selectedPreset) => {
-                          const nextId = selectedPreset ?? "workbench";
-                          const activeCustom = PRESETS.some((preset) => preset.id === nextId)
-                            ? undefined
-                            : nextThemes.find((entry) => entry.id === nextId);
-                          setCustomThemes(nextThemes);
-                          prefs.update({
-                            themePreset: selectedPreset === null ? undefined : nextId,
-                            customTheme: activeCustom,
-                          });
-                          bumpPrefs();
-                        },
-                        contentWidth: p.contentWidth,
-                        onContentWidthChange: (width) => {
-                          prefs.update({ contentWidth: width === "standard" ? undefined : width });
-                          bumpPrefs();
-                        },
-                        reduceMotion: p.reduceMotion,
-                        onReduceMotionChange: (reduce) => {
-                          prefs.update({ reduceMotion: reduce ? true : undefined });
-                          bumpPrefs();
-                        },
-                        listFonts: host.listFonts,
-                        onChange: (patch) => {
-                          prefs.update(patch);
-                          bumpPrefs();
                           return prefs.persistent;
-                        },
-                      }}
-                      notifications={{
-                        sendTest: (sound) =>
-                          host.notify({
-                            sessionId: "test",
-                            title: "Nocturne",
-                            body: "这是一条测试通知",
-                            sound,
-                          }),
-                      }}
-                    />
-                  </PaneErrorBoundary>
-                )}
-              </div>
-            )}
-          </SettingsDeck>
-          <div
-            className="mainpane"
-            inert={overlayOpen}
-            aria-hidden={overlayOpen ? true : undefined}
-          >
-            {active !== undefined && selectedOpenError === undefined ? (
-              <PaneErrorBoundary key={active.session.id}>
-                <SessionPane
-                  view={active.view}
-                  ruleEligibleCalls={active.ruleEligibleCalls}
-                  openWarnings={active.warnings}
-                  replaying={active.replaying === true}
-                  workspace={active.workspace}
-                  session={active.session}
-                  client={active.client}
-                  prefs={prefs}
-                  fileLinks={fileLinks}
-                  images={images}
-                  plainKey={plainKey}
-                  home={home}
-                  selected={selected}
-                  running={conversationStatus(active) !== "idle"}
-                  turnNavHidden={overlayOpen}
-                  searchTarget={
-                    searchTarget?.sessionId === active.session.id ? searchTarget : undefined
-                  }
-                  onResubmit={resubmit}
-                  onFork={forkAt}
-                  initialDraft={
-                    sessionRestore?.id === active.session.id
-                      ? sessionRestore.text
-                      : forkDraft?.id === active.session.id
-                        ? forkDraft.text
-                        : undefined
-                  }
-                  initialAttachments={
-                    sessionRestore?.id === active.session.id
-                      ? sessionRestore.attachments
-                      : undefined
-                  }
-                  initialWorkMode={
-                    sessionRestore?.id === active.session.id ? sessionRestore.workMode : undefined
-                  }
-                  initialError={
-                    sessionRestore?.id === active.session.id
-                      ? `发送失败：${sessionRestore.error}`
-                      : undefined
-                  }
-                  onInitialDraftUsed={() => {
-                    setForkDraft(null);
-                    if (sessionRestore?.id === active.session.id) setSessionRestore(null);
-                  }}
-                  prefillDraft={appDrafts.get(active.session.id) ?? null}
-                  onPrefillDraftUsed={() => {
-                    const id = active.session.id;
-                    setAppDrafts((prev) => {
-                      if (!prev.has(id)) return prev;
-                      const next = new Map(prev);
-                      next.delete(id);
-                      return next;
-                    });
-                  }}
-                  onApprovePlan={() => {
-                    conversations.approvePlan();
-                  }}
-                  turnChanges={active.turnChanges}
-                  onRewindFiles={(seq) => conversations.rewindFiles(seq)}
-                  loadChangeDiff={(seq, path) => conversations.turnChangeDiff(active, seq, path)}
-                  onViewChanges={sidePanel.viewChanges}
-                  subagentLinks={sidePanel.subagentLinks}
-                  onSubmit={(input, mode) => submitInput(input, mode)}
-                  pageComments={draftPageComments}
-                  onRemovePageComments={handleRemovePageCommentGroup}
-                  quotes={draftQuotesBySession.get(active.session.id)}
-                  onQuote={(quote) => {
-                    handleAddQuote(active.session.id, quote);
-                  }}
-                  onRemoveQuote={(index) => {
-                    handleRemoveQuote(active.session.id, index);
-                  }}
-                  quoteFocusNonce={quoteFocusNonce}
-                  onInterrupt={() => {
-                    conversations.interrupt();
-                  }}
-                  pendingInputs={mergePending(active.pendingInputs, active.outgoing)}
-                  outgoing={active.outgoing}
-                  onUpdatePending={updatePending}
-                  onCancelPending={cancelPending}
-                  onResumePending={resumePending}
-                  onSlash={runSlash}
-                  pickImages={() => host.pickImages()}
-                  openUrl={openReplyLink}
-                  panel={panel}
-                  onPanelChange={setPanel}
-                  providersVersion={providersVersion}
-                  scheduleSource={scheduleSourceFor(sessions, scheduleNames, active.session.id)}
-                  computerActive={computerActive?.app}
-                  onStopComputer={stopActiveComputer}
-                  onManageProviders={() => {
-                    setPage("providers");
-                  }}
-                  onManageGrants={() => {
-                    setPage("grants");
-                  }}
-                  onManageMcp={() => {
-                    setPage("mcp");
-                  }}
-                  onManageSkills={() => {
-                    setPage("skills");
-                  }}
-                  onManagePlugins={() => {
-                    setPage("plugins");
-                  }}
-                  suiteRecord={suites.find(
-                    (item) =>
-                      item.id === active.view.suite?.suiteId ||
-                      item.coordinatorSessionId === active.session.id,
+                        }}
+                        onWorkspaceChange={changePlainWorkspace}
+                        pickFolder={() => host.pickFolder()}
+                        providersVersion={settingsVersion}
+                        onConfigSaved={() => {
+                          setProvidersVersion((version) => version + 1);
+                          void refresh();
+                          // 通知开关就写在这份设置里：保存后立刻按新值判定（ADR-0056）
+                          void refreshNotifyPrefs();
+                        }}
+                        onOpenSubagents={() => {
+                          setPage("agents");
+                        }}
+                        onOpenModels={() => {
+                          setPage("models");
+                        }}
+                        onOpenDirectory={(dirPath) => host.openPath(dirPath)}
+                        onOpenSession={(sessionId, projectPath) => {
+                          setPage(null);
+                          void selectSession(sessionId, projectPath);
+                        }}
+                        appearance={{
+                          uiFont: p.uiFont,
+                          codeFont: p.codeFont,
+                          fontSize: p.fontSize ?? FONT_SIZE_DEFAULT,
+                          themePreset: p.themePreset ?? "workbench",
+                          customThemes,
+                          onPresetChange: (id: string) => {
+                            const activeCustom = PRESETS.some((preset) => preset.id === id)
+                              ? undefined
+                              : (customThemes.find((entry) => entry.id === id) ??
+                                (p.customTheme?.id === id ? p.customTheme : undefined));
+                            prefs.update({ themePreset: id, customTheme: activeCustom });
+                            runThemeTransition(() => {
+                              flushSync(() => {
+                                bumpPrefs();
+                              });
+                            });
+                            void pageClient?.runtime
+                              .updateSettings({ "appearance.themePreset": id })
+                              .catch((error: unknown) => {
+                                console.error("主题保存失败", error);
+                              });
+                          },
+                          onCustomThemesChange: (nextThemes, selectedPreset) => {
+                            const nextId = selectedPreset ?? "workbench";
+                            const activeCustom = PRESETS.some((preset) => preset.id === nextId)
+                              ? undefined
+                              : nextThemes.find((entry) => entry.id === nextId);
+                            setCustomThemes(nextThemes);
+                            prefs.update({
+                              themePreset: selectedPreset === null ? undefined : nextId,
+                              customTheme: activeCustom,
+                            });
+                            bumpPrefs();
+                          },
+                          contentWidth: p.contentWidth,
+                          onContentWidthChange: (width) => {
+                            prefs.update({
+                              contentWidth: width === "standard" ? undefined : width,
+                            });
+                            bumpPrefs();
+                          },
+                          reduceMotion: p.reduceMotion,
+                          onReduceMotionChange: (reduce) => {
+                            prefs.update({ reduceMotion: reduce ? true : undefined });
+                            bumpPrefs();
+                          },
+                          listFonts: host.listFonts,
+                          onChange: (patch) => {
+                            prefs.update(patch);
+                            bumpPrefs();
+                            return prefs.persistent;
+                          },
+                        }}
+                        notifications={{
+                          sendTest: (sound) =>
+                            host.notify({
+                              sessionId: "test",
+                              title: "Nocturne",
+                              body: "这是一条测试通知",
+                              sound,
+                            }),
+                        }}
+                      />
+                    </PaneErrorBoundary>
                   )}
-                  onOpenEnsemble={(options) => {
-                    sidePanel.openEnsemble(options);
-                  }}
-                  onOpenEnsembleMember={(member) => {
-                    sidePanel.openEnsembleMember(member);
-                  }}
-                  onOpenSuiteThread={(thread) => {
-                    sidePanel.openSuiteThread(thread);
-                  }}
-                  onOpenPage={sidePanel.openPage}
-                  activePage={sidePanel.activePage}
-                  onShellKindChange={onShellKindChange}
-                />
-              </PaneErrorBoundary>
-            ) : selectedId !== null ? (
-              // 正在打开 / 打开失败：占位区不退回上一个会话（ADR-0051）
-              <div className="center">
-                {selectedOpenError === undefined ? (
-                  <div className="opening" role="status">
-                    <span className="spin" aria-hidden="true" />
-                    正在打开…
-                  </div>
-                ) : selectedOpenError.code === "invalid_model" ? (
-                  <ModelRecoveryCard
-                    key={selectedId}
-                    runtime={pool.get()?.runtime}
-                    workspace={selectedOpenError.workspace}
-                    error={selectedOpenError.message}
-                    attempted={selectedOpenError.model}
-                    disabled={selectedOpenError.disabled}
-                    disabledModel={selectedOpenError.disabledModel}
-                    providersVersion={providersVersion}
-                    onContinue={(model) =>
-                      void selectSession(selectedId, selectedOpenError.workspace, false, model)
+                </div>
+              )}
+            </SettingsDeck>
+            <div
+              className="mainpane"
+              inert={overlayOpen}
+              aria-hidden={overlayOpen ? true : undefined}
+            >
+              {active !== undefined && selectedOpenError === undefined ? (
+                <PaneErrorBoundary key={active.session.id}>
+                  <SessionPane
+                    view={active.view}
+                    ruleEligibleCalls={active.ruleEligibleCalls}
+                    openWarnings={active.warnings}
+                    replaying={active.replaying === true}
+                    workspace={active.workspace}
+                    session={active.session}
+                    client={active.client}
+                    prefs={prefs}
+                    fileLinks={fileLinks}
+                    images={images}
+                    plainKey={plainKey}
+                    home={home}
+                    selected={selected}
+                    running={conversationStatus(active) !== "idle"}
+                    turnNavHidden={overlayOpen}
+                    searchTarget={
+                      searchTarget?.sessionId === active.session.id ? searchTarget : undefined
                     }
-                    onOpenProviders={() => {
+                    onResubmit={resubmit}
+                    onFork={forkAt}
+                    initialDraft={
+                      sessionRestore?.id === active.session.id
+                        ? sessionRestore.text
+                        : forkDraft?.id === active.session.id
+                          ? forkDraft.text
+                          : undefined
+                    }
+                    initialAttachments={
+                      sessionRestore?.id === active.session.id
+                        ? sessionRestore.attachments
+                        : undefined
+                    }
+                    initialWorkMode={
+                      sessionRestore?.id === active.session.id ? sessionRestore.workMode : undefined
+                    }
+                    initialError={
+                      sessionRestore?.id === active.session.id
+                        ? `发送失败：${sessionRestore.error}`
+                        : undefined
+                    }
+                    onInitialDraftUsed={() => {
+                      setForkDraft(null);
+                      if (sessionRestore?.id === active.session.id) setSessionRestore(null);
+                    }}
+                    prefillDraft={appDrafts.get(active.session.id) ?? null}
+                    onPrefillDraftUsed={() => {
+                      const id = active.session.id;
+                      setAppDrafts((prev) => {
+                        if (!prev.has(id)) return prev;
+                        const next = new Map(prev);
+                        next.delete(id);
+                        return next;
+                      });
+                    }}
+                    onApprovePlan={() => {
+                      conversations.approvePlan();
+                    }}
+                    turnChanges={active.turnChanges}
+                    onRewindFiles={(seq) => conversations.rewindFiles(seq)}
+                    loadChangeDiff={(seq, path) => conversations.turnChangeDiff(active, seq, path)}
+                    onViewChanges={sidePanel.viewChanges}
+                    subagentLinks={sidePanel.subagentLinks}
+                    onSubmit={(input, mode) => submitInput(input, mode)}
+                    pageComments={draftPageComments}
+                    onRemovePageComments={handleRemovePageCommentGroup}
+                    quotes={draftQuotesBySession.get(active.session.id)}
+                    onQuote={(quote) => {
+                      handleAddQuote(active.session.id, quote);
+                    }}
+                    onRemoveQuote={(index) => {
+                      handleRemoveQuote(active.session.id, index);
+                    }}
+                    quoteFocusNonce={quoteFocusNonce}
+                    onInterrupt={() => {
+                      conversations.interrupt();
+                    }}
+                    pendingInputs={mergePending(active.pendingInputs, active.outgoing)}
+                    outgoing={active.outgoing}
+                    onUpdatePending={updatePending}
+                    onCancelPending={cancelPending}
+                    onResumePending={resumePending}
+                    onSlash={runSlash}
+                    pickImages={() => host.pickImages()}
+                    openUrl={openReplyLink}
+                    panel={panel}
+                    onPanelChange={setPanel}
+                    providersVersion={providersVersion}
+                    scheduleSource={scheduleSourceFor(sessions, scheduleNames, active.session.id)}
+                    computerActive={computerActive?.app}
+                    onStopComputer={stopActiveComputer}
+                    onManageProviders={() => {
                       setPage("providers");
                     }}
-                    onReenable={
-                      selectedOpenError.disabled === undefined
-                        ? undefined
-                        : () => {
-                            void reenableModel(selectedId, selectedOpenError);
-                          }
-                    }
+                    onManageGrants={() => {
+                      setPage("grants");
+                    }}
+                    onManageMcp={() => {
+                      setPage("mcp");
+                    }}
+                    onManageSkills={() => {
+                      setPage("skills");
+                    }}
+                    onManagePlugins={() => {
+                      setPage("plugins");
+                    }}
+                    suiteRecord={suites.find(
+                      (item) =>
+                        item.id === active.view.suite?.suiteId ||
+                        item.coordinatorSessionId === active.session.id,
+                    )}
+                    onOpenEnsemble={(options) => {
+                      sidePanel.openEnsemble(options);
+                    }}
+                    onOpenEnsembleMember={(member) => {
+                      sidePanel.openEnsembleMember(member);
+                    }}
+                    onOpenSuiteThread={(thread) => {
+                      sidePanel.openSuiteThread(thread);
+                    }}
+                    onOpenPage={sidePanel.openPage}
+                    activePage={sidePanel.activePage}
+                    onShellKindChange={onShellKindChange}
                   />
-                ) : (
-                  <div className="nodecard">
-                    <h3>打开会话失败</h3>
-                    <div className="lead">{selectedOpenError.message}</div>
-                    <div className="acts">
-                      <Button
-                        variant="primary"
-                        onClick={() => void selectSession(selectedId, selectedOpenError.workspace)}
-                      >
-                        重试
-                      </Button>
+                </PaneErrorBoundary>
+              ) : selectedId !== null ? (
+                // 正在打开 / 打开失败：占位区不退回上一个会话（ADR-0051）
+                <div className="center">
+                  {selectedOpenError === undefined ? (
+                    <div className="opening" role="status">
+                      <span className="spin" aria-hidden="true" />
+                      正在打开…
                     </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <PaneErrorBoundary key="draft">
-                <DraftPane
-                  runtime={pool.get()?.runtime}
-                  prefs={prefs}
-                  workspace={conversations.draftWorkspace ?? effectiveWorkspace}
-                  plainKey={plainKey}
-                  projects={projects}
-                  disabled={effectiveWorkspace === null || pool.get() === undefined}
-                  historyKey={conversations.draftWorkspace ?? effectiveWorkspace}
-                  providersVersion={providersVersion}
-                  onSubmit={submitInput}
-                  onSlash={runSlash}
-                  pickImages={() => host.pickImages()}
-                  onSelectPlain={() => void newSession()}
-                  onSelectProject={(path) => void newSession(path)}
-                  onOpenOther={() =>
-                    void openProject().then((dir) => {
-                      if (dir !== undefined) void newSession(dir);
-                    })
-                  }
-                  dirMenuOpen={dirMenuOpen}
-                  onDirMenuOpenChange={setDirMenuOpen}
-                  onManageProviders={() => {
-                    setPage("providers");
-                  }}
-                  onManageMcp={() => {
-                    setPage("mcp");
-                  }}
-                  onManageSkills={() => {
-                    setPage("skills");
-                  }}
-                  onManagePlugins={() => {
-                    setPage("plugins");
-                  }}
-                  restoreDraft={draftRestore}
-                  onRestoreDraftUsed={() => {
-                    setDraftRestore(null);
-                  }}
-                  prefillDraft={draftPrefill}
-                  onPrefillDraftUsed={() => {
-                    setDraftPrefill(null);
-                  }}
-                />
-              </PaneErrorBoundary>
-            )}
-          </div>
-          {quitPrompt !== null && (
-            <div className="dialog-backdrop">
-              <div
-                className="desktop-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="quit-title"
-              >
-                <h3 id="quit-title">还有 {quitPrompt.count} 条没发出</h3>
-                <p>关闭后会丢失。留在这里可以继续编辑，或等它们发出去再关。</p>
-                <div className="acts">
-                  <Button
-                    onClick={() => {
-                      setQuitPrompt(null);
-                      void host.cancelQuit?.();
-                    }}
-                  >
-                    留在这里
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={() => {
-                      const action = quitPrompt.action;
-                      setQuitPrompt(null);
-                      if (action === "restart") {
-                        void runRestart();
-                      } else {
-                        void host.quitApp?.();
+                  ) : selectedOpenError.code === "invalid_model" ? (
+                    <ModelRecoveryCard
+                      key={selectedId}
+                      runtime={pool.get()?.runtime}
+                      workspace={selectedOpenError.workspace}
+                      error={selectedOpenError.message}
+                      attempted={selectedOpenError.model}
+                      disabled={selectedOpenError.disabled}
+                      disabledModel={selectedOpenError.disabledModel}
+                      providersVersion={providersVersion}
+                      onContinue={(model) =>
+                        void selectSession(selectedId, selectedOpenError.workspace, false, model)
                       }
-                    }}
-                  >
-                    {quitPrompt.action === "restart" ? "仍然重启" : "仍然退出"}
-                  </Button>
+                      onOpenProviders={() => {
+                        setPage("providers");
+                      }}
+                      onReenable={
+                        selectedOpenError.disabled === undefined
+                          ? undefined
+                          : () => {
+                              void reenableModel(selectedId, selectedOpenError);
+                            }
+                      }
+                    />
+                  ) : (
+                    <div className="nodecard">
+                      <h3>打开会话失败</h3>
+                      <div className="lead">{selectedOpenError.message}</div>
+                      <div className="acts">
+                        <Button
+                          variant="primary"
+                          onClick={() =>
+                            void selectSession(selectedId, selectedOpenError.workspace)
+                          }
+                        >
+                          重试
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            </div>
-          )}
-          {lockedSession !== null && (
-            <div className="dialog-backdrop">
-              <div
-                className="desktop-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="locked-title"
-              >
-                <h3 id="locked-title">正在别处使用</h3>
-                <p>强制打开会接管会话锁。请先确认其他进程已停止使用此会话，避免并发写入。</p>
-                <div className="acts">
-                  <Button
-                    onClick={() => {
-                      setLockedSession(null);
-                    }}
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={() =>
-                      void selectSession(
-                        lockedSession.id,
-                        lockedSession.cwd,
-                        true,
-                        lockedSession.model,
-                      )
+              ) : (
+                <PaneErrorBoundary key="draft">
+                  <DraftPane
+                    runtime={pool.get()?.runtime}
+                    prefs={prefs}
+                    workspace={conversations.draftWorkspace ?? effectiveWorkspace}
+                    plainKey={plainKey}
+                    projects={projects}
+                    disabled={effectiveWorkspace === null || pool.get() === undefined}
+                    historyKey={conversations.draftWorkspace ?? effectiveWorkspace}
+                    providersVersion={providersVersion}
+                    onSubmit={submitInput}
+                    onSlash={runSlash}
+                    pickImages={() => host.pickImages()}
+                    onSelectPlain={() => void newSession()}
+                    onSelectProject={(path) => void newSession(path)}
+                    onOpenOther={() =>
+                      void openProject().then((dir) => {
+                        if (dir !== undefined) void newSession(dir);
+                      })
                     }
-                  >
-                    强制打开
-                  </Button>
-                </div>
-              </div>
+                    dirMenuOpen={dirMenuOpen}
+                    onDirMenuOpenChange={setDirMenuOpen}
+                    onManageProviders={() => {
+                      setPage("providers");
+                    }}
+                    onManageMcp={() => {
+                      setPage("mcp");
+                    }}
+                    onManageSkills={() => {
+                      setPage("skills");
+                    }}
+                    onManagePlugins={() => {
+                      setPage("plugins");
+                    }}
+                    restoreDraft={draftRestore}
+                    onRestoreDraftUsed={() => {
+                      setDraftRestore(null);
+                    }}
+                    prefillDraft={draftPrefill}
+                    onPrefillDraftUsed={() => {
+                      setDraftPrefill(null);
+                    }}
+                  />
+                </PaneErrorBoundary>
+              )}
             </div>
-          )}
-          {commandOutput !== null && (
-            <div className="dialog-backdrop">
-              <div className="desktop-dialog" role="dialog" aria-modal="true" aria-label="命令结果">
-                <pre>{commandOutput}</pre>
-                <Button
-                  onClick={() => {
-                    setCommandOutput(null);
-                  }}
+            {quitPrompt !== null && (
+              <div className="dialog-backdrop">
+                <div
+                  className="desktop-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="quit-title"
                 >
-                  关闭
-                </Button>
-              </div>
-            </div>
-          )}
-          {(() => {
-            const activeClient = pool.get();
-            const firstReq = remoteStatus?.pendingAgentPairings?.[0];
-            if (page === "remote" || !activeClient || !firstReq) return null;
-            return <AgentPairingDialog client={activeClient} request={firstReq} />;
-          })()}
-        </div>
-        {searchOpen && pageClient?.runtime !== undefined && (
-          <SearchDialog
-            api={pageClient.runtime}
-            client={pageClient}
-            sessions={treeSessions}
-            projects={tree.projects}
-            hiddenProjects={new Set(p.hidden.map(projectKey))}
-            plainKey={plainKey}
-            schedules={scheduleTasks}
-            query={searchQuery}
-            settled={searchSettled}
-            onQueryChange={setSearchQuery}
-            onSettledChange={setSearchSettled}
-            onClose={() => {
-              setSearchOpen(false);
-            }}
-            onOpen={openSearchItem}
-          />
-        )}
-        {sidePanel.panel}
-        {updateNotice !== null && (
-          <div
-            className="dialog-backdrop update-dialog-backdrop"
-            onMouseDown={(event) => {
-              if (event.target !== event.currentTarget || updateFlow?.stage === "working") return;
-              dismissUpdateDialog();
-            }}
-          >
-            <div
-              className="desktop-dialog update-dialog"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="update-dialog-title"
-            >
-              <h3 id="update-dialog-title">
-                发现新版本 v{updateNotice.version.replace(/^v/i, "")}
-              </h3>
-              {updateFlow?.stage === "confirm" ? (
-                <>
-                  <p className="update-dialog-msg">
-                    将中断 {updateFlow.running}{" "}
-                    个正在运行的会话。安装更新会关闭窗口与后台进程，完成后自动重启。
-                  </p>
+                  <h3 id="quit-title">还有 {quitPrompt.count} 条没发出</h3>
+                  <p>关闭后会丢失。留在这里可以继续编辑，或等它们发出去再关。</p>
                   <div className="acts">
                     <Button
                       onClick={() => {
-                        setUpdateFlow(null);
+                        setQuitPrompt(null);
+                        void host.cancelQuit?.();
+                      }}
+                    >
+                      留在这里
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={() => {
+                        const action = quitPrompt.action;
+                        setQuitPrompt(null);
+                        if (action === "restart") {
+                          void runRestart();
+                        } else {
+                          void host.quitApp?.();
+                        }
+                      }}
+                    >
+                      {quitPrompt.action === "restart" ? "仍然重启" : "仍然退出"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {lockedSession !== null && (
+              <div className="dialog-backdrop">
+                <div
+                  className="desktop-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="locked-title"
+                >
+                  <h3 id="locked-title">正在别处使用</h3>
+                  <p>强制打开会接管会话锁。请先确认其他进程已停止使用此会话，避免并发写入。</p>
+                  <div className="acts">
+                    <Button
+                      onClick={() => {
+                        setLockedSession(null);
                       }}
                     >
                       取消
                     </Button>
                     <Button
                       variant="primary"
-                      onClick={() => {
-                        void doUpdateInstall();
-                      }}
+                      onClick={() =>
+                        void selectSession(
+                          lockedSession.id,
+                          lockedSession.cwd,
+                          true,
+                          lockedSession.model,
+                        )
+                      }
                     >
-                      继续更新
+                      强制打开
                     </Button>
                   </div>
-                </>
-              ) : updateFlow?.stage === "working" ? (
-                <p className="update-dialog-msg">{updateFlow.text}</p>
-              ) : updateFlow?.stage === "error" ? (
-                <>
-                  <p className="update-dialog-msg err">{describeUpdateError(updateFlow.message)}</p>
-                  <div className="acts">
-                    <Button variant="ghost" onClick={dismissUpdateDialog}>
-                      稍后
-                    </Button>
-                    <Button variant="primary" onClick={beginUpdateInstall}>
-                      重试
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="update-dialog-body">
-                    {updateNotice.changelog.map((entry, idx) => (
-                      <section className="update-dialog-ver" key={`${entry.version}-${idx}`}>
-                        <h4>v{entry.version.replace(/^v/i, "")}</h4>
-                        {entry.notes !== null && entry.notes !== "" && (
-                          <Markdown
-                            text={entry.notes}
-                            openUrl={(url) => {
-                              void host.openUrl(url);
-                            }}
-                          />
-                        )}
-                      </section>
-                    ))}
-                  </div>
-                  <div className="acts divided">
-                    <Button variant="ghost" onClick={dismissUpdateDialog}>
-                      稍后
-                    </Button>
-                    <Button variant="primary" onClick={beginUpdateInstall}>
-                      立即更新
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
+                </div>
+              </div>
+            )}
+            {commandOutput !== null && (
+              <div className="dialog-backdrop">
+                <div
+                  className="desktop-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="命令结果"
+                >
+                  <pre>{commandOutput}</pre>
+                  <Button
+                    onClick={() => {
+                      setCommandOutput(null);
+                    }}
+                  >
+                    关闭
+                  </Button>
+                </div>
+              </div>
+            )}
+            {(() => {
+              const activeClient = pool.get();
+              const firstReq = remoteStatus?.pendingAgentPairings?.[0];
+              if (page === "remote" || !activeClient || !firstReq) return null;
+              return <AgentPairingDialog client={activeClient} request={firstReq} />;
+            })()}
           </div>
-        )}
-      </div>
+          {searchOpen && pageClient?.runtime !== undefined && (
+            <SearchDialog
+              api={pageClient.runtime}
+              client={pageClient}
+              sessions={treeSessions}
+              projects={tree.projects}
+              hiddenProjects={new Set(p.hidden.map(projectKey))}
+              plainKey={plainKey}
+              schedules={scheduleTasks}
+              query={searchQuery}
+              settled={searchSettled}
+              onQueryChange={setSearchQuery}
+              onSettledChange={setSearchSettled}
+              onClose={() => {
+                setSearchOpen(false);
+              }}
+              onOpen={openSearchItem}
+            />
+          )}
+          {sidePanel.panel}
+          {updateNotice !== null && (
+            <div
+              className="dialog-backdrop update-dialog-backdrop"
+              onMouseDown={(event) => {
+                if (event.target !== event.currentTarget || updateFlow?.stage === "working") return;
+                dismissUpdateDialog();
+              }}
+            >
+              <div
+                className="desktop-dialog update-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="update-dialog-title"
+              >
+                <h3 id="update-dialog-title">
+                  发现新版本 v{updateNotice.version.replace(/^v/i, "")}
+                </h3>
+                {updateFlow?.stage === "confirm" ? (
+                  <>
+                    <p className="update-dialog-msg">
+                      将中断 {updateFlow.running}{" "}
+                      个正在运行的会话。安装更新会关闭窗口与后台进程，完成后自动重启。
+                    </p>
+                    <div className="acts">
+                      <Button
+                        onClick={() => {
+                          setUpdateFlow(null);
+                        }}
+                      >
+                        取消
+                      </Button>
+                      <Button
+                        variant="primary"
+                        onClick={() => {
+                          void doUpdateInstall();
+                        }}
+                      >
+                        继续更新
+                      </Button>
+                    </div>
+                  </>
+                ) : updateFlow?.stage === "working" ? (
+                  <p className="update-dialog-msg">{updateFlow.text}</p>
+                ) : updateFlow?.stage === "error" ? (
+                  <>
+                    <p className="update-dialog-msg err">
+                      {describeUpdateError(updateFlow.message)}
+                    </p>
+                    <div className="acts">
+                      <Button variant="ghost" onClick={dismissUpdateDialog}>
+                        稍后
+                      </Button>
+                      <Button variant="primary" onClick={beginUpdateInstall}>
+                        重试
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="update-dialog-body">
+                      {updateNotice.changelog.map((entry, idx) => (
+                        <section className="update-dialog-ver" key={`${entry.version}-${idx}`}>
+                          <h4>v{entry.version.replace(/^v/i, "")}</h4>
+                          {entry.notes !== null && entry.notes !== "" && (
+                            <Markdown
+                              text={entry.notes}
+                              openUrl={(url) => {
+                                void host.openUrl(url);
+                              }}
+                            />
+                          )}
+                        </section>
+                      ))}
+                    </div>
+                    <div className="acts divided">
+                      <Button variant="ghost" onClick={dismissUpdateDialog}>
+                        稍后
+                      </Button>
+                      <Button variant="primary" onClick={beginUpdateInstall}>
+                        立即更新
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </CompactionFeedbackContext.Provider>
     </ImageViewerProvider>
   );
 }
@@ -3511,6 +3540,8 @@ function SessionPane({
     [client, session.id],
   );
   const resolveAppIcon = useMemo(() => appIconResolver(client.computer), [client]);
+  const compactionStore = useCompactionFeedbackStore();
+  const compaction = useCompactionFeedback(compactionStore, session.id);
   const isPlain = plainKey !== null && projectKey(workspace) === plainKey;
   const currentCwd = view.currentCwd ?? workspace;
   return (
@@ -3543,6 +3574,7 @@ function SessionPane({
         subscribeEvents={subscribeEvents}
         images={images}
         busy={running}
+        compaction={compaction}
         scheduleSource={scheduleSource}
         searchTarget={searchTarget}
         enableFind

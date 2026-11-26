@@ -2,11 +2,17 @@
  * 组曲线程会话标签（ADR-0097 §3.7）：复用 `useEnsembleMemberSession`、`Conversation`、
  * `QuestionCard` 与 `Composer` 查看线程对话与确认权限；底部输入框发送走 `sendToThread`。
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { RpcClient, RpcSession } from "@nocturne/rpc/client";
 
 import type { AttachmentImageSource } from "./attachment-images";
 import { parseSlash } from "./commands";
+import {
+  runSessionCompaction,
+  useCompactionFeedback,
+  useCompactionFeedbackStore,
+  type CompactionFeedbackStore,
+} from "./compaction-feedback";
 import { Composer, type ComposerSubmit, type FileRefSource } from "./Composer";
 import { Conversation, QuestionCard, type FileLinkHooks } from "./Conversation";
 import { useEnsembleMemberSession } from "./ensemble-member-session";
@@ -24,6 +30,7 @@ export interface SuiteThreadPaneProps {
   fileLinks?: FileLinkHooks | undefined;
   prefs?: PrefsStore | undefined;
   pickImages: DesktopHost["pickImages"];
+  compactionStore?: CompactionFeedbackStore | undefined;
 }
 
 export function SuiteThreadPane({
@@ -37,13 +44,23 @@ export function SuiteThreadPane({
   fileLinks,
   prefs,
   pickImages,
+  compactionStore,
 }: SuiteThreadPaneProps) {
+  const store = useCompactionFeedbackStore(compactionStore);
+  const compaction = useCompactionFeedback(store, childSessionId);
   const state = useEnsembleMemberSession({
     ensureClient,
     childSessionId,
     fallbackCwd: workspace,
   });
   const [submitError, setSubmitError] = useState<string>();
+  const readyView = state.status === "ready" ? state.view : undefined;
+  const readyVersion = state.status === "ready" ? state.version : 0;
+  const compactionStatus = compaction?.active?.status;
+  useEffect(() => {
+    if (readyView === undefined) return;
+    store.reconcile(childSessionId, readyView.entries);
+  }, [store, childSessionId, readyView, readyVersion, compactionStatus]);
 
   const readySession = state.status === "ready" ? state.session : undefined;
   const readyTurnCount = state.status === "ready" ? state.view.turnCount : 0;
@@ -72,6 +89,8 @@ export function SuiteThreadPane({
   }
 
   const { session, cwd, shellKind, view, running, pendingInputs, skills, externalAgents } = state;
+  const compactionRunning = compaction?.active?.status === "running";
+  const showRunning = running || compactionRunning;
 
   const handleSubmit = async (input: ComposerSubmit): Promise<boolean> => {
     setSubmitError(undefined);
@@ -87,11 +106,17 @@ export function SuiteThreadPane({
     }
   };
 
-  const handleSlash = async (line: string): Promise<boolean> => {
+  const handleSlash = (line: string): boolean => {
     const parsed = parseSlash(line, "session", skills, externalAgents);
     if (parsed?.kind === "command" && parsed.name === "/compact") {
-      await session.recordInputHistory(line);
-      await session.compact();
+      if (compactionRunning || view.status === "compacting") {
+        throw new Error("已有压缩在进行中");
+      }
+      if (showRunning || state.busy) {
+        throw new Error("会话正在运行");
+      }
+      void session.recordInputHistory(line).catch(() => undefined);
+      void runSessionCompaction(store, session, () => view.entries);
       return true;
     }
     return false;
@@ -108,7 +133,8 @@ export function SuiteThreadPane({
         shellKind={shellKind}
         subscribeEvents={state.subscribeEvents}
         images={images}
-        busy={running}
+        busy={showRunning}
+        compaction={compaction}
         fileLinks={fileLinks}
       />
       {submitError !== undefined ? (
@@ -141,7 +167,7 @@ export function SuiteThreadPane({
           cadenza: "子会话不能使用执行方式",
         }}
         todos={view.todos}
-        running={running}
+        running={showRunning}
         onSubmit={handleSubmit}
         onInterrupt={() => {
           session.interrupt();

@@ -186,6 +186,15 @@ import { mcpToolLabel, noteItemsFromEntry, noteWriteSummary, toolMeta } from "./
 import { TurnChangesCard } from "./TurnChangesCard";
 import { TodoList, TodoProgress, todoSummary } from "./TodoList";
 import { useReasoning, type ReasoningMap } from "./reasoning";
+import {
+  compactionFailedText,
+  compactionRunningText,
+  compactionStoppedText,
+  compactionSucceededText,
+  elapsedCompactionSeconds,
+  firstCompactedSeqAfter,
+  type SessionCompactionFeedback,
+} from "./compaction-feedback";
 import { MCP_STATE_NOTICE_CODES } from "./mcp-status";
 import { openWarningsToShow } from "./open-warnings";
 import { useStickyOutput } from "./useStickyOutput";
@@ -363,6 +372,8 @@ export interface ConversationProps {
   enableTurnNav?: boolean | undefined;
   /** 设置或同类覆盖页遮挡主区时为 true：关闭轮次列表并隐藏刻度，同时保留阅读位置 */
   turnNavHidden?: boolean | undefined;
+  /** 桌面手动 `/compact` 的即时进度、耗时与终态反馈（ADR-0123） */
+  compaction?: SessionCompactionFeedback | undefined;
 }
 
 /** 回答内文件引用（U-09）：存在性经后台只读接口，打开经宿主能力。 */
@@ -1405,6 +1416,25 @@ function Think({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function CompactionRunningRow({ startedAt, now }: { startedAt: number; now: number }) {
+  const frozen = useContext(FrozenContext);
+  const motion = useMotionAllowed();
+  const labelRef = useRef<HTMLSpanElement>(null);
+  const shimmer = !frozen && motion;
+  useLayoutEffect(() => {
+    if (!shimmer) return;
+    syncShimmerPhase(labelRef.current);
+  }, [shimmer]);
+  const seconds = elapsedCompactionSeconds(startedAt, now);
+  return (
+    <div className="think" aria-live="polite" data-compaction-status="running">
+      <span ref={labelRef} className={`think-label${shimmer ? " shim" : ""}`}>
+        {compactionRunningText(seconds)}
+      </span>
     </div>
   );
 }
@@ -3926,6 +3956,9 @@ function EntryView({
   availableSeqs,
   onJumpQuote,
   quotable = false,
+  compaction,
+  compactionRunningSeq,
+  compactionPendingSucceededSeq,
 }: {
   entry: ViewEntry;
   searchHit?: boolean;
@@ -3961,6 +3994,9 @@ function EntryView({
   availableSeqs?: ReadonlySet<number> | undefined;
   onJumpQuote?: ((quote: MessageQuote) => void) | undefined;
   quotable?: boolean;
+  compaction?: SessionCompactionFeedback | undefined;
+  compactionRunningSeq?: number | undefined;
+  compactionPendingSucceededSeq?: number | undefined;
 }) {
   const subagentLinks = useContext(SubagentLinksContext);
   const backgroundView = useContext(BackgroundViewContext);
@@ -4193,6 +4229,25 @@ function EntryView({
       );
     case "notice": {
       if (entry.subtype === "permission" || entry.subtype === "config") return null;
+      if (entry.subtype === "compacted") {
+        if (compaction?.active?.status === "running" && compactionRunningSeq === entry.seq) {
+          return <CompactionRunningRow startedAt={compaction.active.startedAt} now={now} />;
+        }
+        const durationSeconds =
+          compaction?.durationsBySeq.get(entry.seq) ??
+          (compaction?.active?.status === "succeeded" &&
+          (compaction.active.matchedSeq === entry.seq ||
+            compactionPendingSucceededSeq === entry.seq)
+            ? compaction.active.durationSeconds
+            : undefined);
+        if (durationSeconds !== undefined) {
+          return (
+            <div className="note" data-compaction-status="succeeded">
+              {compactionSucceededText(durationSeconds)}
+            </div>
+          );
+        }
+      }
       let message = entry.message;
       if (entry.subtype === "turn_end") {
         const reason = (entry.payload as { reason?: TurnEndReason } | null)?.reason;
@@ -5521,6 +5576,7 @@ function ConversationContent({
   enableFind = false,
   enableTurnNav = false,
   turnNavHidden = false,
+  compaction,
 }: ContentProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -5540,7 +5596,8 @@ function ConversationContent({
   } | null>(null);
   const quoteFlashNonceRef = useRef(0);
   const quotable = onQuote !== undefined && readOnly === undefined;
-  const { parts, now } = useReasoning(subscribeEvents);
+  const compactionRunning = compaction?.active?.status === "running";
+  const { parts, now } = useReasoning(subscribeEvents, compactionRunning);
   const liveRuleEligibleRef = useRef<Map<string, boolean>>(new Map());
   useEffect(() => {
     liveRuleEligibleRef.current = new Map();
@@ -6597,6 +6654,75 @@ function ConversationContent({
                 }
               }
 
+              const activeCompaction = compaction?.active;
+              const inPlaceRunningSeq =
+                activeCompaction?.status === "running"
+                  ? firstCompactedSeqAfter(view.entries, activeCompaction.baselineCompactedSeq)
+                  : undefined;
+              const pendingMatchedSucceededSeq =
+                activeCompaction?.status === "succeeded" &&
+                activeCompaction.matchedSeq === undefined
+                  ? firstCompactedSeqAfter(view.entries, activeCompaction.baselineCompactedSeq)
+                  : undefined;
+              const hasMatchedSucceededEntry =
+                activeCompaction?.status === "succeeded" &&
+                (pendingMatchedSucceededSeq !== undefined ||
+                  (activeCompaction.matchedSeq !== undefined &&
+                    view.entries.some(
+                      (item) =>
+                        item.kind === "notice" &&
+                        item.subtype === "compacted" &&
+                        item.seq === activeCompaction.matchedSeq,
+                    )));
+              const terminalCompactionPos =
+                activeCompaction?.status === "stopped" || activeCompaction?.status === "failed"
+                  ? Math.min(Math.max(0, activeCompaction.afterEntryCount), view.entries.length)
+                  : undefined;
+              const renderTerminalCompaction = (): ReactNode => {
+                if (activeCompaction?.status === "stopped") {
+                  return (
+                    <div
+                      key={`compaction:${String(activeCompaction.id)}`}
+                      className="note"
+                      data-compaction-status="stopped"
+                    >
+                      {compactionStoppedText()}
+                    </div>
+                  );
+                }
+                if (activeCompaction?.status === "failed") {
+                  return (
+                    <div
+                      key={`compaction:${String(activeCompaction.id)}`}
+                      className="conversation-notice conversation-notice-error"
+                      role="alert"
+                      data-compaction-status="failed"
+                    >
+                      {compactionFailedText(activeCompaction.message)}
+                    </div>
+                  );
+                }
+                return null;
+              };
+              const trailingCompaction: ReactNode =
+                activeCompaction?.status === "running" && inPlaceRunningSeq === undefined ? (
+                  <CompactionRunningRow
+                    key={`compaction:${String(activeCompaction.id)}`}
+                    startedAt={activeCompaction.startedAt}
+                    now={now}
+                  />
+                ) : activeCompaction?.status === "succeeded" && !hasMatchedSucceededEntry ? (
+                  <div
+                    key={`compaction:${String(activeCompaction.id)}`}
+                    className="note"
+                    data-compaction-status="succeeded"
+                  >
+                    {compactionSucceededText(activeCompaction.durationSeconds)}
+                  </div>
+                ) : terminalCompactionPos === view.entries.length ? (
+                  renderTerminalCompaction()
+                ) : null;
+
               const renderEntryBlock = (entry: ViewEntry, entryIndex: number) => (
                 <>
                   <EntryView
@@ -6636,6 +6762,9 @@ function ConversationContent({
                     availableSeqs={availableSeqs}
                     onJumpQuote={handleJumpQuote}
                     quotable={quotable}
+                    compaction={compaction}
+                    compactionRunningSeq={inPlaceRunningSeq}
+                    compactionPendingSucceededSeq={pendingMatchedSucceededSeq}
                     showReplyActions={replyActionKeys.has(entry.key)}
                     onApprovePlan={
                       canApprovePlan && entry.key === latestReplyKey ? onApprovePlan : undefined
@@ -6646,6 +6775,11 @@ function ConversationContent({
                   />
                   {entry.kind !== "assistant" && renderChanges(changesByKey.get(entry.key))}
                   {(byAfterEntry.get(entryIndex + 1) ?? []).map(renderNotice)}
+                  {terminalCompactionPos !== undefined &&
+                  terminalCompactionPos < view.entries.length &&
+                  terminalCompactionPos === entryIndex + 1
+                    ? renderTerminalCompaction()
+                    : null}
                   {ensembleEnded !== undefined && ensembleEndedAfterIdx === entryIndex ? (
                     <EnsembleEndedRow
                       key={`ensemble-ended:${ensembleEnded.createdSeq}`}
@@ -6736,6 +6870,9 @@ function ConversationContent({
               return (
                 <>
                   {(byAfterEntry.get(0) ?? []).map(renderNotice)}
+                  {terminalCompactionPos === 0 && view.entries.length > 0
+                    ? renderTerminalCompaction()
+                    : null}
                   {ensembleEnded !== undefined && ensembleEndedAfterIdx === -1 ? (
                     <EnsembleEndedRow
                       key={`ensemble-ended:${ensembleEnded.createdSeq}`}
@@ -6820,6 +6957,7 @@ function ConversationContent({
                     />
                   ) : null}
                   {trailing.map(renderNotice)}
+                  {trailingCompaction}
                 </>
               );
             })()}

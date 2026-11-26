@@ -31,7 +31,7 @@ import {
 import { toPageCommentsInput, type DraftPageCommentGroup } from "./page-comments";
 
 import { isValidGitBranchName, useBranchMenu } from "./BranchMenu";
-import { completeSlash, parseSlash, type SlashGroup } from "./commands";
+import { completeSlash, parseSlash, type SlashCommandName, type SlashGroup } from "./commands";
 import { searchInputHistory, splitHighlightSegments, type MatchRange } from "./history-search";
 import { hasPrimaryMod, hasPrimaryModOrMetaOnOther } from "./platform";
 import {
@@ -823,7 +823,7 @@ export function Composer({
       return;
     }
     if (parsed?.kind === "command") {
-      void runSlash(text);
+      void runSlash(text, parsed.name);
       return;
     }
     const workModeFromTag = parsed === null && selectedMode !== null;
@@ -899,13 +899,40 @@ export function Composer({
     })();
   };
 
-  const runSlash = async (line: string) => {
+  const runSlash = async (
+    line: string,
+    commandName?: SlashCommandName | "/goal" | "/plan" | "/ensemble",
+  ) => {
     setError(null);
+    const immediateClear = commandName === "/compact";
+    let clearedRevision: number | undefined;
+    if (immediateClear) {
+      historyIndex.current = null;
+      updateDraft("");
+      clearedRevision = revision.current;
+    }
+    const beforeRevision = revision.current;
     try {
       const accepted = await onSlash(line);
-      if (!accepted) return;
-      if (mounted.current) updateDraft("");
+      if (!accepted) {
+        if (immediateClear && mounted.current && revision.current === clearedRevision) {
+          updateDraft(line);
+        }
+        return;
+      }
+      if (immediateClear) {
+        if (line !== "") {
+          history.current = appendHistory(history.current, line);
+          historySinceRead.current = appendHistory(historySinceRead.current, line);
+          setHistoryVersion((v) => v + 1);
+        }
+        return;
+      }
+      if (mounted.current && revision.current === beforeRevision) updateDraft("");
     } catch (reason) {
+      if (immediateClear && mounted.current && revision.current === clearedRevision) {
+        updateDraft(line);
+      }
       if (mounted.current) setError(errorText(reason));
     }
   };
@@ -1059,7 +1086,7 @@ export function Composer({
       const parsed = parseSlash(line, variant, skills, externalAgents);
       if (parsed?.kind === "command") {
         event.preventDefault();
-        void runSlash(line);
+        void runSlash(line, parsed.name);
         return;
       }
       event.preventDefault();
@@ -1076,7 +1103,7 @@ export function Composer({
       const line = draftRef.current;
       const parsed = parseSlash(line, variant, skills, externalAgents);
       if (parsed?.kind === "command") {
-        void runSlash(line);
+        void runSlash(line, parsed.name);
         return;
       }
       if (parsed?.kind === "skill" || parsed?.kind === "agent" || parsed?.kind === "work") {

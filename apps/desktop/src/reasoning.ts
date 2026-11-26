@@ -74,13 +74,18 @@ export function recordReasoning(
 
 export function useReasoning(
   subscribeEvents: (listener: (event: RuntimeEvent) => void) => () => void,
+  activeExtra = false,
 ): { parts: ReasoningMap; now: number } {
   const ref = useRef<ReasoningMap | null>(null);
   ref.current ??= new Map();
   const parts = ref.current;
   const [, bump] = useReducer((n: number) => n + 1, 0);
-  const [now, tick] = useReducer(() => Date.now(), Date.now());
-  const active = [...parts.values()].some((list) => list.at(-1)?.active);
+  const [now, tick] = useReducer(
+    () => Date.now(),
+    0,
+    () => Date.now(),
+  );
+  const active = activeExtra || [...parts.values()].some((list) => list.at(-1)?.active);
   useEffect(
     () =>
       subscribeEvents((event) => {
@@ -90,6 +95,7 @@ export function useReasoning(
   );
   useEffect(() => {
     if (!active) return;
+    tick();
     const timer = setInterval(() => {
       tick();
     }, 1000);
