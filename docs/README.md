@@ -130,7 +130,7 @@ MCP 服务器可用性变化的持久环境说明见 [ADR-0071](decisions/ADR-00
 
 桌面端新会话页选择分支与自动工作树（`<repo>-wt/<branch>`）见 [ADR-0085](decisions/ADR-0085-new-session-branch-picker.md)。
 
-桌面端工作台界面改版（单层平铺、中性灰选中态、随包 Inter / JetBrains Mono 字体、去底部状态栏与输入框「+」菜单规划，分三轮落地）见 [ADR-0092](decisions/ADR-0092-desktop-redesign-workbench.md)。外观主题预设、内容宽度与电脑到手机配色同步见 [ADR-0093](decisions/ADR-0093-appearance-theme-presets.md)，第二期自定义主题（单面三色 OKLCH 双面推算、亮暗双面卡片、编辑与导入导出浮窗及三色首帧缓存）见 [ADR-0094](decisions/ADR-0094-custom-themes.md)。Windows 桌面会话文件引用右键菜单（「打开」「打开方式 ›」前三系统推荐应用与原生选择器、「在资源管理器中显示」、复制相对/绝对路径）见 [ADR-0124](decisions/ADR-0124-file-reference-context-menu.md)。
+桌面端工作台界面改版（单层平铺、中性灰选中态、随包 Inter / JetBrains Mono 字体、去底部状态栏与输入框「+」菜单规划，分三轮落地）见 [ADR-0092](decisions/ADR-0092-desktop-redesign-workbench.md)。外观主题预设、内容宽度与电脑到手机配色同步见 [ADR-0093](decisions/ADR-0093-appearance-theme-presets.md)，第二期自定义主题（单面三色 OKLCH 双面推算、亮暗双面卡片、编辑与导入导出浮窗及三色首帧缓存）见 [ADR-0094](decisions/ADR-0094-custom-themes.md)。Windows 桌面会话文件引用右键菜单（「打开」「打开方式 ›」前三系统推荐应用与原生选择器、「在资源管理器中显示」、复制相对/绝对路径）见 [ADR-0124](decisions/ADR-0124-file-reference-context-menu.md)；会话 Markdown 带标题链接引用本地文件（保留标题格式、复用 `session.resolveFiles` 与既有打开/菜单边界）见 [ADR-0129](decisions/ADR-0129-markdown-local-file-links.md)。
 
 会话笔记（`note_write` 增删事实与压缩后补注）与合奏留言板查询（`ensemble_read` 过滤翻页与当前成员名单）见 [ADR-0095](decisions/ADR-0095-session-notes-board-read.md)。
 
