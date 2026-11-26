@@ -1645,4 +1645,124 @@ describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () =
     child.closeStdin();
     expect((await child.exit).code).toBe(0);
   }, 60_000);
+
+  it("A/B 用不同宿主工具配置：恢复后 B 工具生效、A 不再提供、审批由 B 接收", async () => {
+    const ws = makeTempDir("nctrn-acp-abmcp-");
+    const isoHome = makeTempDir("nctrn-acp-abmcphome-");
+    const logDir = makeTempDir("nctrn-acp-abmcplog-");
+    const callLogAlpha = path.join(logDir, "calls-alpha.jsonl");
+    const callLogBeta = path.join(logDir, "calls-beta.jsonl");
+    const secretAlpha = "alpha-secret-aaaa";
+    const secretBeta = "beta-secret-bbbb";
+
+    // ══ 进程 A：注入宿主 MCP "orch"（SESSION_TAG=alpha）建会话 ══
+    const childA = spawnAcpCli({ isoHome });
+    providerHandler = (req) => {
+      const user = latestUserText(req);
+      if (user.includes("setup-turn")) {
+        return { textParts: ["alpha-turn-done"] };
+      }
+      return { textParts: ["alpha-fallback"] };
+    };
+    await childA.request("initialize", { protocolVersion: 1 });
+    const created = await childA.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [
+        {
+          name: "orch",
+          command: process.execPath,
+          args: [fakeHostMcp],
+          env: [
+            { name: "SESSION_TAG", value: "alpha" },
+            { name: "ORCH_API_TOKEN", value: secretAlpha },
+            { name: "NOCTURNE_TEST_CALL_LOG", value: callLogAlpha },
+          ],
+        },
+      ],
+    });
+    const sessionId = created.sessionId;
+    expect(
+      await childA.request("session/prompt", {
+        sessionId,
+        prompt: [{ type: "text", text: "setup-turn" }],
+      }),
+    ).toEqual({ stopReason: "end_turn" });
+    // A 的连接里有 alpha 宿主工具可用（确认 A 配置确实生效，作为对照基线）；
+    // 取最后一个带工具表的请求（排除无 tools 的标题生成等内部 purpose 调用）
+    const alphaBaseline = [...providerRequests].reverse().find((r) => toolNamesOf(r).length > 0);
+    expect(alphaBaseline).toBeDefined();
+    expect(toolNamesOf(alphaBaseline!)).toContain("mcp__orch__dispatch");
+
+    childA.closeStdin();
+    expect((await childA.exit).code).toBe(0);
+    assertAllStdoutLinesValidJsonRpc(childA.stdoutLines);
+
+    // ══ 进程 B：用完全不同的宿主 MCP "betaorch"（SESSION_TAG=beta）恢复同一会话 ══
+    const childB = spawnAcpCli({
+      isoHome,
+      onPermission: async () => "allow_once",
+    });
+    const capturedB: RecordedProviderRequest[] = [];
+    providerHandler = (req) => {
+      capturedB.push(req);
+      const user = latestUserText(req);
+      const toolOut = latestToolMessage(req);
+      if (toolOut !== undefined) {
+        return { textParts: [`beta-result:${toolOut}`] };
+      }
+      if (user.includes("dispatch-beta")) {
+        return {
+          toolCalls: [
+            { id: `call_beta_${randomUUID().slice(0, 6)}`, name: "mcp__betaorch__dispatch", arguments: { task: user } },
+          ],
+        };
+      }
+      return { textParts: ["beta-turn-done"] };
+    };
+    await childB.request("initialize", { protocolVersion: 1 });
+    await childB.request("session/load", {
+      sessionId,
+      cwd: ws,
+      mcpServers: [
+        {
+          name: "betaorch",
+          command: process.execPath,
+          args: [fakeHostMcp],
+          env: [
+            { name: "SESSION_TAG", value: "beta" },
+            { name: "ORCH_API_TOKEN", value: secretBeta },
+            { name: "NOCTURNE_TEST_CALL_LOG", value: callLogBeta },
+          ],
+        },
+      ],
+    });
+
+    // 恢复后新轮：模型收到的工具表含 B 的 betaorch、不再含 A 的 orch
+    expect(
+      await childB.request("session/prompt", {
+        sessionId,
+        prompt: [{ type: "text", text: "dispatch-beta run it" }],
+      }),
+    ).toEqual({ stopReason: "end_turn" });
+
+    const firstTurnReq = capturedB.find((r) => latestUserText(r).includes("dispatch-beta"));
+    expect(firstTurnReq).toBeDefined();
+    const tools = toolNamesOf(firstTurnReq!);
+    expect(tools).toContain("mcp__betaorch__dispatch");
+    expect(tools).not.toContain("mcp__orch__dispatch");
+
+    // B 的宿主工具被调用：审批转发到 B 连接（当前宿主），批准后由 B 实例执行
+    expect(childB.permissions.length).toBeGreaterThan(0);
+    expect(childB.permissions[0]?.toolCall).toMatchObject({ name: "mcp__betaorch__dispatch" });
+    // beta 实例的调用日志写入（带 beta 凭据），alpha 实例从未被执行
+    expect(existsSync(callLogBeta)).toBe(true);
+    const betaCalls = readFileSync(callLogBeta, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(betaCalls[0]).toMatchObject({ tool: "dispatch", tag: "beta", hasToken: true });
+    expect(existsSync(callLogAlpha)).toBe(false);
+
+    childB.closeStdin();
+    expect((await childB.exit).code).toBe(0);
+    assertAllStdoutLinesValidJsonRpc(childB.stdoutLines);
+    expect(findLockFiles(path.join(childB.nocturneHome, "sessions"))).toEqual([]);
+  }, 90_000);
 });
