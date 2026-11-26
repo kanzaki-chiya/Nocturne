@@ -166,7 +166,6 @@ export const BUILTIN_SLASH_COMMANDS: readonly string[] = [
   "plan",
   "fugue",
   "ensemble",
-  "cadenza",
   "suite",
 ];
 

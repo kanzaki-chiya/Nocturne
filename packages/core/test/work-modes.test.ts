@@ -25,6 +25,7 @@ import {
   replaySessionView,
   userEntryText,
   userWorkMode,
+  WORK_MODE_COMMANDS,
   workModeCommandName,
   workModeDisplayText,
   workModeOrigins,
@@ -155,34 +156,64 @@ describe("提交入口 workMode", () => {
     await session.close();
   });
 
-  it("/cadenza 将页面说明追加到用户消息并随持久事件编解码保留", async () => {
-    const provider = new FakeProvider({ scripts: [textScript("好了")] });
+  it("华彩（/cadenza）已从新请求与命令清单移除，但旧日志中的 workMode: cadenza 仍可恢复回放", async () => {
+    const provider = new FakeProvider({ scripts: [textScript("收到")] });
     const runtime = await makeRuntime(provider);
     const session = await runtime.createSession({ model: "fake/fake-1" });
     try {
-      expect(parseWorkModeSlash("/cadenza")).toEqual({
-        kind: "usage",
-        name: "cadenza",
-        hint: "用法：/cadenza 要求",
-      });
-      expect(isWorkModeName("panel")).toBe(false);
-      expect(parseWorkModeSlash("/panel 做个看板")).toBeUndefined();
-      expect(isWorkModeName("page")).toBe(false);
-      expect(parseWorkModeSlash("/page 做个看板")).toBeUndefined();
-      const parsed = parseWorkModeSlash("/cadenza 做个看板");
-      if (parsed?.kind !== "submit") throw new Error("expected cadenza submit");
-      expect(await session.submit({ text: parsed.text, workMode: parsed.workMode })).toBe("done");
-      const [message] = users(session);
-      if (message === undefined) throw new Error("expected a user event");
-      const snapshot = message.payload.workMode;
-      expect(snapshot?.name).toBe("cadenza");
-      expect(snapshot?.body).toContain('Use render_html with display: "panel"');
-      expect(snapshot?.body).toContain("update it using its page id");
-      expect(snapshot?.body).toContain("Do not repeat the page content");
-      const block = `<work-mode name="cadenza">\n${snapshot?.body ?? ""}\n</work-mode>`;
-      expect(message.payload.content.at(-1)).toEqual({ type: "text", text: block });
-      expect(requestText(provider.requests[0])).toContain(block);
-      expect(decodeDurableEvent(encodeDurableEvent(message))).toEqual(message);
+      expect(isWorkModeName("cadenza")).toBe(false);
+      expect(parseWorkModeSlash("/cadenza")).toBeUndefined();
+      expect(parseWorkModeSlash("/cadenza 做个看板")).toBeUndefined();
+      expect(WORK_MODE_COMMANDS.some((item) => item.name === "/cadenza")).toBe(false);
+      await rejects(
+        session.submit({
+          text: "做个看板",
+          workMode: "cadenza" as unknown as "grill-me",
+        }),
+        "invalid_command",
+      );
+      await rejects(
+        session.enqueueInput("queue", {
+          text: "做个看板",
+          workMode: "cadenza" as unknown as "grill-me",
+        }),
+        "invalid_command",
+      );
+      expect(session.durableEvents().some((event) => event.type === "turn.started")).toBe(false);
+
+      // 升级前格式的旧事件：保留完整解码、视图回放与显示文本，但不作为现行执行方式重发
+      const legacyEvent: DurableEvent<"message.user"> = {
+        seq: 2,
+        sessionId: session.id,
+        turnId: "t-legacy",
+        time: "2026-11-23T10:00:00.000Z",
+        type: "message.user",
+        payload: {
+          messageId: "m-legacy-cadenza",
+          content: [
+            { type: "text", text: "做个看板" },
+            {
+              type: "text",
+              text: '<work-mode name="cadenza">\nUse render_html with display: "panel".\n</work-mode>',
+            },
+          ],
+          workMode: {
+            name: "cadenza",
+            body: 'Use render_html with display: "panel".',
+          },
+        },
+      };
+      const roundtrip = decodeDurableEvent(encodeDurableEvent(legacyEvent));
+      expect(roundtrip).toEqual(legacyEvent);
+      const created = session.durableEvents()[0];
+      if (!created) throw new Error("expected session.created");
+      const view = replaySessionView([created, roundtrip]);
+      const entry = view.entries.find((item) => item.kind === "user");
+      if (entry?.kind !== "user") throw new Error("expected legacy user entry");
+      expect(entry.workMode?.name).toBe("cadenza");
+      expect(userEntryText(entry)).toBe("做个看板");
+      expect(userWorkMode(entry.workMode)).toBeUndefined();
+      expect(workModeDisplayText(userEntryText(entry), entry.workMode)).toBe("/cadenza 做个看板");
     } finally {
       await session.close();
     }

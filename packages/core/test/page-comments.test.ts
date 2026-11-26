@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createRuntime } from "../src/index.js";
+import { createRuntime, RuntimeCommandError } from "../src/index.js";
 import { FakeProvider } from "../src/provider/index.js";
 import {
   LOG_FORMAT_VERSION,
@@ -122,63 +122,107 @@ describe("pageComments 协议与运行时（ADR-0113）", () => {
     expect(pageCommentsLabel(snapshot)).toBe("Agent Loop v2 · 2");
   });
 
-  it("提交评论后追加英文块给模型，回放、回退与分叉保留 pageComments", async () => {
+  it("升级前历史日志中的 pageComments 在回放、分叉与回退后完整保留", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "nct-page-comments-"));
     roots.push(root);
-    const seenUserTexts: string[] = [];
-    const provider = new FakeProvider({
-      handler: (request) => {
-        const last = request.messages.at(-1);
-        if (last?.role === "user") {
-          seenUserTexts.push(
-            last.content
-              .filter((p): p is { type: "text"; text: string } => p.type === "text")
-              .map((p) => p.text)
-              .join("\n---\n"),
-          );
-        }
-        return [
-          { type: "text_delta", text: "好的" },
-          { type: "finish", reason: "stop" },
-        ];
+    const sessionsDir = path.join(root, "sessions");
+    mkdirSync(sessionsDir, { recursive: true });
+    const sessionId = "legacy-comments-1";
+    const snapshot: PageCommentsSnapshot = {
+      page: "page-1",
+      version: 1,
+      title: "示意图",
+      comments: [
+        {
+          id: "c1",
+          path: "body > #card-a",
+          text: "入口",
+          x: 50,
+          y: 80,
+          note: "加粗边框",
+        },
+      ],
+    };
+    const legacyEvents: DurableEvent[] = [
+      {
+        seq: 1,
+        time: "2026-11-23T00:00:00.000Z",
+        sessionId,
+        type: "session.created",
+        payload: {
+          cwd: root,
+          workspaceRoot: root,
+          model: { provider: "fake", model: "fake-model" },
+          permissionPreset: "default",
+          formatVersion: 1,
+          nocturneVersion: "0.68.0",
+        },
       },
+      {
+        seq: 2,
+        time: "2026-11-23T00:00:01.000Z",
+        sessionId,
+        turnId: "turn-1",
+        type: "turn.started",
+        payload: { turnIndex: 1 },
+      },
+      {
+        seq: 3,
+        time: "2026-11-23T00:00:01.000Z",
+        sessionId,
+        turnId: "turn-1",
+        type: "message.user",
+        payload: {
+          messageId: "msg-1",
+          content: [{ type: "text", text: formatPageCommentsBlock(snapshot) }],
+          pageComments: snapshot,
+        },
+      },
+      {
+        seq: 4,
+        time: "2026-11-23T00:00:02.000Z",
+        sessionId,
+        turnId: "turn-1",
+        type: "message.assistant",
+        payload: {
+          messageId: "msg-2",
+          model: { provider: "fake", model: "fake-model" },
+          content: [{ type: "text", text: "好的" }],
+          toolCalls: [],
+          finishReason: "stop",
+        },
+      },
+      {
+        seq: 5,
+        time: "2026-11-23T00:00:02.000Z",
+        sessionId,
+        turnId: "turn-1",
+        type: "turn.completed",
+        payload: { reason: "done", steps: 1, usage: { inputTokens: 0, outputTokens: 0 } },
+      },
+    ];
+    writeFileSync(
+      path.join(sessionsDir, `${sessionId}.jsonl`),
+      legacyEvents.map((e) => encodeDurableEvent(e)).join("\n") + "\n",
+      "utf8",
+    );
+
+    const provider = new FakeProvider({
+      handler: () => [
+        { type: "text_delta", text: "收到" },
+        { type: "finish", reason: "stop" },
+      ],
     });
     const runtime = await createRuntime({
       cwd: root,
-      sessionsDir: path.join(root, "sessions"),
+      sessionsDir,
       providers: [provider],
       interactive: true,
     });
-    const session = await runtime.createSession({ model: "fake/fake-model" });
+    const session = await runtime.resumeSession(sessionId);
     try {
-      await session.submit({
-        text: "",
-        pageComments: {
-          page: "page-1",
-          version: 1,
-          title: "示意图",
-          comments: [
-            {
-              path: "body > #card-a",
-              text: "入口",
-              x: 50,
-              y: 80,
-              note: "加粗边框",
-            },
-          ],
-        },
-      });
-      // 第二轮普通对话，用于测试回退到第二轮之前时第一轮的评论仍保留
+      // 第二轮普通对话，用于测试回退到第二轮之前时第一轮的历史评论仍保留
       await session.submit({ text: "第二轮对话" });
-
-      expect(seenUserTexts[0]).toContain(
-        '<page-comments page="page-1" version="1" title="示意图">',
-      );
-      expect(seenUserTexts[0]).toContain("render_html");
-      expect(seenUserTexts[0]).toContain("path: body > #card-a");
-      expect(seenUserTexts[0]).toContain("text: 入口");
-      expect(seenUserTexts[0]).toContain("x: 50, y: 80");
-      expect(seenUserTexts[0]).toContain("note: 加粗边框");
 
       const view = replaySessionView(session.durableEvents());
       const users = view.entries.filter((e) => e.kind === "user");
@@ -186,14 +230,7 @@ describe("pageComments 协议与运行时（ADR-0113）", () => {
       const firstUser = users[0];
       const secondUser = users[1];
       if (!firstUser || !secondUser) throw new Error("expected two user entries");
-      expect(firstUser.pageComments).toEqual({
-        page: "page-1",
-        version: 1,
-        title: "示意图",
-        comments: [
-          { id: "c1", path: "body > #card-a", text: "入口", x: 50, y: 80, note: "加粗边框" },
-        ],
-      });
+      expect(firstUser.pageComments).toEqual(snapshot);
       expect(userEntryText(firstUser)).toBe("");
 
       // 分叉（保留第一轮，截掉第二轮）
@@ -223,49 +260,15 @@ describe("pageComments 协议与运行时（ADR-0113）", () => {
     }
   });
 
-  it("截图附件只在无可见文字元素且当前模型支持图片输入时出现", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "nct-page-comments-img-"));
+  it("ADR-0125 退场后通过 session.submit 提交新的 pageComments（含或不含截图）直接拒绝且不落盘", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "nct-page-comments-reject-"));
     roots.push(root);
-    const seenImagesPerCall: number[] = [];
-    const seenTextsPerCall: string[] = [];
-    const baseCaps = {
-      toolCalls: true,
-      parallelToolCalls: true,
-      reasoning: "none" as const,
-      promptCache: false,
-      editTool: "edit" as const,
-      historyPrune: true,
-    };
+    let providerCalls = 0;
     const provider = new FakeProvider({
-      models: [
-        {
-          ref: { provider: "fake", model: "vision" },
-          displayName: "Vision",
-          contextWindow: 128000,
-          maxOutputTokens: 8192,
-          capabilities: { ...baseCaps, imageInput: true },
-        },
-        {
-          ref: { provider: "fake", model: "text-only" },
-          displayName: "TextOnly",
-          contextWindow: 128000,
-          maxOutputTokens: 8192,
-          capabilities: { ...baseCaps, imageInput: false },
-        },
-      ],
-      handler: (request) => {
-        const last = request.messages.at(-1);
-        if (last?.role === "user") {
-          seenImagesPerCall.push(last.images?.length ?? 0);
-          seenTextsPerCall.push(
-            last.content
-              .filter((p): p is { type: "text"; text: string } => p.type === "text")
-              .map((p) => p.text)
-              .join("\n"),
-          );
-        }
+      handler: () => {
+        providerCalls++;
         return [
-          { type: "text_delta", text: "收到" },
+          { type: "text_delta", text: "不应到达" },
           { type: "finish", reason: "stop" },
         ];
       },
@@ -276,80 +279,61 @@ describe("pageComments 协议与运行时（ADR-0113）", () => {
       providers: [provider],
       interactive: true,
     });
-    const session = await runtime.createSession({ model: "fake/vision" });
+    const session = await runtime.createSession({ model: "fake/fake-model" });
     try {
-      // 1. 无文字元素 + 支持图片模型 → 附带截图
-      await session.submit({
-        text: "",
-        pageComments: {
-          page: "page-1",
-          version: 1,
-          title: "画布",
-          comments: [
-            {
-              path: "body > canvas:nth-of-type(1)",
-              text: "",
-              x: 40,
-              y: 40,
-              note: "这里线断了",
-              screenshot: { data: new Uint8Array(TINY_PNG), mimeType: "image/png" },
-            },
-          ],
-        },
-      });
-      // 2. 有文字元素 + 支持图片模型 → 即使传入 screenshot 也不附截图
-      await session.submit({
-        text: "",
-        pageComments: {
-          page: "page-1",
-          version: 1,
-          title: "画布",
-          comments: [
-            {
-              path: "body > h1:nth-of-type(1)",
-              text: "标题文字",
-              x: 40,
-              y: 20,
-              note: "字号放大",
-              screenshot: { data: new Uint8Array(TINY_PNG), mimeType: "image/png" },
-            },
-          ],
-        },
-      });
-      // 3. 无文字元素 + 不支持图片模型 → 不附截图
-      await session.setModel({ provider: "fake", model: "text-only" });
-      await session.submit({
-        text: "",
-        pageComments: {
-          page: "page-1",
-          version: 1,
-          title: "画布",
-          comments: [
-            {
-              path: "body > svg:nth-of-type(1) > rect:nth-of-type(1)",
-              text: "",
-              x: 100,
-              y: 100,
-              note: "改成蓝色",
-              screenshot: { data: new Uint8Array(TINY_PNG), mimeType: "image/png" },
-            },
-          ],
-        },
-      });
+      await expect(
+        session.submit({
+          text: "",
+          pageComments: {
+            page: "page-1",
+            version: 1,
+            title: "画布",
+            comments: [
+              {
+                path: "body > canvas:nth-of-type(1)",
+                text: "",
+                x: 40,
+                y: 40,
+                note: "这里线断了",
+                screenshot: { data: new Uint8Array(TINY_PNG), mimeType: "image/png" },
+              },
+            ],
+          },
+        }),
+      ).rejects.toSatisfy(
+        (err: unknown) =>
+          err instanceof RuntimeCommandError &&
+          err.code === "invalid_command" &&
+          err.message.includes("只读"),
+      );
 
-      const userEvents = session
-        .durableEvents()
-        .filter((e) => e.type === "message.user")
-        .map((e) => e.payload);
-      expect(userEvents).toHaveLength(3);
-      expect(userEvents[0]?.attachments).toHaveLength(1);
-      expect(userEvents[1]?.attachments).toBeUndefined();
-      expect(userEvents[2]?.attachments).toBeUndefined();
+      await expect(
+        session.submit({
+          text: "顺便改一下",
+          pageComments: {
+            page: "page-1",
+            version: 1,
+            title: "画布",
+            comments: [
+              {
+                path: "body > h1:nth-of-type(1)",
+                text: "标题文字",
+                x: 40,
+                y: 20,
+                note: "字号放大",
+              },
+            ],
+          },
+        }),
+      ).rejects.toSatisfy(
+        (err: unknown) =>
+          err instanceof RuntimeCommandError &&
+          err.code === "invalid_command" &&
+          err.message.includes("只读"),
+      );
 
-      expect(seenImagesPerCall).toEqual([1, 0, 0]);
-      expect(seenTextsPerCall[0]).toContain("screenshot: attached");
-      expect(seenTextsPerCall[1]).not.toContain("screenshot: attached");
-      expect(seenTextsPerCall[2]).not.toContain("screenshot: attached");
+      expect(providerCalls).toBe(0);
+      expect(session.durableEvents().filter((e) => e.type === "message.user")).toHaveLength(0);
     } finally {
       await session.close();
       await runtime.close();

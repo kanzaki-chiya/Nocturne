@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -20,7 +21,7 @@ import {
   type DurableEvent,
   type RuntimeEvent,
 } from "../src/protocol/index.js";
-import { listPagesTool, renderHtmlTool } from "../src/tools/index.js";
+import { renderHtmlTool } from "../src/tools/index.js";
 
 const dirs: string[] = [];
 function makeTmp(prefix: string): string {
@@ -205,207 +206,281 @@ describe("项目页面库（ADR-0114）", () => {
     });
   });
 
-  it("页面库查询、list_pages、render_html 跨会话接着改（含数据复制与错误 ref）、归档/回退/删除与旁路缓存", async () => {
+  it("页面库按项目聚合升级前历史面板页面（含工作树、归档、来源合并、删除与旁路缓存），且不再向模型暴露 list_pages 或跨会话面板编辑", async () => {
     const root = makeTmp("nct-page-lib-");
     const home = path.join(root, "home");
     const sessionsDir = path.join(home, "sessions");
     const defaultWs = path.join(home, "workspace");
     const otherRepo = path.join(root, "repo-beta");
+    mkdirSync(sessionsDir, { recursive: true });
     mkdirSync(defaultWs, { recursive: true });
     mkdirSync(otherRepo, { recursive: true });
     const { repoDir, wtDir } = makeGitRepoWithWorktree(root);
 
-    let mode:
-      | "a_init"
-      | "a_update"
-      | "b_wt"
-      | "other_proj"
-      | "default_ws"
-      | "c_list_and_edit"
-      | "c_bad_ref"
-      | "subagent" = "a_init";
-    let refForC = "";
-    let otherRef = "";
-    let listPagesText = "";
-    let badRefError = "";
+    const writeLegacySession = (opts: {
+      id: string;
+      title: string;
+      cwd: string;
+      time: string;
+      pages: {
+        file: string;
+        html: string;
+        title: string;
+        page: string;
+        version: number;
+        display: "panel" | "inline";
+        from?: { session: string; page: string };
+      }[];
+      pageData?: { page: string; entries: Record<string, unknown> };
+    }): void => {
+      const attachDir = path.join(sessionsDir, "attachments", opts.id);
+      mkdirSync(attachDir, { recursive: true });
+      const events: DurableEvent[] = [
+        {
+          type: "session.created",
+          sessionId: opts.id,
+          seq: 1,
+          time: opts.time,
+          payload: {
+            formatVersion: 1,
+            nocturneVersion: "0.68.0",
+            cwd: opts.cwd,
+            workspaceRoot: opts.cwd,
+            model: { provider: "fake", model: "fake-model" },
+            permissionPreset: "default",
+          },
+        },
+        {
+          type: "session.titled",
+          sessionId: opts.id,
+          seq: 2,
+          time: opts.time,
+          payload: { title: opts.title, source: "user" },
+        },
+      ];
+      let seq = 3;
+      for (const item of opts.pages) {
+        writeFileSync(path.join(attachDir, item.file), item.html, "utf8");
+        events.push({
+          type: "tool.completed",
+          sessionId: opts.id,
+          seq: seq++,
+          turnId: `t-${seq}`,
+          time: opts.time,
+          payload: {
+            callId: `c-${seq}`,
+            name: "render_html",
+            status: "ok",
+            modelContent: "ok",
+            durationMs: 5,
+            files: [
+              {
+                type: "file",
+                file: item.file,
+                sha256: createHash("sha256").update(item.html, "utf8").digest("hex"),
+                bytes: Buffer.byteLength(item.html),
+                mimeType: "text/html",
+                label: `${item.title}.html`,
+                source: "upload",
+                inline: {
+                  title: item.title,
+                  page: item.page,
+                  version: item.version,
+                  display: item.display,
+                  ...(item.from ? { from: item.from } : {}),
+                },
+              },
+            ],
+          },
+        });
+      }
+      if (opts.pageData) {
+        const dataDir = path.join(attachDir, "page-data");
+        mkdirSync(dataDir, { recursive: true });
+        writeFileSync(
+          path.join(dataDir, `${opts.pageData.page}.json`),
+          JSON.stringify({ version: 1, entries: opts.pageData.entries }),
+          "utf8",
+        );
+      }
+      writeFileSync(
+        path.join(sessionsDir, `${opts.id}.jsonl`),
+        `${events.map((e) => encodeDurableEvent(e)).join("\n")}\n`,
+        "utf8",
+      );
+    };
 
+    // 合成升级前的历史面板会话（主仓库、工作树、跨会话副本、其他项目、默认对话）
+    writeLegacySession({
+      id: "legacy-sess-a",
+      title: "会话A-主仓",
+      cwd: repoDir,
+      time: "2026-11-23T10:00:00.000Z",
+      pages: [
+        {
+          file: "file-1.html",
+          html: "<!doctype html><html><body><h1>订单看板 v1</h1></body></html>",
+          title: "订单看板",
+          page: "page-1",
+          version: 1,
+          display: "panel",
+        },
+        {
+          file: "file-2.html",
+          html: "<!doctype html><html><body><h1>订单看板 v2</h1></body></html>",
+          title: "订单看板",
+          page: "page-1",
+          version: 2,
+          display: "panel",
+        },
+        {
+          file: "file-3.html",
+          html: "<!doctype html><html><body><p>inline only</p></body></html>",
+          title: "随文小图",
+          page: "page-2",
+          version: 1,
+          display: "inline",
+        },
+      ],
+      pageData: { page: "page-1", entries: { filter: { region: "east" } } },
+    });
+    writeLegacySession({
+      id: "legacy-sess-b",
+      title: "会话B-工作树",
+      cwd: wtDir,
+      time: "2026-11-23T11:00:00.000Z",
+      pages: [
+        {
+          file: "file-1.html",
+          html: "<!doctype html><html><body><h1>WT Chart</h1></body></html>",
+          title: "工作树性能图",
+          page: "page-1",
+          version: 1,
+          display: "panel",
+        },
+      ],
+    });
+    writeLegacySession({
+      id: "legacy-sess-c",
+      title: "会话C-改版",
+      cwd: repoDir,
+      time: "2026-11-23T12:00:00.000Z",
+      pages: [
+        {
+          file: "file-1.html",
+          html: "<!doctype html><html><body><h1>订单看板 v3</h1></body></html>",
+          title: "订单看板（C 改版）",
+          page: "page-1",
+          version: 3,
+          display: "panel",
+          from: { session: "legacy-sess-a", page: "page-1" },
+        },
+      ],
+    });
+    writeLegacySession({
+      id: "legacy-sess-other",
+      title: "其他项目会话",
+      cwd: otherRepo,
+      time: "2026-11-23T10:30:00.000Z",
+      pages: [
+        {
+          file: "file-1.html",
+          html: "<!doctype html><html><body><h1>Beta</h1></body></html>",
+          title: "Beta 专属页",
+          page: "page-1",
+          version: 1,
+          display: "panel",
+        },
+      ],
+    });
+    writeLegacySession({
+      id: "legacy-sess-default",
+      title: "普通对话会话",
+      cwd: defaultWs,
+      time: "2026-11-23T10:40:00.000Z",
+      pages: [
+        {
+          file: "file-1.html",
+          html: "<!doctype html><html><body><h1>Chat Page</h1></body></html>",
+          title: "日常对话页",
+          page: "page-1",
+          version: 1,
+          display: "panel",
+        },
+      ],
+    });
+
+    // 子会话（带 parent）：即使日志里含面板页，页面库也必须排除
+    const childEvents: DurableEvent[] = [
+      {
+        type: "session.created",
+        sessionId: "child-sub-1",
+        seq: 1,
+        time: "2026-11-24T01:10:00.000Z",
+        payload: {
+          formatVersion: 1,
+          nocturneVersion: "0.68.0",
+          cwd: repoDir,
+          workspaceRoot: repoDir,
+          model: { provider: "fake", model: "fake-model" },
+          permissionPreset: "default",
+          parent: { sessionId: "legacy-sess-a", callId: "sub-call-1" },
+        },
+      },
+      {
+        type: "tool.completed",
+        sessionId: "child-sub-1",
+        seq: 2,
+        turnId: "t-sub",
+        time: "2026-11-24T01:11:00.000Z",
+        payload: {
+          callId: "c-sub",
+          name: "render_html",
+          status: "ok",
+          modelContent: "ok",
+          durationMs: 5,
+          files: [
+            {
+              type: "file",
+              file: "file-1.html",
+              sha256: "b".repeat(64),
+              bytes: 20,
+              mimeType: "text/html",
+              label: "子会话页.html",
+              source: "upload",
+              inline: { title: "子会话页", page: "page-1", version: 1, display: "panel" },
+            },
+          ],
+        },
+      },
+    ];
+    writeFileSync(
+      path.join(sessionsDir, "child-sub-1.jsonl"),
+      `${childEvents.map((e) => encodeDurableEvent(e)).join("\n")}\n`,
+    );
+
+    const seenToolNames: string[][] = [];
+    let crossEditError = "";
+    let step = 0;
     const provider = new FakeProvider({
       handler: (req) => {
-        let lastUserIdx = -1;
-        for (let i = req.messages.length - 1; i >= 0; i--) {
-          if (req.messages[i]?.role === "user") {
-            lastUserIdx = i;
-            break;
-          }
-        }
-        const turnTools = req.messages.slice(lastUserIdx + 1).filter((m) => m.role === "tool");
-        const lastTool = turnTools.at(-1);
-        if (mode === "a_init") {
-          if (!lastTool) {
-            return [
-              {
-                type: "tool_call",
-                toolCallId: "a1",
-                name: "render_html",
-                input: {
-                  title: "订单看板",
-                  display: "panel",
-                  html: "<!doctype html><html><body><h1>订单看板 v1</h1><p>OLD_TEXT</p></body></html>",
-                },
-              },
-              {
-                type: "tool_call",
-                toolCallId: "a2",
-                name: "render_html",
-                input: {
-                  title: "随文小图",
-                  display: "inline",
-                  html: "<!doctype html><html><body><p>inline only</p></body></html>",
-                },
-              },
-              { type: "finish", reason: "tool_calls" },
-            ];
-          }
+        seenToolNames.push(req.tools.map((t) => t.name));
+        if (step === 0) {
+          step++;
           return [
-            { type: "text_delta", text: "A done" },
-            { type: "finish", reason: "stop" },
+            {
+              type: "tool_call",
+              toolCallId: "cross-1",
+              name: "render_html",
+              input: { page: "legacy-sess-a/page-1", html: "<h1>试图跨会话改旧页</h1>" },
+            },
+            { type: "finish", reason: "tool_calls" },
           ];
         }
-        if (mode === "a_update") {
-          if (!lastTool) {
-            return [
-              {
-                type: "tool_call",
-                toolCallId: "a3",
-                name: "render_html",
-                input: {
-                  page: "page-1",
-                  edits: [{ old: "订单看板 v1", new: "订单看板 v2" }],
-                },
-              },
-              { type: "finish", reason: "tool_calls" },
-            ];
-          }
-          return [
-            { type: "text_delta", text: "A v2 done" },
-            { type: "finish", reason: "stop" },
-          ];
-        }
-        if (mode === "b_wt") {
-          if (!lastTool) {
-            return [
-              {
-                type: "tool_call",
-                toolCallId: "b1",
-                name: "render_html",
-                input: {
-                  title: "工作树性能图",
-                  display: "panel",
-                  html: "<!doctype html><html><body><h1>WT Chart</h1></body></html>",
-                },
-              },
-              { type: "finish", reason: "tool_calls" },
-            ];
-          }
-          return [
-            { type: "text_delta", text: "B done" },
-            { type: "finish", reason: "stop" },
-          ];
-        }
-        if (mode === "other_proj") {
-          if (!lastTool) {
-            return [
-              {
-                type: "tool_call",
-                toolCallId: "o1",
-                name: "render_html",
-                input: {
-                  title: "Beta 专属页",
-                  display: "panel",
-                  html: "<!doctype html><html><body><h1>Beta</h1></body></html>",
-                },
-              },
-              { type: "finish", reason: "tool_calls" },
-            ];
-          }
-          return [
-            { type: "text_delta", text: "Other done" },
-            { type: "finish", reason: "stop" },
-          ];
-        }
-        if (mode === "default_ws") {
-          if (!lastTool) {
-            return [
-              {
-                type: "tool_call",
-                toolCallId: "d1",
-                name: "render_html",
-                input: {
-                  title: "日常对话页",
-                  display: "panel",
-                  html: "<!doctype html><html><body><h1>Chat Page</h1></body></html>",
-                },
-              },
-              { type: "finish", reason: "tool_calls" },
-            ];
-          }
-          return [
-            { type: "text_delta", text: "Default done" },
-            { type: "finish", reason: "stop" },
-          ];
-        }
-        if (mode === "c_list_and_edit") {
-          if (turnTools.length === 0) {
-            expect(req.tools.some((t) => t.name === "list_pages")).toBe(true);
-            return [
-              { type: "tool_call", toolCallId: "c1", name: "list_pages", input: {} },
-              { type: "finish", reason: "tool_calls" },
-            ];
-          }
-          if (turnTools.length === 1) {
-            listPagesText = String(turnTools[0]?.content ?? "");
-            return [
-              {
-                type: "tool_call",
-                toolCallId: "c2",
-                name: "render_html",
-                input: {
-                  page: refForC,
-                  title: "订单看板（C 改版）",
-                  edits: [{ old: "OLD_TEXT", new: "NEW_FROM_C" }],
-                },
-              },
-              { type: "finish", reason: "tool_calls" },
-            ];
-          }
-          return [
-            { type: "text_delta", text: "C edited" },
-            { type: "finish", reason: "stop" },
-          ];
-        }
-        if (mode === "c_bad_ref") {
-          if (turnTools.length === 0) {
-            return [
-              {
-                type: "tool_call",
-                toolCallId: "c3",
-                name: "render_html",
-                input: {
-                  page: otherRef,
-                  html: "<p>should fail</p>",
-                },
-              },
-              { type: "finish", reason: "tool_calls" },
-            ];
-          }
-          badRefError = String(turnTools[0]?.content ?? "");
-          return [
-            { type: "text_delta", text: "handled bad ref" },
-            { type: "finish", reason: "stop" },
-          ];
-        }
+        const toolMsg = req.messages.findLast((m) => m.role === "tool");
+        crossEditError = String(toolMsg?.content ?? "");
         return [
-          { type: "text_delta", text: "ok" },
+          { type: "text_delta", text: "已收到拒绝。" },
           { type: "finish", reason: "stop" },
         ];
       },
@@ -421,105 +496,7 @@ describe("项目页面库（ADR-0114）", () => {
     });
 
     try {
-      // 会话 A（主仓库）：创建面板页 page-1（v1 -> v2）+ 内嵌页 page-2，并写入页面数据
-      const sessA = await runtime.createSession({
-        model: "fake/fake-model",
-        cwd: repoDir,
-        workspaceRoot: repoDir,
-        permissionPreset: "read-only",
-      });
-      await runtime.renameSession(sessA.id, "会话A-主仓");
-      mode = "a_init";
-      await sessA.submit({ text: "生成面板与内嵌页" });
-      mode = "a_update";
-      await sessA.submit({ text: "更新到 v2" });
-      await sessA.setPageData("page-1", "filter", { region: "east" });
-      await sessA.close();
-
-      // 会话 B（工作树）：创建面板页，并归档它（页面库仍应包含已归档会话）
-      const sessB = await runtime.createSession({
-        model: "fake/fake-model",
-        cwd: wtDir,
-        workspaceRoot: wtDir,
-        permissionPreset: "default",
-      });
-      await runtime.renameSession(sessB.id, "会话B-工作树");
-      mode = "b_wt";
-      await sessB.submit({ text: "工作树页面" });
-      await sessB.close();
-      await runtime.archiveSession(sessB.id);
-
-      // 会话 Other（另一项目）
-      const sessOther = await runtime.createSession({
-        model: "fake/fake-model",
-        cwd: otherRepo,
-        workspaceRoot: otherRepo,
-        permissionPreset: "default",
-      });
-      await runtime.renameSession(sessOther.id, "其他项目会话");
-      mode = "other_proj";
-      await sessOther.submit({ text: "Beta 页" });
-      await sessOther.close();
-
-      // 默认工作区会话（「对话」项目）
-      const sessDef = await runtime.createSession({
-        model: "fake/fake-model",
-        cwd: defaultWs,
-        workspaceRoot: defaultWs,
-        permissionPreset: "default",
-      });
-      await runtime.renameSession(sessDef.id, "普通对话会话");
-      mode = "default_ws";
-      await sessDef.submit({ text: "对话页" });
-      await sessDef.close();
-
-      // 子会话（带 parent）：即使日志里含面板页，页面库也必须排除
-      const childEvents: DurableEvent[] = [
-        {
-          type: "session.created",
-          sessionId: "child-sub-1",
-          seq: 1,
-          time: "2026-11-24T01:10:00.000Z",
-          payload: {
-            formatVersion: 1,
-            nocturneVersion: "0.0.0-test",
-            cwd: repoDir,
-            workspaceRoot: repoDir,
-            model: { provider: "fake", model: "fake-model" },
-            permissionPreset: "default",
-            parent: { sessionId: sessA.id, callId: "sub-call-1" },
-          },
-        },
-        {
-          type: "tool.completed",
-          sessionId: "child-sub-1",
-          seq: 2,
-          turnId: "t-sub",
-          time: "2026-11-24T01:11:00.000Z",
-          payload: {
-            callId: "c-sub",
-            name: "render_html",
-            status: "ok",
-            modelContent: "ok",
-            files: [
-              {
-                type: "file",
-                file: "file-1.html",
-                sha256: "b".repeat(64),
-                bytes: 20,
-                mimeType: "text/html",
-                label: "子会话页.html",
-                source: "upload",
-                inline: { title: "子会话页", page: "page-1", version: 1, display: "panel" },
-              },
-            ],
-          },
-        },
-      ];
-      writeFileSync(
-        path.join(sessionsDir, "child-sub-1.jsonl"),
-        `${childEvents.map((e) => encodeDurableEvent(e)).join("\n")}\n`,
-      );
+      await runtime.archiveSession("legacy-sess-b");
 
       // 查询项目列表与 alpha 项目页面库
       const projectsRes = await runtime.listPageProjects({ workspaceRoot: wtDir });
@@ -528,97 +505,57 @@ describe("项目页面库（ADR-0114）", () => {
       expect(projectsRes.projects.map((p) => p.name)).toContain("repo-beta");
       expect(projectsRes.projects.map((p) => p.name)).toContain("对话");
 
-      const alphaBeforeC = await runtime.listPages({ workspaceRoot: wtDir });
-      // A 的内嵌页不进页面库；A 的面板页与已归档的 B 的面板页同在 repo-alpha 下
-      expect(alphaBeforeC.items).toHaveLength(2);
-      const aItem = alphaBeforeC.items.find((i) => i.sessionId === sessA.id);
-      const bItem = alphaBeforeC.items.find((i) => i.sessionId === sessB.id);
-      expect(aItem?.title).toBe("订单看板");
-      expect(aItem?.version).toBe(2);
+      // A 与 C 按来源合并为 1 条（取较新的 C v3），B（已归档）单独 1 条，内嵌页与子会话排除
+      const alphaList = await runtime.listPages({ workspaceRoot: wtDir });
+      expect(alphaList.items).toHaveLength(2);
+      const merged = alphaList.items.find((i) => i.originKey === "legacy-sess-a/page-1");
+      const bItem = alphaList.items.find((i) => i.sessionId === "legacy-sess-b");
+      expect(merged?.sessionId).toBe("legacy-sess-c");
+      expect(merged?.title).toBe("订单看板（C 改版）");
+      expect(merged?.version).toBe(3);
       expect(bItem?.title).toBe("工作树性能图");
       expect(bItem?.sessionArchived).toBe(true);
 
-      // 验证旁路缓存生成且损坏时能自动重建
-      const cacheFileA = path.join(sessionsDir, `${sessA.id}.pages.json`);
+      // 旁路缓存损坏时能自动重建
+      const cacheFileA = path.join(sessionsDir, "legacy-sess-a.pages.json");
       expect(existsSync(cacheFileA)).toBe(true);
       writeFileSync(cacheFileA, "{not valid json");
       const alphaAfterCorrupt = await runtime.listPages({ workspaceRoot: repoDir });
       expect(alphaAfterCorrupt.items).toHaveLength(2);
       expect(() => JSON.parse(readFileSync(cacheFileA, "utf8"))).not.toThrow();
 
-      // 会话 C（主仓库）：调用 list_pages（read-only 下免确认），再跨会话接着改 A 的页面
-      refForC = `${sessA.id}/page-1`;
-      otherRef = `${sessOther.id}/page-1`;
-      const sessC = await runtime.createSession({
+      // 恢复旧会话 A：旧面板版本与旧数据仍可按原格式读取
+      const sessA = await runtime.resumeSession("legacy-sess-a");
+      try {
+        expect(await sessA.getPageData("page-1", "filter")).toEqual({ region: "east" });
+        const v2 = await sessA.readAttachment("file-2.html");
+        expect(new TextDecoder().decode(v2.data)).toContain("订单看板 v2");
+      } finally {
+        await sessA.close();
+      }
+
+      // 新会话：模型工具清单不含 list_pages，且跨会话 render_html ref 被拒绝
+      const sessNew = await runtime.createSession({
         model: "fake/fake-model",
         cwd: repoDir,
         workspaceRoot: repoDir,
         permissionPreset: "read-only",
       });
-      await runtime.renameSession(sessC.id, "会话C-接着改");
-      const cEvents: RuntimeEvent[] = [];
-      sessC.subscribe((ev) => cEvents.push(ev));
+      try {
+        await sessNew.submit({ text: "尝试跨会话改旧页面" });
+        expect(seenToolNames[0]).not.toContain("list_pages");
+        expect(crossEditError).toContain("跨会话");
+      } finally {
+        await sessNew.close();
+      }
 
-      mode = "c_list_and_edit";
-      await sessC.submit({ text: "列出页面并修改 A 的订单看板" });
-
-      // list_pages 与 render_html 均未触发权限确认
-      expect(cEvents.some((e) => e.type === "permission.requested")).toBe(false);
-      expect(listPagesText).toContain(`${sessA.id}/page-1`);
-      expect(listPagesText).toContain(`${sessB.id}/page-1`);
-      expect(listPagesText).not.toContain(sessOther.id);
-
-      // C 新建 page-1，版本号接续为 v3，display=panel，edits 以 A 的 v2 为底稿，且复制了 A 的页面数据
-      const cPage = sessC.state().pages.find((p) => p.page === "page-1");
-      expect(cPage?.display).toBe("panel");
-      expect(cPage?.title).toBe("订单看板（C 改版）");
-      expect(cPage?.versions[0]?.version).toBe(3);
-      expect(cPage?.origin).toEqual({ sessionId: sessA.id, page: "page-1" });
-      const cHtmlFile = cPage?.versions[0]?.file.file;
-      expect(cHtmlFile).toBeTruthy();
-      if (!cHtmlFile) throw new Error("missing cHtmlFile");
-      const cHtmlBytes = (await sessC.readAttachment(cHtmlFile)).data;
-      const cHtmlText = new TextDecoder().decode(cHtmlBytes);
-      expect(cHtmlText).toContain("订单看板 v2");
-      expect(cHtmlText).toContain("NEW_FROM_C");
-      expect(cHtmlText).not.toContain("OLD_TEXT");
-
-      // 页面数据文件已复制到 C，之后两边互不影响
-      expect(await sessC.getPageData("page-1", "filter")).toEqual({ region: "east" });
-      await sessC.setPageData("page-1", "filter", { region: "west" });
-      const sessAReopened = await runtime.resumeSession(sessA.id);
-      expect(await sessAReopened.getPageData("page-1", "filter")).toEqual({ region: "east" });
-      await sessAReopened.close();
-
-      // 页面库按来源合并：A 与 C 合并为 1 行，取最近更新的 C（v3）
-      const alphaAfterC = await runtime.listPages({ workspaceRoot: repoDir });
-      expect(alphaAfterC.items).toHaveLength(2);
-      const merged = alphaAfterC.items.find((i) => i.originKey === `${sessA.id}/page-1`);
-      expect(merged?.sessionId).toBe(sessC.id);
-      expect(merged?.sessionTitle).toBe("会话C-接着改");
-      expect(merged?.version).toBe(3);
-
-      // 指向其他项目的 ref 返回 invalid_input 并列出可用 ref
-      mode = "c_bad_ref";
-      await sessC.submit({ text: "试着改其他项目的页面" });
-      expect(badRefError).toContain("不存在或不属于当前项目");
-      expect(badRefError).toContain(`${sessC.id}/page-1`);
-
-      // 回退 C 撤掉该页面：页面库退回显示 A 的 v2
-      const firstUserSeq = sessC.state().history.find((h) => h.kind === "user")?.seq;
-      expect(firstUserSeq).toBeDefined();
-      if (firstUserSeq === undefined) throw new Error("missing firstUserSeq");
-      await sessC.rewind(firstUserSeq, "conversation");
-      const alphaAfterRewind = await runtime.listPages({ workspaceRoot: repoDir });
-      const reverted = alphaAfterRewind.items.find((i) => i.originKey === `${sessA.id}/page-1`);
-      expect(reverted?.sessionId).toBe(sessA.id);
-      expect(reverted?.version).toBe(2);
-      await sessC.close();
-
-      // 删除 B 的会话文件：页面库不再残留 B
-      rmSync(path.join(sessionsDir, `${sessB.id}.jsonl`), { force: true });
+      // 删除 C 与 B 的会话文件：页面库退回显示 A 的 v2，并不再残留 B
+      rmSync(path.join(sessionsDir, "legacy-sess-c.jsonl"), { force: true });
+      rmSync(path.join(sessionsDir, "legacy-sess-b.jsonl"), { force: true });
       const alphaAfterDelete = await runtime.listPages({ workspaceRoot: repoDir });
-      expect(alphaAfterDelete.items.map((i) => i.sessionId)).toEqual([sessA.id]);
+      expect(alphaAfterDelete.items).toHaveLength(1);
+      expect(alphaAfterDelete.items[0]?.sessionId).toBe("legacy-sess-a");
+      expect(alphaAfterDelete.items[0]?.version).toBe(2);
     } finally {
       await runtime.close();
       if (prevHome === undefined) delete process.env.NOCTURNE_HOME;
@@ -626,90 +563,82 @@ describe("项目页面库（ADR-0114）", () => {
     }
   });
 
-  it("读取放行：同项目其他会话面板页面 HTML 在 default 预设下 read 免确认，其他项目与内嵌页仍需确认", async () => {
+  it("跨会话历史面板页面附件不再对模型的 read 工具自动免确认放行", async () => {
     const root = makeTmp("nct-page-perm-");
     const home = path.join(root, "home");
     const sessionsDir = path.join(home, "sessions");
-    const otherRepo = path.join(root, "repo-other");
-    mkdirSync(otherRepo, { recursive: true });
+    mkdirSync(sessionsDir, { recursive: true });
     const { repoDir, wtDir } = makeGitRepoWithWorktree(root);
 
-    let stepMode: "create_alpha" | "create_other" | "read_file" = "create_alpha";
-    let pathToRead = "";
-    let readCallSeq = 0;
+    const attachDir = path.join(sessionsDir, "attachments", "legacy-alpha");
+    mkdirSync(attachDir, { recursive: true });
+    const alphaPanelPath = path.join(attachDir, "file-1.html");
+    writeFileSync(alphaPanelPath, "<p>PANEL_HTML</p>", "utf8");
+    const legacyEvents: DurableEvent[] = [
+      {
+        type: "session.created",
+        sessionId: "legacy-alpha",
+        seq: 1,
+        time: "2026-11-23T10:00:00.000Z",
+        payload: {
+          formatVersion: 1,
+          nocturneVersion: "0.68.0",
+          cwd: repoDir,
+          workspaceRoot: repoDir,
+          model: { provider: "fake", model: "fake-model" },
+          permissionPreset: "default",
+        },
+      },
+      {
+        type: "tool.completed",
+        sessionId: "legacy-alpha",
+        seq: 2,
+        turnId: "t1",
+        time: "2026-11-23T10:00:01.000Z",
+        payload: {
+          callId: "p1",
+          name: "render_html",
+          status: "ok",
+          modelContent: "ok",
+          durationMs: 5,
+          files: [
+            {
+              type: "file",
+              file: "file-1.html",
+              sha256: "a".repeat(64),
+              bytes: 17,
+              mimeType: "text/html",
+              label: "面板页.html",
+              source: "upload",
+              inline: { title: "面板页", page: "page-1", version: 1, display: "panel" },
+            },
+          ],
+        },
+      },
+    ];
+    writeFileSync(
+      path.join(sessionsDir, "legacy-alpha.jsonl"),
+      `${legacyEvents.map((e) => encodeDurableEvent(e)).join("\n")}\n`,
+      "utf8",
+    );
 
+    let called = false;
     const provider = new FakeProvider({
-      handler: (req) => {
-        let lastUserIdx = -1;
-        for (let i = req.messages.length - 1; i >= 0; i--) {
-          if (req.messages[i]?.role === "user") {
-            lastUserIdx = i;
-            break;
-          }
-        }
-        const lastTool = req.messages
-          .slice(lastUserIdx + 1)
-          .reverse()
-          .find((m) => m.role === "tool");
-        if (stepMode === "create_alpha") {
-          if (!lastTool) {
-            return [
-              {
-                type: "tool_call",
-                toolCallId: "p1",
-                name: "render_html",
-                input: { title: "面板页", display: "panel", html: "<p>PANEL_HTML</p>" },
-              },
-              {
-                type: "tool_call",
-                toolCallId: "p2",
-                name: "render_html",
-                input: { title: "内嵌页", display: "inline", html: "<p>INLINE_HTML</p>" },
-              },
-              { type: "finish", reason: "tool_calls" },
-            ];
-          }
+      handler: () => {
+        if (!called) {
+          called = true;
           return [
-            { type: "text_delta", text: "ok" },
-            { type: "finish", reason: "stop" },
-          ];
-        }
-        if (stepMode === "create_other") {
-          if (!lastTool) {
-            return [
-              {
-                type: "tool_call",
-                toolCallId: "p3",
-                name: "render_html",
-                input: { title: "别项目面板页", display: "panel", html: "<p>OTHER_PANEL</p>" },
-              },
-              { type: "finish", reason: "tool_calls" },
-            ];
-          }
-          return [
-            { type: "text_delta", text: "ok" },
-            { type: "finish", reason: "stop" },
-          ];
-        }
-        if (stepMode === "read_file") {
-          if (!lastTool) {
-            return [
-              {
-                type: "tool_call",
-                toolCallId: `r${++readCallSeq}`,
-                name: "read",
-                input: { path: pathToRead },
-              },
-              { type: "finish", reason: "tool_calls" },
-            ];
-          }
-          return [
-            { type: "text_delta", text: String(lastTool.content) },
-            { type: "finish", reason: "stop" },
+            {
+              type: "tool_call",
+              toolCallId: "r1",
+              name: "read",
+              input: { path: alphaPanelPath },
+            },
+            { type: "finish", reason: "tool_calls" },
           ];
         }
         return [
-          { type: "text_delta", text: "ok" },
+          { type: "text_delta", text: "done" },
           { type: "finish", reason: "stop" },
         ];
       },
@@ -725,38 +654,6 @@ describe("项目页面库（ADR-0114）", () => {
     });
 
     try {
-      const sessAlpha = await runtime.createSession({
-        model: "fake/fake-model",
-        cwd: repoDir,
-        workspaceRoot: repoDir,
-        permissionPreset: "default",
-      });
-      stepMode = "create_alpha";
-      await sessAlpha.submit({ text: "create" });
-      const alphaPanelFile = sessAlpha.state().pages.find((p) => p.display === "panel")?.versions[0]
-        ?.file.file;
-      const alphaInlineFile = sessAlpha.state().pages.find((p) => p.display === "inline")
-        ?.versions[0]?.file.file;
-      if (!alphaPanelFile || !alphaInlineFile) throw new Error("missing alpha page files");
-      const alphaPanelPath = path.join(sessionsDir, "attachments", sessAlpha.id, alphaPanelFile);
-      const alphaInlinePath = path.join(sessionsDir, "attachments", sessAlpha.id, alphaInlineFile);
-      await sessAlpha.close();
-
-      const sessOther = await runtime.createSession({
-        model: "fake/fake-model",
-        cwd: otherRepo,
-        workspaceRoot: otherRepo,
-        permissionPreset: "default",
-      });
-      stepMode = "create_other";
-      await sessOther.submit({ text: "create other" });
-      const otherPanelFile = sessOther.state().pages.find((p) => p.display === "panel")?.versions[0]
-        ?.file.file;
-      if (!otherPanelFile) throw new Error("missing otherPanelFile");
-      const otherPanelPath = path.join(sessionsDir, "attachments", sessOther.id, otherPanelFile);
-      await sessOther.close();
-
-      // 在工作树（同项目）开一个非交互 default 会话：若需要确认会直接拒绝；免确认才会成功读取
       const sessReader = await runtime.createSession({
         model: "fake/fake-model",
         cwd: wtDir,
@@ -766,39 +663,11 @@ describe("项目页面库（ADR-0114）", () => {
       });
       const events: RuntimeEvent[] = [];
       sessReader.subscribe((ev) => events.push(ev));
-
-      stepMode = "read_file";
-      // 1. 同项目面板页面 HTML -> 免确认直接 ok
-      pathToRead = alphaPanelPath;
       await sessReader.submit({ text: "read alpha panel" });
-      const panelCompleted = events
+      const completed = events
         .filter((e) => e.type === "tool.completed" && e.payload.name === "read")
         .at(-1);
-      expect(panelCompleted?.type === "tool.completed" && panelCompleted.payload.status).toBe("ok");
-      expect(
-        panelCompleted?.type === "tool.completed" ? panelCompleted.payload.modelContent : "",
-      ).toContain("PANEL_HTML");
-
-      // 2. 同项目内嵌页面 HTML -> 不放行（default 非交互拒绝）
-      pathToRead = alphaInlinePath;
-      await sessReader.submit({ text: "read alpha inline" });
-      const inlineCompleted = events
-        .filter((e) => e.type === "tool.completed" && e.payload.name === "read")
-        .at(-1);
-      expect(inlineCompleted?.type === "tool.completed" && inlineCompleted.payload.status).toBe(
-        "denied",
-      );
-
-      // 3. 其他项目面板页面 HTML -> 不放行（default 非交互拒绝）
-      pathToRead = otherPanelPath;
-      await sessReader.submit({ text: "read other panel" });
-      const otherCompleted = events
-        .filter((e) => e.type === "tool.completed" && e.payload.name === "read")
-        .at(-1);
-      expect(otherCompleted?.type === "tool.completed" && otherCompleted.payload.status).toBe(
-        "denied",
-      );
-
+      expect(completed?.type === "tool.completed" && completed.payload.status).toBe("denied");
       await sessReader.close();
     } finally {
       await runtime.close();
@@ -807,13 +676,9 @@ describe("项目页面库（ADR-0114）", () => {
     }
   });
 
-  it("list_pages 与 render_html 具有一致的仅主会话特性与工具说明", () => {
-    expect(listPagesTool.traits).toEqual({
-      mutates: false,
-      concurrencySafe: true,
-      mainSessionOnly: true,
-    });
+  it("render_html 仅保留主会话内嵌图表说明，不再指引 list_pages 或面板", () => {
     expect(renderHtmlTool.traits.mainSessionOnly).toBe(true);
-    expect(renderHtmlTool.description).toContain("list_pages");
+    expect(renderHtmlTool.description).not.toContain("list_pages");
+    expect(renderHtmlTool.description).not.toContain("/cadenza");
   });
 });

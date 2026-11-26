@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -133,7 +134,7 @@ describe("render_html 工具与内嵌页面标记", () => {
       expect(completed?.payload.status).toBe("ok");
       expect(completed?.payload.modelContent).toContain("page-1 v1");
       expect(completed?.payload.modelContent).toContain("file-1.html");
-      expect(completed?.payload.modelContent).toContain("回复中不要复述页面里的数据、结论或说明");
+      expect(completed?.payload.modelContent).toContain("回复中不要复述图表里的数据、结论或说明");
       expect(JSON.stringify(completed?.payload)).not.toContain("unique-secret-marker");
       expect(completed?.payload.files).toHaveLength(1);
       const att = completed?.payload.files?.[0];
@@ -728,13 +729,33 @@ describe("render_html 工具与内嵌页面标记", () => {
           edits: [{ old: "a", new: "b" }],
         }),
       ).toBeUndefined();
+      // display: "panel" 与任何显式 display、跨会话 ref 均在校验层被拒
+      expect(
+        renderHtmlTool.validateInput?.({
+          title: "看板",
+          html: "<p>a</p>",
+          display: "panel",
+        } as unknown as Parameters<NonNullable<typeof renderHtmlTool.validateInput>>[0]),
+      ).toContain("面板");
       expect(
         renderHtmlTool.validateInput?.({
           page: "page-1",
           html: "<p>rewrite</p>",
           display: "panel",
+        } as unknown as Parameters<NonNullable<typeof renderHtmlTool.validateInput>>[0]),
+      ).toContain("面板");
+      expect(
+        renderHtmlTool.validateInput?.({
+          page: "other-session/page-1",
+          html: "<p>cross</p>",
         }),
-      ).toBeUndefined();
+      ).toContain("跨会话");
+      const props = (renderHtmlTool.inputSchema as { properties?: Record<string, unknown> })
+        .properties;
+      expect(props?.display).toBeUndefined();
+      expect(renderHtmlTool.description).not.toContain("/cadenza");
+      expect(renderHtmlTool.description).not.toContain("list_pages");
+      expect(renderHtmlTool.description).not.toContain("window.nocturne");
     });
 
     it("applyHtmlEdits：顺序依次替换，old 出现 0 次或多次时写明第几条和次数", () => {
@@ -762,34 +783,31 @@ describe("render_html 工具与内嵌页面标记", () => {
       }
     });
 
-    it("新建 id/版本号、edits 顺序替换、html 整份重写、title 沿用、更新忽略 display、结果含文件路径", async () => {
+    it("新建内嵌图表 id/版本号、edits 顺序替换、html 整份重写、title 沿用、结果含文件路径", async () => {
       const root = mkdtempSync(path.join(tmpdir(), "nct-render-ver-"));
       roots.push(root);
       const sessionsDir = path.join(root, "sessions");
       const calls: Record<string, unknown>[] = [
-        // 1. 新建面板页面 page-1 v1
+        // 1. 新建内嵌图表 page-1 v1
         {
-          title: "每周提交看板",
-          html: "<h1>看板</h1><p>总数: 100</p><p>环比: +10%</p>",
-          display: "panel",
+          title: "每周提交趋势",
+          html: "<h1>趋势</h1><p>总数: 100</p><p>环比: +10%</p>",
         },
-        // 2. edits 顺序替换，不传 title（沿用），传入 display: "inline"（忽略）
+        // 2. edits 顺序替换，不传 title（沿用）
         {
           page: "page-1",
-          display: "inline",
           edits: [
             { old: "总数: 100", new: "总数: 162" },
             { old: "总数: 162</p><p>环比: +10%", new: "总数: 162</p><p>环比: +26%" },
           ],
         },
-        // 3. html 整份重写并更新标题，传入合法但不同的 display: "inline" 仍忽略
+        // 3. html 整份重写并更新标题
         {
           page: "page-1",
-          title: "每周提交看板（终版）",
-          html: "<h1>终版看板</h1><p>八周平均: 20.3</p>",
-          display: "inline",
+          title: "每周提交趋势（终版）",
+          html: "<h1>终版趋势</h1><p>八周平均: 20.3</p>",
         },
-        // 4. 新建内嵌页面（缺省 display = "inline"）-> page-2 v1
+        // 4. 新建第二张内嵌图表 -> page-2 v1
         { title: "架构对比表", html: "<table><tr><td>A</td></tr></table>" },
       ];
       let idx = 0;
@@ -817,7 +835,7 @@ describe("render_html 工具与内嵌页面标记", () => {
       });
       const session = await runtime.createSession({ model: "fake/fake-model" });
       try {
-        await session.submit({ text: "创建并迭代页面" });
+        await session.submit({ text: "创建并迭代内嵌图表" });
         const completions = session
           .durableEvents()
           .filter(
@@ -834,22 +852,22 @@ describe("render_html 工具与内嵌页面标记", () => {
         const c4 = e4.payload;
 
         expect(c1.files?.[0]?.inline).toEqual({
-          title: "每周提交看板",
+          title: "每周提交趋势",
           page: "page-1",
           version: 1,
-          display: "panel",
+          display: "inline",
         });
         expect(c2.files?.[0]?.inline).toEqual({
-          title: "每周提交看板",
+          title: "每周提交趋势",
           page: "page-1",
           version: 2,
-          display: "panel",
+          display: "inline",
         });
         expect(c3.files?.[0]?.inline).toEqual({
-          title: "每周提交看板（终版）",
+          title: "每周提交趋势（终版）",
           page: "page-1",
           version: 3,
-          display: "panel",
+          display: "inline",
         });
         expect(c4.files?.[0]?.inline).toEqual({
           title: "架构对比表",
@@ -870,11 +888,11 @@ describe("render_html 工具与内嵌页面标记", () => {
         // 验证 edits 落盘内容
         const v2Bytes = await session.readAttachment(file2);
         expect(new TextDecoder().decode(v2Bytes.data)).toBe(
-          "<h1>看板</h1><p>总数: 162</p><p>环比: +26%</p>",
+          "<h1>趋势</h1><p>总数: 162</p><p>环比: +26%</p>",
         );
         const v3Bytes = await session.readAttachment(file3);
         expect(new TextDecoder().decode(v3Bytes.data)).toBe(
-          "<h1>终版看板</h1><p>八周平均: 20.3</p>",
+          "<h1>终版趋势</h1><p>八周平均: 20.3</p>",
         );
 
         // 派生视图校验
@@ -883,13 +901,13 @@ describe("render_html 工具与内嵌页面标记", () => {
         const [p0, p1] = view.pages;
         expect(p0).toMatchObject({
           page: "page-1",
-          title: "每周提交看板（终版）",
-          display: "panel",
+          title: "每周提交趋势（终版）",
+          display: "inline",
         });
         expect(p0?.versions.map((v) => ({ version: v.version, title: v.title }))).toEqual([
-          { version: 1, title: "每周提交看板" },
-          { version: 2, title: "每周提交看板" },
-          { version: 3, title: "每周提交看板（终版）" },
+          { version: 1, title: "每周提交趋势" },
+          { version: 2, title: "每周提交趋势" },
+          { version: 3, title: "每周提交趋势（终版）" },
         ]);
         expect(p1).toMatchObject({
           page: "page-2",
@@ -897,6 +915,280 @@ describe("render_html 工具与内嵌页面标记", () => {
           display: "inline",
         });
         expect(p1?.versions).toHaveLength(1);
+      } finally {
+        await session.close();
+      }
+    });
+
+    it("升级前旧会话：恢复历史面板页与数据可读，拒绝新建面板和省略 display 传入旧面板 page ID，但普通内嵌图表正常", async () => {
+      const root = mkdtempSync(path.join(tmpdir(), "nct-render-legacy-panel-"));
+      roots.push(root);
+      const sessionsDir = path.join(root, "sessions");
+      const sessionId = "legacy-panel-session";
+      const attachDir = path.join(sessionsDir, "attachments", sessionId);
+      const pageDataDir = path.join(attachDir, "page-data");
+      mkdirSync(pageDataDir, { recursive: true });
+      const v1Html = "<!doctype html><html><body><h1>旧看板 v1</h1></body></html>";
+      const v2Html = "<!doctype html><html><body><h1>旧看板 v2</h1></body></html>";
+      writeFileSync(path.join(attachDir, "file-1.html"), v1Html, "utf8");
+      writeFileSync(path.join(attachDir, "file-2.html"), v2Html, "utf8");
+      writeFileSync(
+        path.join(pageDataDir, "page-1.json"),
+        JSON.stringify({ version: 1, entries: { saved: "keep-me" } }),
+        "utf8",
+      );
+      const legacyEvents: DurableEvent[] = [
+        {
+          seq: 1,
+          sessionId,
+          time: "2026-11-23T10:00:00.000Z",
+          type: "session.created",
+          payload: {
+            cwd: root,
+            workspaceRoot: root,
+            model: { provider: "fake", model: "fake-model" },
+            permissionPreset: "default",
+            formatVersion: 1,
+            nocturneVersion: "0.68.0",
+          },
+        },
+        {
+          seq: 2,
+          sessionId,
+          turnId: "t1",
+          time: "2026-11-23T10:00:01.000Z",
+          type: "turn.started",
+          payload: { turnIndex: 1 },
+        },
+        {
+          seq: 3,
+          sessionId,
+          turnId: "t1",
+          time: "2026-11-23T10:00:01.000Z",
+          type: "message.user",
+          payload: {
+            messageId: "u1",
+            content: [
+              { type: "text", text: "做个旧看板" },
+              {
+                type: "text",
+                text: '<work-mode name="cadenza">\nUse render_html with display: "panel".\n</work-mode>',
+              },
+            ],
+            workMode: { name: "cadenza", body: 'Use render_html with display: "panel".' },
+          },
+        },
+        {
+          seq: 4,
+          sessionId,
+          turnId: "t1",
+          time: "2026-11-23T10:00:02.000Z",
+          type: "message.assistant",
+          payload: {
+            messageId: "a1",
+            model: { provider: "fake", model: "fake-model" },
+            content: [],
+            toolCalls: [
+              {
+                callId: "legacy-rh-1",
+                name: "render_html",
+                input: { title: "旧看板", html: v1Html, display: "panel" },
+              },
+            ],
+            finishReason: "tool_calls",
+          },
+        },
+        {
+          seq: 5,
+          sessionId,
+          turnId: "t1",
+          time: "2026-11-23T10:00:02.100Z",
+          type: "tool.completed",
+          payload: {
+            callId: "legacy-rh-1",
+            name: "render_html",
+            status: "ok",
+            modelContent: "ok",
+            durationMs: 5,
+            files: [
+              {
+                type: "file",
+                file: "file-1.html",
+                bytes: Buffer.byteLength(v1Html),
+                sha256: createHash("sha256").update(v1Html, "utf8").digest("hex"),
+                label: "旧看板.html",
+                mimeType: "text/html",
+                source: "upload",
+                inline: { title: "旧看板", page: "page-1", version: 1, display: "panel" },
+              },
+            ],
+          },
+        },
+        {
+          seq: 6,
+          sessionId,
+          turnId: "t1",
+          time: "2026-11-23T10:00:03.000Z",
+          type: "message.assistant",
+          payload: {
+            messageId: "a2",
+            model: { provider: "fake", model: "fake-model" },
+            content: [],
+            toolCalls: [
+              {
+                callId: "legacy-rh-2",
+                name: "render_html",
+                input: { page: "page-1", html: v2Html },
+              },
+            ],
+            finishReason: "tool_calls",
+          },
+        },
+        {
+          seq: 7,
+          sessionId,
+          turnId: "t1",
+          time: "2026-11-23T10:00:03.100Z",
+          type: "tool.completed",
+          payload: {
+            callId: "legacy-rh-2",
+            name: "render_html",
+            status: "ok",
+            modelContent: "ok",
+            durationMs: 5,
+            files: [
+              {
+                type: "file",
+                file: "file-2.html",
+                bytes: Buffer.byteLength(v2Html),
+                sha256: createHash("sha256").update(v2Html, "utf8").digest("hex"),
+                label: "旧看板.html",
+                mimeType: "text/html",
+                source: "upload",
+                inline: { title: "旧看板", page: "page-1", version: 2, display: "panel" },
+              },
+            ],
+          },
+        },
+        {
+          seq: 8,
+          sessionId,
+          turnId: "t1",
+          time: "2026-11-23T10:00:03.500Z",
+          type: "message.assistant",
+          payload: {
+            messageId: "a3",
+            model: { provider: "fake", model: "fake-model" },
+            content: [{ type: "text", text: "旧看板已更新到 v2。" }],
+            toolCalls: [],
+            finishReason: "stop",
+          },
+        },
+        {
+          seq: 9,
+          sessionId,
+          turnId: "t1",
+          time: "2026-11-23T10:00:04.000Z",
+          type: "turn.completed",
+          payload: {
+            reason: "done",
+            steps: 3,
+            usage: { inputTokens: 0, outputTokens: 0 },
+          },
+        },
+      ];
+      writeFileSync(
+        path.join(sessionsDir, `${sessionId}.jsonl`),
+        `${legacyEvents.map((e) => encodeDurableEvent(e)).join("\n")}\n`,
+        "utf8",
+      );
+
+      const calls: Record<string, unknown>[] = [
+        // 1. 新建面板页（显式 display: "panel"）-> 拒绝
+        { title: "新面板", html: "<p>panel</p>", display: "panel" },
+        // 2. 省略 display、传入旧面板页 ID（edits）-> 拒绝
+        { page: "page-1", edits: [{ old: "旧看板 v2", new: "旧看板 v3" }] },
+        // 3. 省略 display、传入旧面板页 ID（整份 html）-> 拒绝
+        { page: "page-1", html: "<h1>试图覆盖旧看板</h1>" },
+        // 4. 跨会话 ref（省略 display）-> 拒绝
+        { page: `${sessionId}/page-1`, html: "<h1>跨会话覆盖</h1>" },
+        // 5. 新建普通内嵌折线图（省略 display）-> 成功生成 page-2 v1 (inline)
+        { title: "本周用量折线图", html: "<svg><polyline points='0,10 10,5'/></svg>" },
+        // 6. 更新刚才的内嵌折线图 page-2 -> 成功生成 page-2 v2 (inline)
+        { page: "page-2", edits: [{ old: "10,5", new: "10,2" }] },
+      ];
+      let idx = 0;
+      const provider = new FakeProvider({
+        handler: () => {
+          const input = calls[idx];
+          if (input !== undefined) {
+            return [
+              { type: "tool_call", toolCallId: `guard-${++idx}`, name: "render_html", input },
+              { type: "finish", reason: "tool_calls" },
+            ];
+          }
+          return [
+            { type: "text_delta", text: "完成。" },
+            { type: "finish", reason: "stop" },
+          ];
+        },
+      });
+      const runtime = await createRuntime({
+        cwd: root,
+        sessionsDir,
+        providers: [provider],
+        interactive: true,
+      });
+      const session = await runtime.resumeSession(sessionId);
+      try {
+        // 恢复后旧面板 v1/v2、数据与回退目标都可读
+        expect(session.state().pages[0]).toMatchObject({
+          page: "page-1",
+          title: "旧看板",
+          display: "panel",
+        });
+        expect(session.state().pages[0]?.versions.map((v) => v.version)).toEqual([1, 2]);
+        expect(new TextDecoder().decode((await session.readAttachment("file-1.html")).data)).toBe(
+          v1Html,
+        );
+        expect(await session.getPageData("page-1", "saved")).toBe("keep-me");
+        const targets = await session.rewindTargets();
+        expect(targets[0]?.firstLine).toBe("/cadenza 做个旧看板");
+        expect(targets[0]?.text).toBe("做个旧看板");
+
+        await session.submit({ text: "测试面板拦截与内嵌图表" });
+
+        const newCompletions = session
+          .durableEvents()
+          .filter(
+            (e): e is DurableEvent<"tool.completed"> =>
+              e.seq > 9 && e.type === "tool.completed" && e.payload.name === "render_html",
+          );
+        expect(newCompletions).toHaveLength(6);
+        for (let i = 0; i < 4; i++) {
+          expect(newCompletions[i]?.payload.status).toBe("error");
+          expect(newCompletions[i]?.payload.error?.code).toBe("invalid_input");
+        }
+        expect(newCompletions[4]?.payload.status).toBe("ok");
+        expect(newCompletions[4]?.payload.files?.[0]?.inline).toEqual({
+          title: "本周用量折线图",
+          page: "page-2",
+          version: 1,
+          display: "inline",
+        });
+        expect(newCompletions[5]?.payload.status).toBe("ok");
+        expect(newCompletions[5]?.payload.files?.[0]?.inline).toEqual({
+          title: "本周用量折线图",
+          page: "page-2",
+          version: 2,
+          display: "inline",
+        });
+
+        // 历史面板 page-1 版本数和内容完全未被篡改
+        const view = replaySessionView(session.durableEvents());
+        const panel = view.pages.find((p) => p.page === "page-1");
+        expect(panel?.display).toBe("panel");
+        expect(panel?.versions.map((v) => v.version)).toEqual([1, 2]);
       } finally {
         await session.close();
       }
@@ -1005,7 +1297,7 @@ describe("render_html 工具与内嵌页面标记", () => {
                 type: "tool_call",
                 toolCallId: "rh-1",
                 name: "render_html",
-                input: { title: "面板页", html: "<p>v1 content</p>", display: "panel" },
+                input: { title: "内嵌图表", html: "<p>v1 content</p>" },
               },
               { type: "finish", reason: "tool_calls" },
             ];
@@ -1083,7 +1375,7 @@ describe("render_html 工具与内嵌页面标记", () => {
                 type: "tool_call",
                 toolCallId: "rh-t1",
                 name: "render_html",
-                input: { title: "看板", html: "<p>v1</p>", display: "inline" },
+                input: { title: "图表", html: "<p>v1</p>" },
               },
               { type: "finish", reason: "tool_calls" },
             ];
@@ -1100,7 +1392,7 @@ describe("render_html 工具与内嵌页面标记", () => {
                 type: "tool_call",
                 toolCallId: "rh-t2",
                 name: "render_html",
-                input: { page: "page-1", display: "panel", edits: [{ old: "v1", new: "v2" }] },
+                input: { page: "page-1", edits: [{ old: "v1", new: "v2" }] },
               },
               { type: "finish", reason: "tool_calls" },
             ];
@@ -1134,8 +1426,8 @@ describe("render_html 工具与内嵌页面标记", () => {
           (event): event is DurableEvent<"tool.completed"> =>
             event.type === "tool.completed" && event.payload.name === "render_html",
         );
-        expect(completions[0]?.payload.modelContent).toContain("page-1 v1，内嵌");
-        expect(completions[1]?.payload.modelContent).toContain("page-1 v2，内嵌");
+        expect(completions[0]?.payload.modelContent).toContain("page-1 v1");
+        expect(completions[1]?.payload.modelContent).toContain("page-1 v2");
         expect(completions[1]?.payload.output).toMatchObject({ display: "inline", version: 2 });
 
         // 0.62.0 的日志会将内嵌页的更新版本记成 panel。

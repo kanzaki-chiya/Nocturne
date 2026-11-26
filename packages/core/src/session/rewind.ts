@@ -4,6 +4,7 @@ import {
   effectiveEvents,
   firstUserText,
   isRuntimeWorkMode,
+  userWorkMode,
   workModeDisplayText,
   type CheckpointBefore,
   type DurableEvent,
@@ -196,7 +197,15 @@ export async function rewindTargets(
             ? `${pageComments.title} v${pageComments.version} · ${pageComments.comments.length}`
             : "")),
       time: event.time,
-      text: workMode === undefined ? typed : isRuntimeWorkMode(workMode) ? "" : shown,
+      // 现行执行方式回填带命令名以便原模式重发；已下线或未知执行方式只回填纯正文，Runtime 写入的消息不回填
+      text:
+        workMode === undefined
+          ? typed
+          : isRuntimeWorkMode(workMode)
+            ? ""
+            : userWorkMode(workMode) !== undefined
+              ? shown
+              : typed,
       ...(quotes ? { quotes } : {}),
       hasImages: (event.payload.attachments?.length ?? 0) > 0,
       files,

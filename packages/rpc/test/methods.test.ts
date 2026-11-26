@@ -724,4 +724,55 @@ describe("公开 API 与 RPC 方法集合一致", () => {
       expect(served.has(method)).toBe(true);
     }
   });
+
+  it("直接 RPC 拒绝已清退的 workMode: cadenza 与新页面评论提交", async () => {
+    const h = await connect({ scripts: [textScript("ok")] });
+    const { session } = await h.client.runtime.createSession({ model: MODEL });
+    try {
+      await expect(
+        h.client.call("session.submit", {
+          sessionId: session.id,
+          text: "做个看板",
+          workMode: "cadenza" as never,
+        }),
+      ).rejects.toMatchObject({ code: "invalid_params", rpcCode: -32602 });
+      await expect(
+        h.client.call("session.enqueueInput", {
+          sessionId: session.id,
+          mode: "queue",
+          text: "做个看板",
+          workMode: "cadenza" as never,
+        }),
+      ).rejects.toMatchObject({ code: "invalid_params", rpcCode: -32602 });
+      await expect(
+        h.client.call("session.submit", {
+          sessionId: session.id,
+          text: "",
+          pageComments: {
+            page: "page-1",
+            version: 1,
+            title: "旧看板",
+            comments: [{ path: "body > h1", text: "标题", x: 10, y: 20, note: "改一下" }],
+          },
+        }),
+      ).rejects.toMatchObject({ code: "invalid_params", rpcCode: -32602 });
+      await expect(
+        h.client.call("session.enqueueInput", {
+          sessionId: session.id,
+          mode: "queue",
+          text: "",
+          pageComments: {
+            page: "page-1",
+            version: 1,
+            title: "旧看板",
+            comments: [{ replyTo: "c1", note: "继续" }],
+          },
+        }),
+      ).rejects.toMatchObject({ code: "invalid_params", rpcCode: -32602 });
+    } finally {
+      await session.close();
+      h.client.close();
+      await h.served;
+    }
+  });
 });

@@ -1,19 +1,11 @@
 import {
   nextSessionPageId,
   type InlinePageDisplay,
-  type InlinePageFrom,
   type SessionPage,
   type SubjectRequest,
 } from "../../protocol/index.js";
 import { sniffImageMime } from "../image.js";
-import type {
-  ProjectPageEntry,
-  ProjectPageTarget,
-  ToolContext,
-  ToolDefinition,
-  ToolResult,
-  ToolScope,
-} from "../types.js";
+import type { ToolContext, ToolDefinition, ToolResult, ToolScope } from "../types.js";
 
 export const MAX_INLINE_HTML_TITLE_CHARS = 80;
 export const MAX_INLINE_HTML_BYTES = 256 * 1024;
@@ -36,7 +28,6 @@ export interface RenderHtmlInput {
   images?: string[] | undefined;
   page?: string | undefined;
   edits?: RenderHtmlEdit[] | undefined;
-  display?: InlinePageDisplay | undefined;
 }
 
 export interface RenderHtmlOutput {
@@ -177,19 +168,22 @@ function validateHtmlText(html: unknown): string | undefined {
 }
 
 function formatExistingPages(pages: readonly SessionPage[]): string {
-  if (pages.length === 0) {
-    return "当前会话尚未创建任何页面";
+  const inlinePages = pages.filter((p) => p.display !== "panel");
+  if (inlinePages.length === 0) {
+    return "当前会话尚未创建任何内嵌图表";
   }
-  const lines = pages.map((p) => `- ${p.page}: ${p.title}`);
-  return `当前会话已有页面：\n${lines.join("\n")}`;
+  const lines = inlinePages.map((p) => `- ${p.page}: ${p.title}`);
+  return `当前会话已有内嵌图表：\n${lines.join("\n")}`;
 }
 
-function formatAvailableProjectRefs(entries: readonly ProjectPageEntry[]): string {
-  if (entries.length === 0) {
-    return "当前项目暂无可用的面板页面。";
+function rejectDisallowedDisplay(input: unknown): string | undefined {
+  if (typeof input !== "object" || input === null || !("display" in input)) return undefined;
+  const rawDisplay = (input as { display?: unknown }).display;
+  if (rawDisplay === undefined) return undefined;
+  if (rawDisplay === "panel") {
+    return "render_html 仅支持聊天内嵌图表，不能创建或更新面板页面";
   }
-  const lines = entries.map((p) => `- ${p.ref}: ${p.title} (v${p.version})`);
-  return `可用的页面 ref：\n${lines.join("\n")}`;
+  return "render_html 不接受 display 参数，仅支持聊天内嵌图表";
 }
 
 /** 逐个读取 images 并内联进 html；任一失败整次调用失败 */
@@ -258,13 +252,11 @@ async function inlineImages(
 export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> = {
   name: "render_html",
   description:
-    "Render a self-contained HTML page in a sandbox. Use for charts, comparisons, diagrams, UI sketches, interactive widgets, dashboards or standalone documents when they improve on prose, or on request. Use Markdown for ordinary prose and code. Do not repeat the page in the reply.\n" +
-    'Default to display: "inline", including requests to show, draw or compare. Use "panel" for /cadenza or explicit requests for a panel, sidebar or artifact. Updates keep the original display and title unless a new title is supplied. Set the background on body.\n' +
-    'Update with page plus edits (ordered, exact, unique matches) or replacement html. Use read on the returned path for the full source. To continue another session’s page, find its ref with list_pages and pass page: "<ref>".\n' +
-    "Inline scripts and styles are allowed. Navigation, forms, popups and downloads are blocked. List local image paths in images and use the same strings in attributes or url(). Make pages responsive at about 720px and 360px. Inline pages above 420px collapse.\n" +
+    "Render a self-contained inline HTML chart in the current reply. Use for charts, data visualizations, comparison tables, or compact diagrams (including reading interactions such as legends, tooltips, or series toggles) when a visual explains better than prose. Do not use this tool to create standalone pages, dashboards, interactive widgets, or side-panel artifacts. Use Markdown for ordinary prose and code. Do not repeat the chart in the reply.\n" +
+    "Update an existing inline chart in this session with page plus edits (ordered, exact, unique matches) or replacement html. Updates keep the title unless a new title is supplied. Use read on the returned path for the full source. Set the background on body.\n" +
+    "Inline scripts and styles are allowed. Navigation, forms, popups and downloads are blocked. List local image paths in images and use the same strings in attributes or url(). Make charts responsive at about 720px and 360px. Inline charts above 420px collapse.\n" +
     'Define your own font stack and all colors as CSS variables on :root with light values. Redefine them with dark values and color-scheme: dark in both @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { ... } } and :root[data-theme="dark"] { ... }. Reference only those variables in components; do not set component colors inside the media query or [data-theme] blocks.\n' +
-    'Only https://cdnjs.cloudflare.com/ajax/libs/<lib>/<exact version>/<file> may load externally. Use UMD/global builds or ES module imports with <script type="module">. Render independent content first and show a brief loading error on failure. fetch, XMLHttpRequest and WebSocket are blocked.\n' +
-    "Check for window.nocturne before using .storage or .ask. Render normally without it. Model calls may require approval. Handle rejection and cancellation.",
+    'Only https://cdnjs.cloudflare.com/ajax/libs/<lib>/<exact version>/<file> may load externally. Use UMD/global builds or ES module imports with <script type="module">. Render independent content first and show a brief loading error on failure. fetch, XMLHttpRequest and WebSocket are blocked.',
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -280,8 +272,7 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
       page: {
         type: "string",
         minLength: 1,
-        description:
-          "要更新的已有页面 id（如 page-1），或同项目其他会话的页面 ref（<sessionId>/<page>）",
+        description: "要更新的当前会话内嵌图表 id（如 page-1）",
       },
       edits: {
         type: "array",
@@ -304,12 +295,6 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
         },
         description: "对上一版 HTML 按序执行的精确替换（仅更新用，与 html 互斥，小改动优先）",
       },
-      display: {
-        type: "string",
-        enum: ["inline", "panel"],
-        description:
-          'For new pages, use "inline" by default and "panel" only on explicit user request. Updates ignore this field and keep the display of the first version.',
-      },
       images: {
         type: "array",
         maxItems: MAX_INLINE_HTML_IMAGES,
@@ -331,10 +316,15 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
     }));
   },
   validateInput(input) {
+    const displayErr = rejectDisallowedDisplay(input);
+    if (displayErr !== undefined) return displayErr;
     const isUpdate = input.page !== undefined;
     if (isUpdate) {
       if (typeof input.page !== "string" || input.page.trim() === "") {
         return "page 必须是非空字符串";
+      }
+      if (input.page.trim().includes("/")) {
+        return "render_html 仅支持更新当前会话的内嵌图表，不支持跨会话或面板页面引用";
       }
       if (input.title !== undefined) {
         const titleErr = validateTitle(input.title);
@@ -373,10 +363,6 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
       }
       const htmlErr = validateHtmlText(input.html);
       if (htmlErr !== undefined) return htmlErr;
-      const rawDisplay: unknown = input.display;
-      if (rawDisplay !== undefined && rawDisplay !== "inline" && rawDisplay !== "panel") {
-        return 'display 必须是 "inline" 或 "panel"';
-      }
     }
     if (input.images !== undefined) {
       if (!Array.isArray(input.images) || input.images.length > MAX_INLINE_HTML_IMAGES) {
@@ -392,6 +378,10 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
     return undefined;
   },
   async execute(input, ctx) {
+    const displayErr = rejectDisallowedDisplay(input);
+    if (displayErr !== undefined) {
+      return failure("invalid_input", displayErr);
+    }
     if (!ctx.saveFileAttachment) {
       return {
         status: "error",
@@ -403,155 +393,64 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
     const pages = ctx.pages?.() ?? [];
     let pageId: string;
     let version: number;
-    let display: InlinePageDisplay;
+    const display: InlinePageDisplay = "inline";
     let title: string;
     let baseHtml: string;
-    let fromMeta: InlinePageFrom | undefined;
-    let crossSessionTarget: ProjectPageTarget | undefined;
     let reservedId: string | undefined;
     const inFlight = getInFlightSet(ctx.pages);
 
     if (input.page !== undefined) {
       const requestedPage = input.page.trim();
-      const isCrossRef = requestedPage.includes("/");
-      if (isCrossRef) {
-        const parts = requestedPage.split("/");
-        const [refSessionId, refPageId] = parts;
-        const formatInvalidRef = async (): Promise<ToolResult<RenderHtmlOutput>> => {
-          const available = ctx.projectPages ? await ctx.projectPages.listPages() : [];
-          return failure(
-            "invalid_input",
-            `页面 "${requestedPage}" 不存在或不属于当前项目。${formatAvailableProjectRefs(available)}`,
-          );
-        };
-        if (parts.length !== 2 || !refSessionId || !refPageId) {
-          return formatInvalidRef();
-        }
-        if (refSessionId === ctx.sessionId) {
-          const existing = pages.find((p) => p.page === refPageId && p.display === "panel");
-          if (existing === undefined) {
-            return formatInvalidRef();
-          }
-          pageId = existing.page;
-          const latest = existing.versions.at(-1);
-          version = (latest?.version ?? existing.versions.length) + 1;
-          display = existing.display;
-          title = input.title !== undefined ? input.title.trim() : existing.title;
-          if (input.edits !== undefined) {
-            if (!ctx.loadFileAttachment || latest === undefined) {
-              return failure("attachment_unavailable", "附件存储不可用，无法读取上一版页面内容");
-            }
-            const prevBytes = await ctx.loadFileAttachment(latest.file);
-            if (prevBytes === undefined) {
-              return failure(
-                "io_error",
-                `无法读取页面 "${pageId}" 上一版（v${latest.version}，${latest.file.file}）的 HTML 内容`,
-              );
-            }
-            const prevHtml = new TextDecoder("utf-8").decode(prevBytes);
-            const applied = applyHtmlEdits(prevHtml, input.edits);
-            if (!applied.ok) {
-              return failure("invalid_input", applied.error);
-            }
-            const htmlErr = validateHtmlText(applied.html);
-            if (htmlErr !== undefined) {
-              return failure("invalid_input", htmlErr);
-            }
-            baseHtml = applied.html;
-          } else {
-            if (input.html === undefined) {
-              return failure("invalid_input", "更新页面时请提供 html 或 edits");
-            }
-            baseHtml = input.html;
-          }
-        } else {
-          const resolved = ctx.projectPages
-            ? await ctx.projectPages.resolvePage(requestedPage)
-            : undefined;
-          if (resolved === undefined) {
-            return formatInvalidRef();
-          }
-          crossSessionTarget = resolved;
-          pageId = nextSessionPageId(pages, inFlight);
-          if (inFlight !== undefined) {
-            inFlight.add(pageId);
-            reservedId = pageId;
-          }
-          version = resolved.version + 1;
-          display = "panel";
-          title = input.title !== undefined ? input.title.trim() : resolved.title;
-          fromMeta = { session: resolved.sessionId, page: resolved.page };
+      if (requestedPage.includes("/")) {
+        return failure(
+          "invalid_input",
+          "render_html 仅支持更新当前会话的内嵌图表，不支持跨会话或面板页面引用",
+        );
+      }
+      const existing = pages.find((p) => p.page === requestedPage);
+      if (existing === undefined) {
+        return failure(
+          "invalid_input",
+          `页面 "${requestedPage}" 不存在。${formatExistingPages(pages)}`,
+        );
+      }
+      if (existing.display === "panel") {
+        return failure(
+          "invalid_input",
+          `页面 "${requestedPage}" 是面板页面，render_html 不能更新面板页面`,
+        );
+      }
+      pageId = existing.page;
+      const latest = existing.versions.at(-1);
+      version = (latest?.version ?? existing.versions.length) + 1;
+      title = input.title !== undefined ? input.title.trim() : existing.title;
 
-          if (input.edits !== undefined) {
-            const prevBytes = await resolved.readHtml();
-            if (prevBytes === undefined) {
-              if (reservedId !== undefined) inFlight?.delete(reservedId);
-              return failure(
-                "io_error",
-                `无法读取页面 "${requestedPage}" 最新版（v${resolved.version}）的 HTML 内容`,
-              );
-            }
-            const prevHtml = new TextDecoder("utf-8").decode(prevBytes);
-            const applied = applyHtmlEdits(prevHtml, input.edits);
-            if (!applied.ok) {
-              if (reservedId !== undefined) inFlight?.delete(reservedId);
-              return failure("invalid_input", applied.error);
-            }
-            const htmlErr = validateHtmlText(applied.html);
-            if (htmlErr !== undefined) {
-              if (reservedId !== undefined) inFlight?.delete(reservedId);
-              return failure("invalid_input", htmlErr);
-            }
-            baseHtml = applied.html;
-          } else {
-            if (input.html === undefined) {
-              if (reservedId !== undefined) inFlight?.delete(reservedId);
-              return failure("invalid_input", "更新页面时请提供 html 或 edits");
-            }
-            baseHtml = input.html;
-          }
+      if (input.edits !== undefined) {
+        if (!ctx.loadFileAttachment || latest === undefined) {
+          return failure("attachment_unavailable", "附件存储不可用，无法读取上一版页面内容");
         }
+        const prevBytes = await ctx.loadFileAttachment(latest.file);
+        if (prevBytes === undefined) {
+          return failure(
+            "io_error",
+            `无法读取页面 "${pageId}" 上一版（v${latest.version}，${latest.file.file}）的 HTML 内容`,
+          );
+        }
+        const prevHtml = new TextDecoder("utf-8").decode(prevBytes);
+        const applied = applyHtmlEdits(prevHtml, input.edits);
+        if (!applied.ok) {
+          return failure("invalid_input", applied.error);
+        }
+        const htmlErr = validateHtmlText(applied.html);
+        if (htmlErr !== undefined) {
+          return failure("invalid_input", htmlErr);
+        }
+        baseHtml = applied.html;
       } else {
-        const existing = pages.find((p) => p.page === requestedPage);
-        if (existing === undefined) {
-          return failure(
-            "invalid_input",
-            `页面 "${requestedPage}" 不存在。${formatExistingPages(pages)}`,
-          );
+        if (input.html === undefined) {
+          return failure("invalid_input", "更新页面时请提供 html 或 edits");
         }
-        pageId = existing.page;
-        const latest = existing.versions.at(-1);
-        version = (latest?.version ?? existing.versions.length) + 1;
-        display = existing.display;
-        title = input.title !== undefined ? input.title.trim() : existing.title;
-
-        if (input.edits !== undefined) {
-          if (!ctx.loadFileAttachment || latest === undefined) {
-            return failure("attachment_unavailable", "附件存储不可用，无法读取上一版页面内容");
-          }
-          const prevBytes = await ctx.loadFileAttachment(latest.file);
-          if (prevBytes === undefined) {
-            return failure(
-              "io_error",
-              `无法读取页面 "${pageId}" 上一版（v${latest.version}，${latest.file.file}）的 HTML 内容`,
-            );
-          }
-          const prevHtml = new TextDecoder("utf-8").decode(prevBytes);
-          const applied = applyHtmlEdits(prevHtml, input.edits);
-          if (!applied.ok) {
-            return failure("invalid_input", applied.error);
-          }
-          const htmlErr = validateHtmlText(applied.html);
-          if (htmlErr !== undefined) {
-            return failure("invalid_input", htmlErr);
-          }
-          baseHtml = applied.html;
-        } else {
-          if (input.html === undefined) {
-            return failure("invalid_input", "更新页面时请提供 html 或 edits");
-          }
-          baseHtml = input.html;
-        }
+        baseHtml = input.html;
       }
     } else {
       if (input.title === undefined || input.html === undefined) {
@@ -563,7 +462,6 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
         reservedId = pageId;
       }
       version = 1;
-      display = input.display ?? "inline";
       title = input.title.trim();
       baseHtml = input.html;
     }
@@ -582,18 +480,14 @@ export const renderHtmlTool: ToolDefinition<RenderHtmlInput, RenderHtmlOutput> =
           page: pageId,
           version,
           display,
-          ...(fromMeta !== undefined ? { from: fromMeta } : {}),
         },
       });
-      if (crossSessionTarget !== undefined) {
-        await crossSessionTarget.copyPageDataTo(ctx.sessionId, pageId);
-      }
       const filePath = ctx.attachmentPath ? ctx.attachmentPath(saved.file) : saved.file;
       return {
         status: "ok",
         modelContent:
-          `页面「${title}」（${pageId} v${version}，${display === "panel" ? "面板" : "内嵌"}）已保存：${filePath}（${saved.bytes} B）。` +
-          `回复中不要复述页面里的数据、结论或说明；需要核对当前全文时可用 read 读取该路径。`,
+          `内嵌图表「${title}」（${pageId} v${version}）已保存：${filePath}（${saved.bytes} B）。` +
+          `回复中不要复述图表里的数据、结论或说明；需要核对当前全文时可用 read 读取该路径。`,
         output: {
           page: pageId,
           version,

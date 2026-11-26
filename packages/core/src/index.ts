@@ -361,16 +361,13 @@ import { DEFAULT_REVIEW_CONFIDENCE } from "./permission/reviewer-questions.js";
 import {
   effectiveEvents,
   formatQuotesBlock,
-  PAGE_COMMENT_ID_PATTERN,
   isWorkModeName,
   normalizeQuoteText,
-  PAGE_COMMENT_TEXT_MAX_CHARS,
   workModeCommandName,
   workModeOrigins,
   type GoalStatus,
   type MessageQuote,
   type PageCommentsInput,
-  type PageCommentsSnapshot,
   type PageLibraryListResult,
   type PageLibraryProjectsResult,
   type PlanConfig,
@@ -2265,18 +2262,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     const externalResolved = await Promise.all(
       externalPaths.map((path) => platform.resolveReal(path)),
     );
-    const attachmentsRootReal = await platform.resolveReal(paths.join(sessionsDir, "attachments"));
-    const ownAttachmentsReal = paths.join(attachmentsRootReal, session.id);
-    let projectPageFiles: string[] = await pageLibrary.listProjectPanelPageFiles({
-      workspaceRoot: currentWorkspaceRoot(),
-      excludeSessionId: session.id,
-    });
-    const refreshProjectPageFiles = async (): Promise<void> => {
-      projectPageFiles = await pageLibrary.listProjectPanelPageFiles({
-        workspaceRoot: currentWorkspaceRoot(),
-        excludeSessionId: session.id,
-      });
-    };
     // presetContext.sessionId 参数化：子会话重建策略时换自己的 id
     // （attachments 目录等规则绑定子会话自己的落盘位置，subagent.md 7.2）
     const buildPolicy = (
@@ -2298,7 +2283,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           skillFiles: skillDiscovery.skills
             .filter((s) => s.layout === "file")
             .map((s) => s.realPath),
-          projectPageFiles,
           sessionsDir,
           sessionId: policySessionId,
           nocturneHome,
@@ -2585,19 +2569,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         saveAppPermissions,
         hooks: hookRunner,
         worktrees: activeWorktrees,
-        beforeEvaluate: async (subjects) => {
-          const needsRefresh = subjects.some((s) => {
-            if (s.kind !== "read") return false;
-            const candidate = s.resolved ?? s.target;
-            return (
-              paths.isWithin(candidate, attachmentsRootReal) &&
-              !paths.isWithin(candidate, ownAttachmentsReal)
-            );
-          });
-          if (needsRefresh) {
-            await refreshProjectPageFiles();
-          }
-        },
         ...(residentChild?.permissions !== undefined
           ? {
               onPendingSettled: (requestId: string) => {
@@ -3261,35 +3232,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       notes: () => session.state().notes,
       // ADR-0109：读取当前会话有效历史页面列表
       pages: () => session.state().pages,
-      // ADR-0114：主会话访问同项目面板页面库（供 list_pages 与 render_html 跨会话接着改）
-      ...(residentChild === undefined
-        ? {
-            projectPages: {
-              listPages: async () => {
-                const items = await pageLibrary.listPagesWithPaths({
-                  workspaceRoot: currentWorkspaceRoot(),
-                });
-                await refreshProjectPageFiles();
-                return items.map((item) => ({
-                  ref: item.ref,
-                  origin: item.origin,
-                  sessionId: item.sessionId,
-                  sessionTitle: item.sessionTitle,
-                  page: item.page,
-                  title: item.title,
-                  version: item.version,
-                  updatedAt: item.updatedAt,
-                  path: item.path,
-                }));
-              },
-              resolvePage: (ref: string) =>
-                pageLibrary.resolveCrossSessionPage({
-                  workspaceRoot: currentWorkspaceRoot(),
-                  ref,
-                }),
-            },
-          }
-        : {}),
     };
     const turnConfig: TurnConfig = { ...DEFAULT_TURN_CONFIG };
     for (const src of [resolved?.turn, options.turn]) {
@@ -4658,89 +4600,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           );
         delegation = { agent: agent.name, task: input.delegate.task };
       }
-      let pageComments: PageCommentsSnapshot | undefined;
-      const commentScreenshotInputs: NonNullable<SubmitInput["attachments"]> = [];
-      const commentScreenshotIndices = new Set<number>();
       if (input.pageComments !== undefined) {
-        const raw = input.pageComments;
-        if (
-          typeof raw.page !== "string" ||
-          raw.page.trim() === "" ||
-          !Number.isInteger(raw.version) ||
-          raw.version < 1 ||
-          typeof raw.title !== "string" ||
-          !Array.isArray(raw.comments) ||
-          raw.comments.length === 0
-        ) {
-          throw new RuntimeCommandError("invalid_command", "pageComments 参数不合法");
+        throw new RuntimeCommandError("invalid_command", "旧面板页面已转为只读，不能提交页面评论");
         }
-        const items = raw.comments.map((item, idx) => {
-          if (item.replyTo !== undefined) {
-            if (
-              typeof item.replyTo !== "string" ||
-              !new RegExp(PAGE_COMMENT_ID_PATTERN).test(item.replyTo) ||
-              typeof item.note !== "string" ||
-              item.note.trim() === ""
-            ) {
-              throw new RuntimeCommandError("invalid_command", "无效的评论回复");
-            }
-            const thread = session
-              .state()
-              .pages.find((page) => page.page === raw.page.trim())
-              ?.comments?.find((comment) => comment.id === item.replyTo);
-            if (thread === undefined || thread.resolved)
-              throw new RuntimeCommandError("invalid_command", "评论不存在或已解决");
-            return { replyTo: item.replyTo, note: item.note.trim() };
-          }
-          if (
-            typeof item.path !== "string" ||
-            typeof item.text !== "string" ||
-            typeof item.x !== "number" ||
-            !Number.isFinite(item.x) ||
-            typeof item.y !== "number" ||
-            !Number.isFinite(item.y) ||
-            typeof item.note !== "string" ||
-            item.note.trim() === ""
-          ) {
-            throw new RuntimeCommandError(
-              "invalid_command",
-              `pageComments.comments[${idx}] 不合法`,
-            );
-          }
-          const trimmedText = item.text.trim().slice(0, PAGE_COMMENT_TEXT_MAX_CHARS);
-          const trimmedNote = item.note.trim();
-          // ADR-0113：无可见文字元素且当前模型支持图片输入时，附带点击处周围截图
-          if (
-            item.screenshot !== undefined &&
-            trimmedText === "" &&
-            model.model.capabilities.imageInput
-          ) {
-            commentScreenshotIndices.add(idx);
-            commentScreenshotInputs.push({
-              data: item.screenshot.data,
-              mimeType: item.screenshot.mimeType,
-              label:
-                item.screenshot.label ??
-                `page-comment-${raw.page.trim()}-v${raw.version}-${idx + 1}.png`,
-              source: "paste",
-            });
-          }
-          return {
-            path: item.path,
-            text: trimmedText,
-            x: Math.round(item.x),
-            y: Math.round(item.y),
-            note: trimmedNote,
-          };
-        });
-        pageComments = {
-          page: raw.page.trim(),
-          version: raw.version,
-          title: raw.title,
-          comments: items,
-        };
-      }
-      const combinedAttachmentInputs = [...(input.attachments ?? []), ...commentScreenshotInputs];
+      const combinedAttachmentInputs = [...(input.attachments ?? [])];
       const attachmentError = validateAttachmentInputs(combinedAttachmentInputs);
       if (attachmentError) throw new RuntimeCommandError("invalid_command", attachmentError);
       if (combinedAttachmentInputs.length && !execEnv.attachments)
@@ -4884,9 +4747,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
       }
       const prepared: PreparedInput = {
-        ...(commentScreenshotIndices.size > 0
-          ? { pageCommentScreenshotIndices: commentScreenshotIndices }
-          : {}),
         ...(prepended !== undefined ? { prepended } : {}),
         content,
         appended,
@@ -4897,7 +4757,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         ...(skillInvocation !== undefined ? { skillInvocation } : {}),
         ...(delegation !== undefined ? { delegate: delegation } : {}),
         ...(workMode !== undefined ? { workMode } : {}),
-        ...(pageComments !== undefined ? { pageComments } : {}),
         ...(quotes !== undefined ? { quotes } : {}),
       };
       if (workMode !== undefined) workModeStarts.add(prepared);
