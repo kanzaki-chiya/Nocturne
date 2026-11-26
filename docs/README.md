@@ -140,6 +140,8 @@ Hook 上下文注入（`SessionStart` / `UserPromptSubmit` / `SubagentStart`、`
 
 长期记忆（全局 / 项目 / 组曲三层存储、`memory` 上下文索引、`memory_read` / `memory_write` / `memory_delete`、`memory.global` / `memory.project` 开关与 `memory.*` 本机 RPC）见 [ADR-0098](decisions/ADR-0098-memory.md)。
 
+桌面会话手动 `/compact` 即时反馈与计时（立即清命令、就地显示进度与用时、保留新草稿、与摘要回执合为一条、按会话归属）见 [ADR-0123](decisions/ADR-0123-desktop-manual-compaction-feedback.md)。
+
 ## Roadmap
 子代理档位（按任务选择执行者）见 [ADR-0058](decisions/ADR-0058-subagent-profiles.md)，插件定义子代理见 [ADR-0105](decisions/ADR-0105-plugin-subagents.md)，项目级子代理定义（`.nocturne/agents`、`.claude/agents`）见 [ADR-0108](decisions/ADR-0108-project-subagents.md)，主文档是 [subagent.md](architecture/subagent.md)。
 
