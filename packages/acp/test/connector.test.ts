@@ -1092,7 +1092,8 @@ describe("ADR-0127 第五阶段：worker 续派", () => {
     const fastB = setup("loadableRelease");
     const homeDir = process.env.NOCTURNE_HOME ?? "";
     // 人为先占住跨进程锁：模拟"另一个宿主进程"正持有该 worker。
-    // 锁内容用存活的当前 pid——tryAcquireWorkerLock 判定持有者存活即 busy。
+    // 新原语下锁是 SQLite 写事务——本进程持锁即占用全库唯一写事务，
+    // 其他获取者的 BEGIN IMMEDIATE 立即报 database is locked → busy。
     const lockDir = path.join(homeDir, "external-workers");
     await fs.mkdir(lockDir, { recursive: true });
     const lockPath = path.join(lockDir, `${workerId}.lock`);
@@ -1129,54 +1130,66 @@ describe("ADR-0127 第五阶段：worker 续派", () => {
     expect(after.output?.resumed).toBe(true);
   });
 
-  it("宿主崩溃残留的失效锁被回收：pid 不存活的锁不阻塞后续续派", async () => {
+  it("宿主进程崩溃（持锁被强杀）后其余宿主可继续续派：崩溃可恢复，非永久锁", async () => {
+    // 新互斥原语（SQLite BEGIN IMMEDIATE 事务）不再有"失效锁文件"概念——
+    // 锁不是文件存在性，而是数据库写事务。持有者崩溃时 OS 关闭其句柄、SQLite
+    // 回滚未完成事务，锁自动释放。本用例用真跨进程强杀验证：一个独立 node 进程
+    // 持有该 worker 的锁后被 SIGKILL（模拟宿主崩溃，无清理机会），随后 connector
+    // 的续派不得 busy——崩溃不留下永久锁。
     const firstSetup = setup("loadable");
     const first = await firstSetup.connector.run(firstSetup.request, firstSetup.ctx);
     const workerId = first.output?.workerId;
     expect(workerId).toBeDefined();
-    // 动态获得一个确定不存活的 pid：启动一个立即退出的进程并等它结束，
-    // 用它的 pid 构造锁——避免硬编码 pid 在 Windows 上被 process.kill(pid, 0)
-    // 误判为存活（pid 复用/系统保留进程行为不确定）。
+
+    // 独立进程持有该 worker 锁并挂起（保持事务不提交）。
     const { spawn } = await import("node:child_process");
-    const deadPid = await new Promise<number>((resolve, reject) => {
-      const probe = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
-      const pid = probe.pid;
-      if (pid === undefined) {
-        reject(new Error("probe spawn 未分配 pid"));
-        return;
-      }
-      probe.on("close", () => resolve(pid));
-      probe.on("error", reject);
-    });
-    // 确认该 pid 已不存活（process.kill(pid, 0) 抛错即不存活）
-    const isDead = await new Promise((resolve) => {
-      try {
-        process.kill(deadPid, 0);
-        resolve(false);
-      } catch {
-        resolve(true);
-      }
-    });
+    const { pathToFileURL } = await import("node:url");
+    const coreDist = fileURLToPath(new URL("../../core/dist/index.mjs", import.meta.url));
     const lockDir = path.join(process.env.NOCTURNE_HOME ?? "", "external-workers");
     await fs.mkdir(lockDir, { recursive: true });
-    const staleLock = path.join(lockDir, `${workerId}.lock`);
-    await fs.writeFile(
-      staleLock,
-      JSON.stringify({
-        pid: deadPid,
-        hostname: (await import("node:os")).hostname(),
-        startedAt: Date.now(),
-        token: "stale-token",
-      }),
+    const lockPath = path.join(lockDir, `${workerId}.lock`);
+    const holderScript = `
+import { createPlatform, tryAcquireWorkerLock } from ${JSON.stringify(pathToFileURL(coreDist).href)};
+const platform = createPlatform();
+const lock = await tryAcquireWorkerLock(platform, process.argv[1]);
+process.stdout.write(lock === undefined ? "BUSY\\n" : "HOLDING\\n");
+setInterval(() => {}, 1000);
+`;
+    const holder = spawn(process.execPath, ["-e", holderScript, lockPath], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    // 屏障：等独立进程真正持锁（非固定毫秒延时）。
+    await new Promise<void>((resolve, reject) => {
+      let out = "";
+      const timer = setTimeout(() => reject(new Error(`holder 未及时持锁：${out}`)), 10000);
+      holder.stdout?.on("data", (chunk) => {
+        out += chunk.toString();
+        if (out.includes("HOLDING")) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      holder.on("exit", () => {
+        clearTimeout(timer);
+        reject(new Error(`holder 提前退出：${out}`));
+      });
+    });
+
+    // 持锁期间续派必须 busy（快速验证互斥在 connector 层生效）。
+    const busySetup = setup("loadable");
+    const busyResult = await busySetup.connector.run(
+      { ...busySetup.request, workerId },
+      busySetup.ctx,
     );
-    if (!isDead) {
-      // pid 恰好被复用（极少见）：改用早于开机时间的 startedAt 触发另一条失效路径，
-      // 同样证明崩溃恢复不留下永久锁。
-      await fs.writeFile(
-        staleLock,
-        JSON.stringify({ pid: deadPid, hostname: "other-host", startedAt: 1, token: "stale" }),
-      );
-    }
+    expect(busyResult.status).toBe("error");
+    expect(busyResult.status === "error" && busyResult.error.code).toBe("worker_busy");
+
+    // 强杀持有者——模拟宿主崩溃，未提交事务、无清理机会。
+    const exitPromise = new Promise<void>((resolve) => holder.on("exit", () => resolve()));
+    holder.kill("SIGKILL");
+    await exitPromise;
+
+    // 崩溃后：同一 worker 的续派立即可用——锁随事务回滚自动释放，不留永久锁。
     const resumeSetup = setup("loadable");
     const result = await resumeSetup.connector.run(
       { ...resumeSetup.request, workerId },
@@ -1200,19 +1213,26 @@ describe("ADR-0127 第五阶段：worker 续派", () => {
     expect(workerA).not.toBe(workerB);
     const resumeA = setup("loadableRelease");
     const resumeB = setup("loadable");
-    const [resultA, resultB] = await Promise.all([
-      resumeA.connector.run({ ...resumeA.request, workerId: workerA }, resumeA.ctx),
-      resumeB.connector.run({ ...resumeB.request, workerId: workerB }, resumeB.ctx),
-    ]);
-    // B（无 release 阻塞）必定成功；A 在 release 阻塞下也进入 prompt 而非 busy——
-    // 两个 worker 的锁互不干扰，证明并行性。此处只需两者都不是 worker_busy。
+    // 并行发起两个续派。resultA 用 loadableRelease——进入 prompt 后挂起直到
+    // release.txt 写入；这要求 A 真正取得了自己 worker 的锁并走到了 prompt
+    // （若 worker 间互斥错误地串行/阻塞，A 连 prompt 都进不去）。两个 Promise
+    // 并发启动，证明锁按 workerId 寻址、互不干扰。
+    const promiseA = resumeA.connector.run({ ...resumeA.request, workerId: workerA }, resumeA.ctx);
+    const promiseB = resumeB.connector.run({ ...resumeB.request, workerId: workerB }, resumeB.ctx);
+    // B 无 release 阻塞，先完成——且必须是 ok（不 busy）。
+    const resultB = await promiseB;
+    expect(resultB.status).toBe("ok");
+    // 放行 A 的 prompt，让它收尾。release.txt 必须在 await promiseA 之前写——
+    // 否则 promiseA 永远挂起（这是该用例早期版本的时序死锁，基线即超时）。
+    await fs.writeFile(path.join(root, "release.txt"), "go");
+    const resultA = await promiseA;
+    // 两个 worker 都真实完成且都不是 worker_busy——证明并行而非串行/互斥。
     for (const result of [resultA, resultB]) {
       if (result.status === "error") {
         expect(result.error.code).not.toBe("worker_busy");
       }
     }
-    // 放行 release，确保 A 正常收尾。
-    await fs.writeFile(path.join(root, "release.txt"), "go");
+    expect(resultA.status).toBe("ok");
   });
 });
 

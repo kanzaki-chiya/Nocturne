@@ -138,10 +138,13 @@ export function createAcpConnector(
   // 不受其约束，可能同时 session/load 同一外部会话导致重复轮次与上下文错序。
   // 因此互斥改为两层：
   //   1. 进程内链（本实例内严格串行，且完成后删除键——Map 不再单调增长）；
-  //   2. `<NOCTURNE_HOME>/external-workers/<workerId>.lock` 跨进程存在性锁
-  //      （tryAcquireWorkerLock，失效按 pid/开机时间回收）。持有者存活时返回
-  //      可识别的 worker_busy——不等待、不重复 prompt、崩溃不留下永久锁。
-  // 独立 worker（不同 workerId）锁路径不同，天然保持并行。
+  //   2. `<NOCTURNE_HOME>/external-workers/<workerId>.lock.db` 跨进程互斥锁
+  //      （tryAcquireWorkerLock）：每 worker 一个独立 SQLite 数据库文件，获取锁即
+  //      `BEGIN IMMEDIATE` 写事务并保持不提交。持有者存活时竞争者立即
+  //      `database is locked` → 可识别的 worker_busy，不等待、不重复 prompt；
+  //      持有进程崩溃时 OS 关闭句柄、SQLite 回滚未完成事务，锁自动释放——
+  //      无 pid/开机时间/token 失效判定，不存在"检查与回收"临界区，不留永久锁。
+  // 独立 worker（不同 workerId）锁文件独立、写事务互不干扰，天然保持并行。
   const workerChains = new Map<string, Promise<unknown>>();
   const runSerialized = (
     workerId: string,
@@ -309,7 +312,7 @@ async function runAgent(
   // ADR-0127 第五阶段返工：跨进程互斥锁在 worker 记录校验通过之后、任何副作用
   // （transcript 落盘、spawn、session/load）之前取得。顺序很关键——若先取锁再读记录，
   // 对不存在/归属不符/不可恢复的 worker 也会空持锁，且 external-workers 目录可能
-  // 尚未创建（worker_not_found 场景）导致 createExclusive 以 ENOENT 失败。
+  // 尚未创建（worker_not_found 场景）导致锁数据库无从落盘。
   // 用 holder 变量把锁带进 try/finally：只有成功取锁才在 finally 释放；
   // 校验失败（worker_not_found 等早期 return）发生在取锁之前，不触碰锁。
   let workerLock: Awaited<ReturnType<typeof tryAcquireWorkerLock>> | undefined;

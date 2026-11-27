@@ -1,151 +1,141 @@
 /**
- * 外部 worker 跨进程互斥锁（ADR-0127 第五阶段返工）。
+ * 外部 worker 跨进程互斥锁（ADR-0127 第五阶段返工，锁原语重写）。
  *
  * 背景：单 connector 实例内的 Promise 链只能在同一进程内串行同一 worker 的
  * 续派；共享同一 NOCTURNE_HOME 的独立宿主/connector 实例（例如两个 CLI 进程、
  * 或宿主重启期间的并发调用）不受其约束，可能同时 session/load 同一外部会话，
  * 造成重复轮次与上下文错序。
  *
- * 机制：`<NOCTURNE_HOME>/external-workers/<workerId>.lock` 存在性锁，
- * `createExclusive` 原子创建，内容 `{ pid, hostname, startedAt, token }`。
- * 失效判定与 sessions.md 会话锁一致（ADR-0009）：
- *   - startedAt 早于本机最近一次开机；
- *   - 锁的主机名与本机相同且 pid 已不存活。
- * 失效锁的回收带所有权保证（返工第 3 条）：检查旧锁与删除不是原子序列时，
- * 两个并行竞争者可能同时判定同一失效锁可收——先读取旧锁内容取其 token，
- * 删除前重新读取校验 token 未变才 unlink。迟到的清理不会删掉已被另一竞争者
- * 换持的新锁（token 不同则放弃删除并重新竞争）。崩溃恢复由此保证：
- * 宿主进程崩溃留下的锁在下次续派时按 pid/开机时间判定失效回收，
- * 不会形成永久锁；token 归属校验防止误删他人新持有的锁。
+ * 原语选择（返工重写动机）：上一版用 `<workerId>.lock` 存在性文件 +
+ * createExclusive + pid/开机时间失效判定 + token 归属校验。该方案存在无法消除的
+ * 临界区——失效判定（read）与回收（unlink）不是原子序列，判定后读到的 token
+ * 可能已是新持有者，unlink 也不与换持互斥；继续加读取次数或延时都不能闭合这个
+ * 窗口。因此改为成熟的事务原语：SQLite 的写事务（`BEGIN IMMEDIATE`）。
+ *
+ * 为什么不用单一数据库文件：SQLite 的写事务是**全库级**写锁，没有行级写锁——
+ * 单一 `worker-locks.db` 里即便按 workerId 分行，一个 worker 的未提交写事务也会
+ * 阻塞所有其他 worker 的 `BEGIN IMMEDIATE`（实测验证）。这会把"不同 worker
+ * 可并行"错误地串行化。因此采用**每 worker 一个独立数据库文件**：
+ *   `<NOCTURNE_HOME>/external-workers/<workerId>.lock.db`
+ * 文件独立使不同 worker 的写事务互不干扰（天然并行），而同一 worker 的并发
+ * 获取竞争同一文件，`BEGIN IMMEDIATE` 在文件层强制互斥。
+ *
+ * 机制：获取锁 = 打开该 worker 的 `.lock.db`，`BEGIN IMMEDIATE` 写入占位行并
+ * **保持事务不提交**。SQLite 保证同一时刻该文件至多一个未提交写事务，因此：
+ *   - 互斥由数据库引擎在文件层强制，跨进程、跨宿主实例都生效；
+ *   - 持有者存活时，竞争者的 `BEGIN IMMEDIATE` 立即报 `database is locked`
+ *     （busy_timeout=0，绝不阻塞 event loop 等待）→ 返回 undefined（busy）；
+ *   - 持有进程崩溃（含未提交事务被 kill）时，操作系统关闭其文件句柄，
+ *     SQLite 在下次访问时自动回滚该未完成事务，锁随之释放——无需 pid 探测、
+ *     无需开机时间判定、无需 token 归属校验，不存在"检查与回收"的临界区；
+ *   - release = `ROLLBACK`：锁语义只在事务存续期间，回滚后占位行不落地，
+ *     文件保持空表，其他进程随后可立即 `BEGIN IMMEDIATE`。
+ *
+ * 依赖与平台：`node:sqlite` 是 Node 内置模块（产品要求 Node >=24.16，
+ * DatabaseSync 自 23.4 起稳定可用），零新增第三方依赖。SQLite 事务语义在
+ * Windows / macOS / Linux 一致，不依赖任何平台特定的文件锁、socket 或
+ * unlink 技巧——这是统一的跨平台事务原语。
  */
-import { randomUUID } from "node:crypto";
-import { fsErrorCode, type FileSystem, type Platform } from "../platform/index.js";
+import { DatabaseSync } from "node:sqlite";
+import type { Platform } from "../platform/index.js";
+
+const BUSY_TIMEOUT_MS = 0;
 
 export interface WorkerLock {
   readonly path: string;
-  /** 释放锁；best-effort，锁已被清理时不报错。只会删除自己（token 匹配）的锁。 */
+  /** 释放锁；幂等，已释放或连接已关闭时不报错。 */
   release(): Promise<void>;
 }
 
-interface LockContent {
-  pid?: unknown;
-  hostname?: unknown;
-  startedAt?: unknown;
-  token?: unknown;
-}
-
-function readLockContent(text: string): LockContent | undefined {
-  try {
-    const value: unknown = JSON.parse(text);
-    return typeof value === "object" && value !== null ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function isStaleLock(fs: FileSystem, platform: Platform, lockPath: string): Promise<boolean> {
-  const boot = platform.bootTimeMs();
-  let content: LockContent | undefined;
-  try {
-    content = readLockContent(await fs.readTextFile(lockPath));
-  } catch {
-    content = undefined;
-  }
-  if (content !== undefined) {
-    const startedAt = typeof content.startedAt === "number" ? content.startedAt : undefined;
-    if (startedAt !== undefined && startedAt < boot) return true;
-    if (content.hostname === platform.hostname()) {
-      const pid = content.pid;
-      if (typeof pid === "number" && !platform.processAlive(pid)) return true;
-    }
-    return false;
-  }
-  try {
-    const stat = await fs.stat(lockPath);
-    return stat.mtimeMs < boot;
-  } catch {
-    return true;
-  }
-}
-
 /**
- * 回收失效锁的所有权守卫（返工第 3 条）：读取旧锁 token 后，删除前重新读取
- * 校验 token 未变才 unlink。token 已变说明另一竞争者已换持新锁——本方的
- * 迟到清理不得删除它，返回 false 让调用方重新竞争而非误删。
+ * 锁数据库路径：与 worker 元数据同目录，每 worker 一个 `<workerId>.lock.db`。
+ * `lockPath` 参数保留既有调用约定（`<dir>/<workerId>.lock`），本实现把扩展名
+ * 换成 `.lock.db` 派生实际数据库路径，不改变按 workerId 寻址的语义。
  */
-async function unlinkStaleLockIfOwner(
-  fs: FileSystem,
-  lockPath: string,
-  expectedToken: unknown,
-): Promise<void> {
-  // 重新读取当前锁内容：只在 token 与失效判定时一致时才删除。
-  // 已变（被换持或已删）则跳过 unlink——不是本方的锁，不碰。
-  let current: LockContent | undefined;
-  try {
-    current = readLockContent(await fs.readTextFile(lockPath));
-  } catch {
-    return;
-  }
-  if (current?.token !== expectedToken) return;
-  try {
-    await fs.unlink(lockPath);
-  } catch {
-    // 锁已消失——回收语义已达
-  }
+function deriveDbPath(platform: Platform, lockPath: string): string {
+  return lockPath.endsWith(".lock")
+    ? `${lockPath.slice(0, -".lock".length)}.lock.db`
+    : `${lockPath}.db`;
 }
 
 /**
  * 尝试取得指定 worker 的排他锁。持有者存活时返回 undefined（不等待）；
  * 取得成功返回 WorkerLock，调用方必须在 finally 中 release。
+ *
+ * 同步说明：`node:sqlite` 的 DatabaseSync 是同步 API。本实现把 busy_timeout 设为 0，
+ * `BEGIN IMMEDIATE` 在锁被占用时立即抛错而非等待，因此同步调用只覆盖一次微秒级
+ * 的本地数据库操作，不会在 event loop 上产生可感知阻塞；busy 路径不等待、由
+ * 调用方（connector）映射为可识别的 worker_busy。
  */
 export async function tryAcquireWorkerLock(
   platform: Platform,
   lockPath: string,
 ): Promise<WorkerLock | undefined> {
-  const { fs } = platform;
-  const mine = {
-    pid: platform.pid(),
-    hostname: platform.hostname(),
-    startedAt: Date.now(),
-    token: randomUUID(),
-  };
-  const body = JSON.stringify(mine);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      await fs.createExclusive(lockPath, body);
-      let released = false;
-      return {
-        path: lockPath,
-        async release() {
-          if (released) return;
-          released = true;
-          try {
-            const current = readLockContent(await fs.readTextFile(lockPath));
-            if (current?.token === mine.token) {
-              await fs.unlink(lockPath);
-            }
-          } catch {
-            // 锁已消失或不可读——释放语义已达
-          }
-        },
-      };
-    } catch (error) {
-      if (fsErrorCode(error) !== "EEXIST") throw error;
-      if (attempt === 0 && (await isStaleLock(fs, platform, lockPath))) {
-        // 失效锁回收带所有权守卫：先取旧锁 token，删除前校验未变才 unlink——
-        // 并行竞争者同遇失效锁时至多一方真正删除成功，另一方 token 不匹配放弃，
-        // 双方随后重新 createExclusive 竞争，原子创建保证至多一方进入 worker 操作。
-        let staleToken: unknown;
-        try {
-          staleToken = readLockContent(await fs.readTextFile(lockPath))?.token;
-        } catch {
-          staleToken = undefined;
-        }
-        await unlinkStaleLockIfOwner(fs, lockPath, staleToken);
-        continue;
-      }
-      break;
-    }
+  // 锁与 worker 记录同目录；connector 已确保目录存在，这里兜底创建（幂等）。
+  const normalized = lockPath.replace(/\\/g, "/");
+  const slash = normalized.lastIndexOf("/");
+  const dir = slash >= 0 ? lockPath.slice(0, slash) : lockPath;
+  await platform.fs.mkdir(dir, { mode: 0o700 }).catch(() => undefined);
+  const dbPath = deriveDbPath(platform, lockPath);
+
+  let db: DatabaseSync;
+  try {
+    db = new DatabaseSync(dbPath);
+  } catch {
+    // 数据库文件无法打开（损坏、权限）时按 busy 处理——宁可不进入 worker 操作，
+    // 也不在互斥无法保证时放行并发。
+    return undefined;
   }
-  return undefined;
+
+  try {
+    db.exec(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}`);
+    // 单行占位表：CHECK(id=1) 约束全表至多一行，事务本身即锁，行内容仅诊断用。
+    db.exec(
+      "CREATE TABLE IF NOT EXISTS worker_lock(id INTEGER PRIMARY KEY CHECK(id=1), holder TEXT)",
+    );
+    // BEGIN IMMEDIATE 是互斥核心：同一时刻该文件至多一个未提交写事务。
+    // 失败（database is locked）即他方持有，抛错进入 catch → busy。
+    db.exec("BEGIN IMMEDIATE");
+  } catch {
+    db.close();
+    return undefined;
+  }
+
+  // 至此本进程持有该文件唯一写事务。写入占位行后保持事务不提交，直到 release。
+  // 行内容仅诊断用途，崩溃后随事务回滚消失，无残留状态需要清理。
+  try {
+    const insert = db.prepare("INSERT OR REPLACE INTO worker_lock(id, holder) VALUES(1, ?)");
+    insert.run(`${platform.hostname()}:${platform.pid()}`);
+  } catch {
+    // 行写入失败不应保留已建立的事务锁——回滚并按 busy 处理（保守：不放行并发）。
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // 事务可能已不在——忽略
+    }
+    db.close();
+    return undefined;
+  }
+
+  let released = false;
+  // 释放是同步的 sqlite 调用（ROLLBACK/close），包装为已解决的 Promise 以符合接口。
+  const release = (): Promise<void> => {
+    if (released) return Promise.resolve();
+    released = true;
+    try {
+      // 回滚而非提交：锁语义只要求事务存续期间的互斥，无需把占位行持久化。
+      // 回滚后表保持为空，无行增长；其他进程随后可立即 BEGIN IMMEDIATE。
+      db.exec("ROLLBACK");
+    } catch {
+      // 无活跃事务（理论上不发生）——释放语义已达
+    }
+    try {
+      db.close();
+    } catch {
+      // 已关闭——忽略
+    }
+    return Promise.resolve();
+  };
+
+  return { path: dbPath, release };
 }
