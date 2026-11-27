@@ -1721,6 +1721,148 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
     expect((await child.exit).code).toBe(0);
     assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
   }, 60_000);
+
+  it("执行进度与命令发现：真实 stdio 长任务核对 plan/usage/commands 顺序与归属", async () => {
+    const ws = makeTempDir("nctrn-acp-progress-");
+    const child = spawnAcpCli({});
+    // 可控长任务：第一轮调用 todo_write，第二轮回复完成。
+    providerHandler = (req) => {
+      const toolOut = latestToolMessage(req);
+      const user = latestUserText(req);
+      if (user.includes("track-work") && toolOut === undefined) {
+        return {
+          toolCalls: [
+            {
+              id: "call_todo_1",
+              name: "todo_write",
+              arguments: {
+                items: [
+                  { text: "设计", status: "completed" },
+                  { text: "实现", status: "in_progress" },
+                  { text: "验证", status: "pending" },
+                ],
+              },
+            },
+          ],
+        };
+      }
+      return { textParts: ["work done"] };
+    };
+    await child.request("initialize", { protocolVersion: 1 });
+    const { sessionId } = await child.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [],
+    });
+
+    // 命令发现：session/new 后立即发布，归属本 session，只含可工作的 /compact
+    const commandsUpdate = child.updates.find(
+      (u) => u.sessionId === sessionId && u.update.sessionUpdate === "available_commands_update",
+    );
+    expect(commandsUpdate).toBeDefined();
+    const cmds =
+      (commandsUpdate?.update as { availableCommands?: { name: string }[] }).availableCommands ??
+      [];
+    expect(cmds.map((c) => c.name)).toContain("compact");
+    expect(cmds.map((c) => c.name)).not.toContain("model");
+
+    const res = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text: "请 track-work" }],
+    });
+    expect(res.stopReason).toBe("end_turn");
+
+    // plan 更新：完整清单替换，归属本 session，状态逐项映射
+    const planUpdates = child.updates.filter(
+      (u) => u.sessionId === sessionId && u.update.sessionUpdate === "plan",
+    );
+    expect(planUpdates.length).toBeGreaterThanOrEqual(1);
+    const entries =
+      (planUpdates[0]?.update as { entries?: { content: string; status: string }[] }).entries ?? [];
+    expect(entries.map((e) => [e.content, e.status])).toEqual([
+      ["设计", "completed"],
+      ["实现", "in_progress"],
+      ["验证", "pending"],
+    ]);
+
+    // usage_update：turn 结束后发布，归属本 session，used/size 为真实水位
+    const usageUpdates = child.updates.filter(
+      (u) => u.sessionId === sessionId && u.update.sessionUpdate === "usage_update",
+    );
+    expect(usageUpdates.length).toBeGreaterThanOrEqual(1);
+    const usage = usageUpdates[0]?.update as unknown as { used: number; size: number };
+    expect(usage.used).toBeGreaterThanOrEqual(0);
+    expect(usage.size).toBeGreaterThan(0);
+    expect(usage.used).toBeLessThanOrEqual(usage.size);
+
+    // 事件顺序与归属：available_commands 早于 plan，plan 早于 usage（turn 结束才发）。
+    // 全部归属同一 sessionId。
+    const order = child.updates
+      .filter((u) => u.sessionId === sessionId)
+      .map((u) => u.update.sessionUpdate);
+    const cmdIdx = order.indexOf("available_commands_update");
+    const planIdx = order.indexOf("plan");
+    const usageIdx = order.indexOf("usage_update");
+    expect(cmdIdx).toBeGreaterThanOrEqual(0);
+    expect(planIdx).toBeGreaterThan(cmdIdx);
+    expect(usageIdx).toBeGreaterThan(planIdx);
+
+    child.closeStdin();
+    expect((await child.exit).code).toBe(0);
+    assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
+  }, 60_000);
+
+  it("/compact 命令真实 stdio：压缩配对 compaction_update 且不进入模型推理", async () => {
+    const ws = makeTempDir("nctrn-acp-compact-");
+    const child = spawnAcpCli({});
+    // 所有请求（含压缩的摘要请求）都返回文本——压缩需要模型完成摘要。
+    providerHandler = () => ({ textParts: ["reply text for compaction boundary"] });
+    await child.request("initialize", { protocolVersion: 1 });
+    const { sessionId } = await child.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [],
+    });
+    // 先跑一轮产生历史
+    const r1 = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text: "start some work" }],
+    });
+    expect(r1.stopReason).toBe("end_turn");
+    expect(
+      child.updates.filter(
+        (u) => u.sessionId === sessionId && u.update.sessionUpdate === "compaction_update",
+      ).length,
+    ).toBe(0);
+    const requestsBeforeCompact = providerRequests.length;
+
+    // 发 /compact 命令（Paseo toAcpPrompt 形式）
+    providerRequests.length = 0;
+    const r2 = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text: "/compact" }],
+    });
+    expect(r2.stopReason).toBe("end_turn");
+    const compactionUpdates = child.updates
+      .filter((u) => u.sessionId === sessionId && u.update.sessionUpdate === "compaction_update")
+      .map((u) => u.update as unknown as { compactionId: string; status: string });
+    const started = compactionUpdates.find((u) => u.status === "in_progress");
+    const terminal = compactionUpdates.find(
+      (u) => u.status === "completed" || u.status === "cancelled" || u.status === "failed",
+    );
+    // 压缩开始必有终态配对（completed 或 cancelled），同一 compactionId
+    expect(started).toBeDefined();
+    expect(terminal).toBeDefined();
+    expect(terminal?.compactionId).toBe(started?.compactionId);
+    // "/compact" 不作为用户输入进入新一轮推理
+    const sawCompactAsUserInput = providerRequests.some((r) =>
+      latestUserText(r).trim().startsWith("/compact"),
+    );
+    expect(sawCompactAsUserInput).toBe(false);
+    void requestsBeforeCompact;
+
+    child.closeStdin();
+    expect((await child.exit).code).toBe(0);
+    assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
+  }, 60_000);
 });
 
 describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () => {

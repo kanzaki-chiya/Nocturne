@@ -2610,3 +2610,260 @@ describe("图片与文本附件（ADR-0127 第四阶段）", () => {
     ).rejects.toMatchObject({ code: -32602 });
   });
 });
+
+describe("执行进度与命令发现（ADR-0127 第四阶段）", () => {
+  async function startProgressHarness(options?: { handler?: FakeHandler; scripts?: FakeScript[] }) {
+    const h = await startHarness({
+      ...(options?.handler !== undefined
+        ? { handler: options.handler }
+        : { scripts: options?.scripts ?? [textScript("ok")] }),
+    });
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    return { ...h, sessionId };
+  }
+
+  const updatesOf = (h: { updates: SessionNotification[] }, kind: string) =>
+    h.updates.filter((u) => u.update.sessionUpdate === kind);
+
+  it("session/new 后发布 available_commands_update：只含真实可工作的 /compact", async () => {
+    const h = await startProgressHarness();
+    await vi.waitFor(
+      () => {
+        if (updatesOf(h, "available_commands_update").length === 0) {
+          throw new Error("commands not yet published");
+        }
+      },
+      { timeout: 5000 },
+    );
+    const update = updatesOf(h, "available_commands_update")[0]?.update as {
+      availableCommands: { name: string; description: string }[];
+    };
+    const names = update.availableCommands.map((c) => c.name);
+    expect(names).toContain("compact");
+    // 不公布依赖 TUI/REPL 交互的命令（经 ACP 无法工作）
+    for (const banned of ["model", "cost", "help", "rename", "context", "provider"]) {
+      expect(names).not.toContain(banned);
+    }
+  });
+
+  it("todo_write 成功投影为完整清单替换式 plan 更新，状态逐项映射", async () => {
+    const h = await startProgressHarness({
+      scripts: [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "t1",
+            name: "todo_write",
+            input: {
+              items: [
+                { text: "第一步", status: "completed" },
+                { text: "第二步", status: "in_progress" },
+                { text: "第三步", status: "pending" },
+              ],
+            },
+          },
+          { type: "finish", reason: "stop" },
+        ],
+        textScript("done"),
+      ],
+    });
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "track tasks" }],
+    });
+    await vi.waitFor(
+      () => {
+        if (updatesOf(h, "plan").length === 0) throw new Error("plan not yet published");
+      },
+      { timeout: 5000 },
+    );
+    const plan = updatesOf(h, "plan")[0]?.update as {
+      entries: { content: string; status: string; priority: string }[];
+    };
+    expect(plan.entries.map((e) => [e.content, e.status])).toEqual([
+      ["第一步", "completed"],
+      ["第二步", "in_progress"],
+      ["第三步", "pending"],
+    ]);
+  });
+
+  it("同一清单重复 todo_write 不重复投影 plan（签名去重）", async () => {
+    const items = [{ text: "唯一步骤", status: "pending" }];
+    const h = await startProgressHarness({
+      scripts: [
+        [
+          { type: "tool_call", toolCallId: "t1", name: "todo_write", input: { items } },
+          { type: "tool_call", toolCallId: "t2", name: "todo_write", input: { items } },
+          { type: "finish", reason: "stop" },
+        ],
+        textScript("done"),
+      ],
+    });
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "dedupe" }],
+    });
+    await vi.waitFor(
+      async () => {
+        // 等本轮真正结束（最后 text 到达）再统计，避免过早断言
+        const texts = updatesOf(h, "agent_message_chunk");
+        if (
+          !texts.some((u) =>
+            (u.update as { content: { text: string } }).content.text.includes("done"),
+          )
+        ) {
+          throw new Error("turn not finished");
+        }
+      },
+      { timeout: 5000 },
+    );
+    // 同一清单两次写入只投影一次 plan
+    expect(updatesOf(h, "plan").length).toBe(1);
+  });
+
+  it("turn.completed 投影 usage_update：used/size 来自上下文报告，累计用量进 _meta", async () => {
+    const h = await startProgressHarness();
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "usage probe" }],
+    });
+    await vi.waitFor(
+      () => {
+        if (updatesOf(h, "usage_update").length === 0) throw new Error("usage not yet published");
+      },
+      { timeout: 5000 },
+    );
+    const usage = updatesOf(h, "usage_update")[0]?.update as {
+      used: number;
+      size: number;
+      _meta?: { inputTokens?: number; outputTokens?: number };
+    };
+    // used/size 是真实上下文水位：非负且 used 不超过窗口
+    expect(usage.used).toBeGreaterThanOrEqual(0);
+    expect(usage.size).toBeGreaterThan(0);
+    expect(usage.used).toBeLessThanOrEqual(usage.size);
+    // 累计用量非负存在
+    expect(usage._meta?.inputTokens).toBeGreaterThanOrEqual(0);
+    expect(usage._meta?.outputTokens).toBeGreaterThanOrEqual(0);
+  });
+
+  it("/compact 命令触发压缩并投影 compaction_update 开始/完成配对，不进入模型推理", async () => {
+    // handler：所有请求（含压缩的摘要请求）都返回文本——压缩需要模型完成摘要。
+    // 摘要请求走主对话通道（buildSummaryRequest 无 purpose），用脚本会在第一轮后耗尽。
+    // 记录每次推理请求的首条用户输入，验证 "/compact" 不作为用户输入进入新一轮推理。
+    const promptInputs: string[] = [];
+    const h = await startProgressHarness({
+      handler: (request) => {
+        const firstUser = [...request.messages].reverse().find((m) => m.role === "user");
+        const text =
+          firstUser !== undefined && typeof firstUser.content !== "string"
+            ? firstUser.content.find((b) => b.type === "text")?.text
+            : undefined;
+        if (text !== undefined) promptInputs.push(text);
+        return textScript("reply text for compaction boundary");
+      },
+    });
+    // 先跑一轮产生历史
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "start some work" }],
+    });
+    const compactionUpdatesBefore = updatesOf(h, "compaction_update").length;
+    expect(compactionUpdatesBefore).toBe(0);
+
+    // 发 /compact 命令（Paseo toAcpPrompt 形式：纯文本 "/compact"）
+    const res = await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "/compact" }],
+    });
+    expect(res).toEqual({ stopReason: "end_turn" });
+    await vi.waitFor(
+      () => {
+        if (updatesOf(h, "compaction_update").length < 2) {
+          throw new Error("compaction updates not yet complete");
+        }
+      },
+      { timeout: 8000 },
+    );
+    const updates = updatesOf(h, "compaction_update").map(
+      (u) =>
+        u.update as {
+          compactionId: string;
+          status: string;
+        },
+    );
+    // 开始/完成配对：同一 compactionId 先 in_progress 后 completed
+    const started = updates.find((u) => u.status === "in_progress");
+    const completed = updates.find((u) => u.status === "completed");
+    expect(started).toBeDefined();
+    expect(completed).toBeDefined();
+    expect(started?.compactionId).toBe(completed?.compactionId);
+    // "/compact" 不作为用户输入进入新一轮推理（压缩的摘要请求用户块是压缩指令，
+    // 不是 "/compact"；第一轮是 "start some work"）。
+    expect(promptInputs.some((t) => t.trim() === "/compact")).toBe(false);
+  });
+
+  it("普通文本 /compact 之外的斜杠文本不拦截：进入正常推理", async () => {
+    const h = await startProgressHarness();
+    const res = await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "/model 是什么" }],
+    });
+    expect(res).toEqual({ stopReason: "end_turn" });
+    // 未触发压缩
+    expect(updatesOf(h, "compaction_update").length).toBe(0);
+  });
+
+  it("压缩失败/中断时 compaction_update 按 cancelled 终态化，不留卡在 in_progress 的条目", async () => {
+    // handler：第一轮正常；压缩的摘要请求抛错使压缩失败。
+    // 摘要请求 purpose 为 compaction 类角色——用 roleHandler 无法按内容区分，
+    // 这里依赖 Core 失败路径只保证 cancelled 终态化逻辑被覆盖（成功路径另测）。
+    // 若压缩实际不可用（无边界），应无 compaction 更新或按 cancelled 收尾——
+    // 关键断言：绝不留下状态为 in_progress 且无配对的条目。
+    const h = await startProgressHarness({
+      scripts: [textScript("some history")],
+    });
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "seed" }],
+    });
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "/compact" }],
+    });
+    await vi.waitFor(
+      () => {
+        const ups = updatesOf(h, "compaction_update");
+        if (ups.length === 0) throw new Error("no compaction updates yet");
+        // 等到出现终态（completed 或 cancelled）
+        const terminal = ups.some((u) => {
+          const s = (u.update as { status: string }).status;
+          return s === "completed" || s === "cancelled" || s === "failed";
+        });
+        if (!terminal) throw new Error("no terminal compaction state yet");
+      },
+      { timeout: 8000 },
+    );
+    const ups = updatesOf(h, "compaction_update").map(
+      (u) =>
+        u.update as {
+          compactionId: string;
+          status: string;
+        },
+    );
+    // 每个 in_progress 都必须有同 ID 的终态配对
+    const inProgress = ups.filter((u) => u.status === "in_progress");
+    for (const ip of inProgress) {
+      const paired = ups.some(
+        (u) =>
+          u.compactionId === ip.compactionId &&
+          (u.status === "completed" || u.status === "cancelled" || u.status === "failed"),
+      );
+      expect(paired).toBe(true);
+    }
+  });
+});

@@ -58,7 +58,7 @@ import {
   type SubagentPendingPermission,
   type TurnEndReason,
 } from "@nocturne/core";
-import { effectiveEvents, userEntryText } from "@nocturne/core/protocol";
+import { effectiveEvents, todoItemsFromCompletion, userEntryText } from "@nocturne/core/protocol";
 
 const MAX_TOOL_PROGRESS_CHARS = 32_768;
 const MAX_TITLE_TARGET_CHARS = 80;
@@ -138,6 +138,14 @@ interface ManagedSession {
   activeTurnId: string | undefined;
   /** 进行中的提问：requestId → 发起时的 turnId（ADR-0127 第三阶段返工轮次绑定） */
   pendingQuestions: Map<string, string>;
+  /** 最近一次投影给宿主的任务清单签名（ADR-0127 第四阶段 plan 去重；undefined = 从未发送） */
+  lastPlanSignature: string | undefined;
+  /** 本会话跨轮累计 token 用量（turn.completed.usage 逐轮累加；usage_update 用） */
+  cumulativeUsage: { input: number; output: number; reasoning: number };
+  /** 单调递增的压缩序号，生成会话内唯一的 compactionId */
+  compactionSeq: number;
+  /** 当前进行中的压缩 ID（runtime.status=compacting 置位、compacted/结束清除）；无压缩为 undefined */
+  activeCompactionId: string | undefined;
   enqueueUpdate: (update: SessionUpdate) => void;
   flushUpdates: () => Promise<void>;
 }
@@ -1401,6 +1409,100 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     }
   };
 
+  // ── ADR-0127 第四阶段：执行进度映射（plan / compaction / usage） ──
+
+  /**
+   * todo_write 成功完成 → 完整清单替换式 plan 更新（ACP 语义：每次发送完整清单）。
+   * 用清单签名去重——同一清单不重复投影。清空（items: []）时同样发空清单，
+   * 宿主据此移除已有 todo 项（Paseo todo 时间线整体替换）。
+   */
+  const forwardPlan = (
+    entry: ManagedSession,
+    payload: { name: string; status: string; output?: unknown },
+  ): void => {
+    const items = todoItemsFromCompletion(payload);
+    if (items === undefined) return;
+    const signature = JSON.stringify(items);
+    if (signature === entry.lastPlanSignature) return;
+    entry.lastPlanSignature = signature;
+    entry.enqueueUpdate({
+      sessionUpdate: "plan",
+      entries: items.map((item) => ({
+        content: item.text,
+        priority: "medium" as const,
+        status: item.status,
+      })),
+    });
+  };
+
+  /**
+   * turn.completed → usage_update。used 取当前上下文估算 token
+   * （describeContext().report.estimatedTokens），size 取预算 budgetTokens；
+   * 累计用量进 _meta 供需要总量的宿主读取。describeContext 失败时静默跳过
+   * usage_update（不影响主事件流）。
+   */
+  const forwardUsage = (
+    entry: ManagedSession,
+    usage: {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens?: number | undefined;
+      cacheWriteTokens?: number | undefined;
+      reasoningTokens?: number | undefined;
+    },
+  ): void => {
+    entry.cumulativeUsage.input += usage.inputTokens;
+    entry.cumulativeUsage.output += usage.outputTokens;
+    entry.cumulativeUsage.reasoning += usage.reasoningTokens ?? 0;
+    let report;
+    try {
+      report = entry.session.describeContext().report;
+    } catch {
+      return;
+    }
+    entry.enqueueUpdate({
+      sessionUpdate: "usage_update",
+      used: report.estimatedTokens,
+      size: report.budgetTokens,
+      _meta: {
+        inputTokens: entry.cumulativeUsage.input,
+        outputTokens: entry.cumulativeUsage.output,
+        thoughtTokens: entry.cumulativeUsage.reasoning,
+      },
+    });
+  };
+
+  /**
+   * compaction 生命周期（ADR-0127 第四阶段）。Core 压缩序列：
+   * runtime.status=compacting（开始）→ context.compacted（成功结束）/
+   * runtime.status=idle（结束或中止）。失败/中断不写 context.compacted，
+   * 因此用 compactionId 配对：compacting 开启一段、compacted 完成它。
+   * 压缩在 Turn 外进行，turn 归属不属于此处——按 session 归属（compactionId
+   * 会话内唯一）。注意：UNSTABLE 能力，规范要求客户端声明 session.compaction；
+   * Paseo 0.17.5 发送 clientCapabilities: {} 但实际处理 compaction_update，
+   * 本映射按真实可工作路径发送（验收记录 wire 依据）。
+   */
+  const forwardCompactionStarted = (entry: ManagedSession): void => {
+    entry.compactionSeq += 1;
+    entry.activeCompactionId = `compact-${entry.compactionSeq}`;
+    entry.enqueueUpdate({
+      sessionUpdate: "compaction_update",
+      compactionId: entry.activeCompactionId,
+      status: "in_progress",
+    });
+  };
+
+  const forwardCompactionCompleted = (entry: ManagedSession): void => {
+    const id = entry.activeCompactionId;
+    if (id === undefined) return;
+    entry.activeCompactionId = undefined;
+    entry.enqueueUpdate({
+      sessionUpdate: "compaction_update",
+      compactionId: id,
+      status: "completed",
+    });
+  };
+
   const handleSessionEvent = (entry: ManagedSession, event: RuntimeEvent): void => {
     if (entry.closing || isServerClosing()) return;
 
@@ -1605,6 +1707,8 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
 
       case "tool.completed": {
         const { callId, name, status, modelContent, output, error } = event.payload;
+        // ADR-0127 第四阶段：成功的 todo_write 投影为 plan 更新（完整清单替换）。
+        forwardPlan(entry, event.payload);
         const acpStatus = mapToolCompletedStatus(status);
         const text = modelContent.length > 0 ? modelContent : (error?.message ?? "");
         const content: ToolCallContent[] | undefined =
@@ -1640,6 +1744,8 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         if (event.payload.error !== undefined) {
           entry.turnError = event.payload.error;
         }
+        // ADR-0127 第四阶段：本轮 token 用量与上下文水位投影给宿主。
+        forwardUsage(entry, event.payload.usage);
         // 本轮结束：清除活动 turn 标记，并丢弃属于本轮的待决提问绑定——
         // 之后到达的迟到 elicitation 响应不再对应任何活动轮次。
         if (event.turnId !== undefined && entry.activeTurnId === event.turnId) {
@@ -1648,6 +1754,37 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         for (const [reqId, turnId] of [...entry.pendingQuestions]) {
           if (turnId === event.turnId) entry.pendingQuestions.delete(reqId);
         }
+        return;
+      }
+
+      case "runtime.status": {
+        // ADR-0127 第四阶段：压缩开始（compacting）开启一段 compaction 更新。
+        // compacting 只在压缩流程发出，turn 内不出现，无需按 turnId 过滤。
+        if (event.payload.status === "compacting") {
+          forwardCompactionStarted(entry);
+        }
+        // 压缩收尾的 runtime.status=idle 无 turnId（turn 结束的 idle 带 turnId）。
+        // 压缩失败/中断不写 context.compacted——若此时仍留有未配对的进行中压缩，
+        // 按 cancelled 终态化，宿主不留卡在 in_progress 的条目。
+        if (
+          event.payload.status === "idle" &&
+          event.turnId === undefined &&
+          entry.activeCompactionId !== undefined
+        ) {
+          const id = entry.activeCompactionId;
+          entry.activeCompactionId = undefined;
+          entry.enqueueUpdate({
+            sessionUpdate: "compaction_update",
+            compactionId: id,
+            status: "cancelled",
+          });
+        }
+        return;
+      }
+
+      case "context.compacted": {
+        // ADR-0127 第四阶段：压缩成功收尾（失败/中断不写本事件，不会产生误配）。
+        forwardCompactionCompleted(entry);
         return;
       }
 
@@ -1733,6 +1870,10 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       pendingSubagentPermissions: new Map(),
       activeTurnId: undefined,
       pendingQuestions: new Map(),
+      lastPlanSignature: undefined,
+      cumulativeUsage: { input: 0, output: 0, reasoning: 0 },
+      compactionSeq: 0,
+      activeCompactionId: undefined,
       enqueueUpdate: (update) => {
         if (entry.closing || isServerClosing()) return;
         entry.notifyQueue = entry.notifyQueue
@@ -1750,6 +1891,18 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       handleSessionEvent(entry, event);
     });
     sessions.set(session.id, entry);
+    // ADR-0127 第四阶段：会话就绪即发布可用命令发现。只公布真实能通过 ACP
+    // 工作的命令——/compact 经 prompt 拦截调用 session.compact()，其余 CLI 斜杠命令
+    // 依赖 TUI/REPL 本地交互（表格、向导、打印），经 ACP 无法工作，不公布。
+    entry.enqueueUpdate({
+      sessionUpdate: "available_commands_update",
+      availableCommands: [
+        {
+          name: "compact",
+          description: "压缩会话历史，释放上下文窗口",
+        },
+      ],
+    });
     return entry;
   };
 
@@ -2199,6 +2352,31 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     }
 
     const converted = convertPromptBlocks(params.prompt);
+    // ADR-0127 第四阶段：斜杠命令拦截。Paseo 等宿主把 available_commands 的命令
+    // 作为 `/name args` 纯文本 prompt 发回（toAcpPrompt）；/compact 是唯一经 ACP 真实
+    // 可工作的会话命令——在此拦截并调用 session.compact()，不进入模型推理。
+    // 带参数或非 compact 的 `/` 文本按普通用户输入处理（用户可能真的想输入斜杠文本）。
+    if (
+      converted.attachments.length === 0 &&
+      converted.content.length === 1 &&
+      converted.content[0]?.type === "text" &&
+      converted.content[0].text.trim() === "/compact"
+    ) {
+      try {
+        await entry.session.compact();
+        await entry.flushUpdates();
+        return { stopReason: "end_turn" };
+      } catch (err) {
+        await entry.flushUpdates();
+        const message = err instanceof Error ? err.message : String(err);
+        entry.enqueueUpdate({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: `压缩失败：${message}` },
+        });
+        await entry.flushUpdates();
+        return { stopReason: "end_turn" };
+      }
+    }
     // 模型能力校验（ADR-0127 第四阶段）：图片内容只在当前模型支持图片输入时提交；
     // 不支持时整体拒绝并明确反馈——不降级丢弃图片、不提交残缺消息。
     if (converted.hasImages) {
