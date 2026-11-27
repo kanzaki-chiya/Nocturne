@@ -111,7 +111,7 @@ OpenCode Zen / Go 预设、Responses 协议与会话标识请求头方案见 [AD
 
 后台工作树隔离、快照、并回与清理见 [ADR-0075](decisions/ADR-0075-worktree-isolation.md)。
 
-四种执行方式（`/grill-me`、`/goal`、`/plan`、`/fugue`）的入口、状态存放、上限与各端支持见 [ADR-0076](decisions/ADR-0076-work-modes.md)；第五种执行方式 `/ensemble`（指挥（Maestro，`@maestro`）不写文件、常驻命名成员、公开任务书与共享留言板、成员权限请求等用户确认）见 [ADR-0089](decisions/ADR-0089-ensemble.md)。华彩执行方式 `/cadenza` 见 [ADR-0076 修订](decisions/ADR-0076-work-modes.md#修订2026-11-23华彩)。
+四种执行方式（`/grill-me`、`/goal`、`/plan`、`/fugue`）的入口、状态存放、上限与各端支持见 [ADR-0076](decisions/ADR-0076-work-modes.md)；第五种执行方式 `/ensemble`（指挥（Maestro，`@maestro`）不写文件、常驻命名成员、公开任务书与共享留言板、成员权限请求等用户确认）见 [ADR-0089](decisions/ADR-0089-ensemble.md)，合奏概览、常驻搜索与留言筛选见 [ADR-0131](decisions/ADR-0131-ensemble-overview-board.md)。华彩执行方式 `/cadenza` 见 [ADR-0076 修订](decisions/ADR-0076-work-modes.md#修订2026-11-23华彩)。
 
 目标完成时独立抽查工具证据与清单覆盖见 [ADR-0119](decisions/ADR-0119-goal-check.md)。
 
