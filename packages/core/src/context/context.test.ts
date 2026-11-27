@@ -2945,6 +2945,87 @@ describe("图片附件投影（ADR-0023）", () => {
     const blueAfter = msg?.role === "user" ? msg.images?.[0]?.afterBlock : undefined;
     expect(blueAfter).toBe(-1);
   });
+
+  it("r1126n-fix2 开头反向排列：缺图先于蓝图提交则蓝图在占位后（不错位到占位前）", () => {
+    // 原 [缺图,有效蓝图,A]，两图同 afterBlock=-1，缺图先提交、蓝图后提交。缺图占位插入
+    // 开头桶占据 textParts[0]；蓝图在占位后——afterBlock 重映射为 0（-1+b，b=1），
+    // 插到占位（idx0）之后。修复前 -1 直接返回不重映射，蓝图留在 leading 桶错位到占位前。
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [{ type: "text", text: "A" }],
+        attachments: [
+          { ...att("missing-red"), afterBlock: -1 }, // 先提交，数据缺失 → 占位
+          { ...att("valid-blue"), afterBlock: -1 }, // 后提交，数据齐全 → 图片
+        ],
+      },
+    ];
+    const built = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf("valid-blue") }),
+    );
+    const msg = built.request.messages[0];
+    const texts = (msg?.role === "user" ? msg.content : []).map((b) => b.text);
+    expect(texts).toEqual(["[image unavailable: attachment file missing]", "A"]);
+    // 蓝图在占位之后：afterBlock=0（插到占位 idx0 之后），不再停留在 -1 leading 桶
+    const blueAfter = msg?.role === "user" ? msg.images?.[0]?.afterBlock : undefined;
+    expect(blueAfter).toBe(0);
+  });
+
+  it("r1126n-fix2 开头纯附件一缺一在：有效图在占位后按输入顺序保序", () => {
+    // 纯图片附件无文本块：原 [缺图,有效蓝图]，两图同 afterBlock=-1，缺图先提交。
+    // 占位（无文本块时仍在最前输出）后应是有效图——afterBlock 重映射为 0。
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [],
+        attachments: [
+          { ...att("missing-red"), afterBlock: -1 }, // 先提交，数据缺失 → 占位
+          { ...att("valid-blue"), afterBlock: -1 }, // 后提交，数据齐全 → 图片
+        ],
+      },
+    ];
+    const built = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf("valid-blue") }),
+    );
+    const msg = built.request.messages[0];
+    const texts = (msg?.role === "user" ? msg.content : []).map((b) => b.text);
+    expect(texts).toEqual(["[image unavailable: attachment file missing]"]);
+    const blueAfter = msg?.role === "user" ? msg.images?.[0]?.afterBlock : undefined;
+    expect(blueAfter).toBe(0);
+  });
+
+  it("r1126n-fix2 未指定位置附件兼容：afterBlock undefined 不重映射沿用末尾追加", () => {
+    // 旧附件/read/mcp 工具结果图无 afterBlock：不参与重映射，保持 undefined 由适配器
+    // 末尾追加。即使同消息有带位置占位膨胀，无位置图也不受影响。
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [
+          { type: "text", text: "A" },
+          { type: "text", text: "B" },
+        ],
+        attachments: [
+          { ...att("missing-red"), afterBlock: 0 }, // 带位置缺图 → 占位
+          att("valid-blue"), // 无位置（undefined）→ 末尾追加
+        ],
+      },
+    ];
+    const built = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf("valid-blue") }),
+    );
+    const msg = built.request.messages[0];
+    const blueAfter = msg?.role === "user" ? msg.images?.[0]?.afterBlock : undefined;
+    expect(blueAfter).toBeUndefined();
+  });
 });
 
 describe("history 细分（ADR-0046 第 5 节）", () => {

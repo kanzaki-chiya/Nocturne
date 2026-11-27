@@ -704,8 +704,10 @@ function mergeUserBlocks(
  * 索引）；图片要落在 content[jp] 之后、同锚点提交顺序在它之前的 b 个占位之后，故
  * 新位置 = jp + shift + b（b 即 precedingTexts，同锚点前驱占位计数）。这样同锚点的
  * 混合附件（有效图与缺图占位交错）按输入顺序穿插——蓝图先于缺图提交则蓝图在占位前，
- * 反之在占位后。afterBlock=-1（开头）与越界（末尾）保持原值：-1 是序列最前、越界
- * clamp 到末尾，重映射不改变其语义。
+ * 反之在占位后。开头锚点 -1 同样计入 precedingTexts：首图前的 b 个占位对应新位置
+ * -1+b（占位插入开头桶占据 textParts 最前索引，b≥1 时图片移出 leading 桶、插到对应
+ * 占位之后；b=0 时保持 -1 仍在最前）。越界（末尾）保持原值：clamp 到末尾，重映射不
+ * 改变其语义。afterBlock undefined（旧附件、read/mcp 工具结果图）不重映射，沿用末尾追加。
  */
 function remapImagePositions(
   images: readonly ModelImage[],
@@ -722,14 +724,21 @@ function remapImagePositions(
   }
   return images.map((img, index) => {
     const jp = img.afterBlock;
-    if (jp === undefined || jp < 0) return img; // 无位置或开头(-1)：不重映射
+    if (jp === undefined) return img; // 无位置信息（旧附件/工具结果图）：不重映射
+    const before = precedingTexts?.[index] ?? 0;
+    // 开头锚点 -1：无更小锚点不计 shift，新位置 = -1 + b。b=0 保持 -1（最前）；
+    // b≥1 时占位已占据 textParts 最前索引，图片插到第 b 个占位之后（索引 b-1 之后即 b）
+    if (jp < 0) {
+      const next = jp + before;
+      if (next === jp) return img;
+      return { ...img, afterBlock: next };
+    }
     // 锚点严格小于 jp 的文本总数（含 -1 开头桶，它在最前占据索引、把后续文本块往后推）；
     // 同锚点 jp 的占位不计入 shift——它们相对图片的先后由 precedingTexts(b) 表达
     let shift = 0;
     for (const [pos, count] of countAt) {
       if (pos < jp) shift += count;
     }
-    const before = precedingTexts?.[index] ?? 0;
     const next = jp + shift + before;
     if (next === jp) return img;
     return { ...img, afterBlock: next };
