@@ -231,7 +231,7 @@ idle ──submit──▶ thinking ──工具调用──▶ running_tool ─
 
 `waiting_user` 是 ADR-0032 的提问等待态：`needsUser` 工具经 `ToolContext.askUser` 发出 `question.requested` 后进入；`respondQuestion` 到达或提问被取消后回到 `running_tool` 继续本 Step。
 
-提问有三种结算：`respondQuestion` 的正常回答/逐题拒绝（`ok`）、中断/取消（`cancelled`）、以及 ADR-0127 第三阶段的宿主挂起（`questionSuspend` → `handoff_suspended`）。挂起不是错误失败也不是用户拒答——宿主已把问题完整展示给用户但不能结构化回收时，当前轮按可见问题收尾、控制交还宿主，ask_user 的工具结果指引模型不按假设执行依赖该选择的动作、等下一轮用户答复；下一轮答复作为普通消息进入，由模型按真实回答继续。用户明确拒绝仍走 `respondQuestion` 的 `declined`，宿主不支持/取消/断连/超时绝不写成「用户拒绝回答」。
+提问有三种结算：`respondQuestion` 的正常回答/逐题拒绝（`ok`）、中断/取消（`cancelled`）、以及 ADR-0127 第三阶段的宿主挂起（`questionSuspend` → `handoff_suspended`）。挂起不是错误失败也不是用户拒答——宿主已把问题完整展示给用户但不能结构化回收时，broker 在 `suspend` 结算时登记 `turnId`，handoff 的 `tool.completed` 写入后命中本轮 `shouldFinish`（按 `isTurnSuspended` 结果语义判定，非工具名分支）：当前轮以可见问题**有序收尾、不再发起下一次推理**，批内尚未开始、依赖答复的后续调用随收尾结算为 cancelled，控制交还宿主。ask_user 的工具结果指引模型不按假设执行依赖该选择的动作、等下一轮用户答复；下一轮答复作为普通消息进入，由模型按真实回答继续。用户明确拒绝仍走 `respondQuestion` 的 `declined`，宿主不支持/取消/断连/超时绝不写成「用户拒绝回答」。
 
 状态是派生信息，丢失不影响正确性。
 
