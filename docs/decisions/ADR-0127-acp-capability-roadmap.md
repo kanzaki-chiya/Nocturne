@@ -152,3 +152,21 @@
 - 边界如实陈述：宿主模型与 worker 模型均为脚本化 capture provider（不是真实 Claude/GPT 账号）；并发与取消路径由 connector 真实子进程夹具测试覆盖（同一 worker 并发续派串行、取消经 session/cancel 传播、进程树清理），e2e 覆盖主链路与不可恢复路径。`session/load` 的宿主侧资格校验（归属/工作区/锁）是第二阶段既有语义，本阶段复用未改。
 
 限制：`mcpServers` 注入解析池为会话装配池加配置重载刷新——会话建立后新打开的会话外注入路径不存在（strictHostMcp 场景外无运行时再注入，无实际盲区）；worker 记录不含 env 值与凭据，恢复时 worker 进程环境按当前配置重新展开（配置改了 env 引用值时续派用新值——与每次新起进程的语义一致）；续派不存在的 worker 在 Core 装配层拦截因而不产生外部 transcript（设计使然）。
+
+### 第五阶段返工（2026-11-27，归属/权限/并发/隔离修正）
+
+主审复核发现三处缺陷与一个证据缺口，本轮逐一修正。改动集中在 `packages/core/src/external-workers/`（新增 `lock.ts`、扩展 `store.ts`）、`packages/core/src/index.ts`（装配层核对）、`packages/acp/src/connector.ts`（跨进程锁接入）。
+
+**1. 归属核对改为比对调用方真实工作区（原来在比较记录与自身）**。原实现 connector 用 `workerRecord.cwd` 覆盖 `request.cwd` 后再拿二者比较——恒真，归属核对形同虚设。修正后：Core 装配层在续派时把 worker 记录 cwd 与**调用方当前真实工作区**分别经 `platform.resolveReal` 解析后比较（`packages/core/src/index.ts` externalRunner）。用真实路径而非词法比较的原因：Windows 8.3 短名（`ADMINI~1` vs `Administrator`）、junction/symlink 等同一物理位置的合法别名在词法比较下会被误判为不匹配，导致合法重启续派被错误拒绝（单测复现确认）。两侧任一解析失败（原工作树消失）按不匹配处理——这本就是不可恢复状态。归属一致才放行，执行 cwd 仍沿 worker 原工作树。
+
+**2. provider 变更识别落盘 `providerDigest`**。原实现 `providerSnapshot` 写入后没有任何消费者——同名 agent 启动目标（command/args）改变时无法识别，会把外部会话 ID 与注入 MCP 披露给非预期执行者。修正后：worker 记录新增 `providerDigest` 字段（`computeProviderDigest`，command/args/envKeys/mode/configOptions 结构归一化——envKeys 与 configOptions 键排序——后的 sha256）。**单向哈希、不含任何 env 值**，落盘不泄露原值，满足"仅用必要的非敏感身份信息或摘要"的约束。续派时 Core 重算当前同名 agent 配置的摘要并比对，不匹配在披露会话 ID 或注入 MCP 之前以 `worker_mismatch` 拒绝。缺失摘要的历史记录（早期 formatVersion 1）按"不可验证"一律拒绝并提示重建——区分了历史记录的可验证状态，不以宽松匹配放行。command/args 属启动身份本身（worker 本就以该命令恢复），其摘要是必要身份信息；env 值与凭据仍绝不入档。
+
+**3. 跨进程互斥替换单实例 Promise 链**。原实现只在单 connector 实例内串行，且已完成键不释放导致 Map 单调增长；共享同一 `NOCTURNE_HOME` 的独立宿主/connector（两个 CLI 进程、宿主重启叠加）不受约束，可能并发 `session/load` 同一外部会话。修正为两层：进程内链串行（完成后删除链键）+ `packages/core/src/external-workers/lock.ts` 的跨进程存在性锁 `<workerId>.lock`（`createExclusive` 原子创建，内容 pid/hostname/startedAt/token，失效判定与 ADR-0009 会话锁一致）。**关键顺序修正**：锁在 worker 记录校验通过之后、任何副作用之前取得——最初实现先取锁再读记录，导致 `worker_not_found` 场景（目录尚未创建）下 `createExclusive` 以 ENOENT 抛错、且对不存在的 worker 空持锁，单测暴露后修正。持有者存活返回可识别 `worker_busy`（不等待、不重复 prompt、不并发 load）；失效锁（pid 不存活/startedAt 早于开机）回收，崩溃不留永久锁，token 归属校验防误删。锁最后随进程树清理与 transcript 落盘完成才释放。独立 worker 锁路径不同，保持并行。
+
+**4. 权限归属厘清——移除装配层冗余判定**。原计划"装配层显式校验权限"，实现中发现创建与续派的权限**本就由执行管线在调用装配层之前完成**：`permissionSubjects` 对创建同步产出精确主体 `subagent external:<agent 名>`、对续派产出通用主体 `subagent external:worker`（同步阶段无法读盘解析归属），两者经同一权限层完整判定——deny 在 executor 结算为 `status:"denied"`（连 worker 记录都不读取，比规格要求更严格）、ask 走交互/审批。装配层重复判定既冗余又会引入状态不一致（executor 用 `"denied"`、装配层用 `"error"`），故移除，文档与行为对齐为"权限在执行管线完成"。防御性回归经公开 task 入口验证：归属不符/provider 改变/执行者被 deny 时进程、注入、`session/load`、历史读取均不发生（connector run 从未被调用）。
+
+**5. 端到端隔离对照修正（证据缺口）**。原 turn5 对照派发的是**新** reviewer worker（第三个 worker id）——新会话本就没有注入，证明不了"恢复路径不残留首次注入"。修正为：用 reviewer 的**原** worker id 续派且显式省略 `mcpServers`，验证同一外部会话经 `session/load` 恢复后不再持有 turn2 首次创建时注入的团队工具。capture provider 记录新增 `containsReviewerContinuation`/`containsReviewAlpha` 标记精确区分恢复路径请求。修正后端到端 14 项 checks 全过，新增三项证据：`reviewerResumeSameSession`（worker store 中 reviewer 外部会话 ID 恢复前后不变）、`reviewerResumeHadNoMcp`（续派请求零注入）、`reviewerResumeContextRestored`（恢复后仍携带首次审查轮 REVIEW-ALPHA 上下文，msgCount 8→10 累积增长）。证据目录只剩两个 worker 文件（author+reviewer），不再有第三个。
+
+**测试证据（返工后实测）**：Core external-agents-runtime **24/24**（新增 5 项防御性回归：归属不符、provider 摘要变更、历史无摘要记录、执行者禁用、续派主体放行）；connector **62 通过 1 跳过**（新增 3 项跨进程并发：两独立 connector 共享同一 home 同 worker 并发续派一方 worker_busy 且不起进程、pid 不存活失效锁回收不阻塞续派、独立 worker 并发保持并行非 busy）；端到端 **14/14**。
+
+**如实陈述的限制**：跨进程锁是存在性锁（`createExclusive`），互斥依赖所有宿主都经同一 connector 路径——绕过 Nocturne 直接对 worker 进程发 `session/load` 不受约束（与会话锁同属非强制性，ADR-0009 已知限制）；pid 复用在极窄时间窗内可能把失效锁误判为存活（继承 ADR-0009 既有局限）；`providerDigest` 不含 env 值——env 值改变而键不变时摘要不匹配检测不到（但 env 本就按当前配置在每次新起进程重新展开，不构成注入泄露）。
