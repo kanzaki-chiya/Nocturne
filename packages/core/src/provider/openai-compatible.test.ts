@@ -5,8 +5,6 @@
 import { describe, expect, it } from "vitest";
 
 import { classifyStreamErrorKind, toProviderError } from "./adapters/ai-sdk-common.js";
-import { buildContext } from "../context/build.js";
-import type { HistoryEntry, ImageAttachment } from "../protocol/index.js";
 import {
   createOpenAICompatibleProvider,
   type OpenAICompatibleConfig,
@@ -558,69 +556,30 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
   });
 
   it("端到端 context→provider：缺图占位膨胀后有效蓝图不错位（对旧实现失败）", async () => {
-    // r1126n-fix2 问题2 的确定性回归：buildContext 投影缺图占位（膨胀 textParts 索引），
-    // 有效蓝图 afterBlock 同步重映射。任务书例 [A,缺失图,B,有效蓝图,C] 应得
-    // [A,缺图占位,B,蓝图,C]——蓝图在 B 之后而非提前到 B 之前。旧实现蓝图按原索引错位。
-    const visionModel = {
-      ref: { provider: "oai", model: "gpt-x" },
-      contextWindow: 100_000,
-      maxOutputTokens: 8_000,
-      capabilities: {
-        toolCalls: true,
-        parallelToolCalls: true,
-        reasoning: "none",
-        imageInput: true,
-        promptCache: false,
-        editTool: "edit",
-      },
-    } as const;
-    const mkAtt = (sha: string, afterBlock: number): ImageAttachment => ({
-      type: "image",
-      file: `img-${sha}.png`,
-      mimeType: "image/png",
-      bytes: 29,
-      sha256: sha,
-      width: 2,
-      height: 3,
-      source: "paste",
-      afterBlock,
-    });
-    const history: HistoryEntry[] = [
-      {
-        kind: "user",
-        seq: 1,
-        turnId: "t",
-        messageId: "u1",
-        content: [
-          { type: "text", text: "A" },
-          { type: "text", text: "B" },
-          { type: "text", text: "C" },
-        ],
-        attachments: [mkAtt("missing-red", 0), mkAtt("valid-blue", 1)],
-      },
-    ];
-    const built = buildContext({
-      history,
-      model: visionModel,
-      tools: [{ name: "read", description: "read a file", inputSchema: { type: "object" } }],
-      instructions: { project: [] },
-      environment: {
-        os: "Windows 11",
-        shell: "pwsh",
-        cwd: "C:\\ws",
-        workspaceRoot: "C:\\ws",
-        sessionDate: "2025-01-01",
-      },
-      // 只给 valid-blue 的数据——missing-red 走缺失占位（膨胀 textParts）
-      attachmentData: new Map([["valid-blue", "QkxVRQ=="]]),
-    });
-    const userMsg = built.request.messages.find((m) => m.role === "user");
-    expect(userMsg).toBeDefined();
-    if (userMsg === undefined) return;
-    // 把 buildContext 的真实输出喂给适配器，capture 实际 wire payload
+    // r1126n-fix2 问题2 的确定性回归（provider 半段）：buildContext 投影缺图占位后 textParts
+    // 索引膨胀为 [A,占位,B,C]（占位 idx1），有效蓝图的 afterBlock 被一致重映射为 2（指向 B）。
+    // 这里喂入与 buildContext 投影等价的消息（context 半段的重映射值由 context.test.ts 钉住，
+    // 依赖方向禁止 provider→context 串联两个实现模块），核对适配器按重映射索引穿插为
+    // [A,占位,B,蓝图,C]——若 afterBlock 仍是原始索引 1（旧实现），蓝图被插到占位后、B 前而错位。
     const capture: { body?: Record<string, unknown> } = {};
     const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
-    await collect(p, { ...built.request, messages: [userMsg] });
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "A" },
+              { type: "text", text: "[image unavailable: attachment file missing]" },
+              { type: "text", text: "B" },
+              { type: "text", text: "C" },
+            ],
+            images: [{ ...pngBlue, afterBlock: 2 }],
+          },
+        ],
+      }),
+    );
     const msgs = capture.body?.["messages"] as Record<string, unknown>[];
     const parts = msgs[1]?.["content"] as Record<string, unknown>[];
     // 逐 part 核对类型与顺序：A / 缺图占位 / B / 蓝图 / C
@@ -646,99 +605,37 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
   });
 
   it("端到端 context→provider：压缩重注入保留原任务图片/文字对应关系（对旧实现失败）", async () => {
-    // r1126n-fix2 问题1 的确定性回归，按实际 provider payload 验证压缩后的真实构建分支。
-    // 原任务 [红图(开头),「请看左图」,蓝图(请看左图后),「请看右图」]：压缩重注入在 content 前
-    // 插 MARK 前缀，但原任务内部顺序应保留——红图在「请看左图」前、蓝图在「请看左图」后，
-    // 而非剥掉位置变成两段文字后跟两图。
-    const visionModel = {
-      ref: { provider: "oai", model: "gpt-x" },
-      contextWindow: 100_000,
-      maxOutputTokens: 8_000,
-      capabilities: {
-        toolCalls: true,
-        parallelToolCalls: true,
-        reasoning: "none",
-        imageInput: true,
-        promptCache: false,
-        editTool: "edit",
-      },
-    } as const;
-    const mkAtt = (sha: string, afterBlock: number): ImageAttachment => ({
-      type: "image",
-      file: `img-${sha}.png`,
-      mimeType: "image/png",
-      bytes: 29,
-      sha256: sha,
-      width: 2,
-      height: 3,
-      source: "paste",
-      afterBlock,
-    });
-    const history: HistoryEntry[] = [
-      {
-        kind: "user",
-        seq: 2,
-        turnId: "t1",
-        messageId: "u2",
-        content: [
-          { type: "text", text: "请看左图" },
-          { type: "text", text: "请看右图" },
-        ],
-        attachments: [mkAtt("red", -1), mkAtt("blue", 0)],
-      },
-      {
-        kind: "assistant",
-        seq: 3,
-        turnId: "t1",
-        messageId: "a3",
-        model: { provider: "oai", model: "gpt-x" },
-        content: [{ type: "text", text: "看到了" }],
-        toolCalls: [],
-        usage: undefined,
-        finishReason: "stop",
-      },
-      {
-        kind: "compaction",
-        seq: 4,
-        turnId: "t1",
-        compactKind: "summary",
-        throughSeq: 3,
-        summary: "前半段摘要",
-      },
-    ];
-    const evT = (seq: number, type: string, payload: Record<string, unknown>, turnId = "t1") =>
-      ({ type, sessionId: "s", seq, time: "t", payload, turnId }) as never;
-    const events = [
-      evT(1, "turn.started", { turnIndex: 1 }),
-      evT(2, "message.user", { messageId: "u2" }),
-      evT(4, "context.compacted", { kind: "summary", throughSeq: 3, summary: "前半段摘要" }),
-    ];
-    const built = buildContext({
-      history,
-      events,
-      model: visionModel,
-      tools: [{ name: "read", description: "read a file", inputSchema: { type: "object" } }],
-      instructions: { project: [] },
-      environment: {
-        os: "Windows 11",
-        shell: "pwsh",
-        cwd: "C:\\ws",
-        workspaceRoot: "C:\\ws",
-        sessionDate: "2025-01-01",
-      },
-      attachmentData: new Map([
-        ["red", "UkVE"], // "RED"
-        ["blue", "QkxVRQ=="], // "BLUE"
-      ]),
-    });
-    const reinjected = built.request.messages.find(
-      (m) => m.role === "user" && JSON.stringify(m.content).includes("当前 Turn 开始时"),
-    );
-    expect(reinjected).toBeDefined();
-    if (reinjected === undefined) return;
+    // r1126n-fix2 问题1 的确定性回归（provider 半段）：压缩重注入在 content 前插 MARK
+    // 前缀，original 附件 afterBlock 平移（N→N+1，-1→0）后按位置穿插。原任务
+    // [红图(开头),「请看左图」,蓝图(请看左图后),「请看右图」] 的投影为：
+    // content [MARK, 请看左图, 请看右图]（MARK 占索引 0），images red afterBlock=0
+    // （MARK 后、请看左图前）、blue afterBlock=1（请看左图后）。这里喂入与该投影等价的
+    // 消息——context 半段的平移值由 context.test.ts 钉住，依赖方向禁止 provider→context
+    // 串联两个实现模块。核对适配器按平移后索引穿插为 MARK / 红图 / 请看左图 / 蓝图 /
+    // 请看右图——红在左图前、蓝在左图后，而非剥掉位置变成两段文字后跟两图。
+    const mark =
+      "[当前 Turn 开始时的用户请求（原文）]\n它被上面的摘要覆盖后重新附在这里，不是新的请求。";
     const capture: { body?: Record<string, unknown> } = {};
     const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
-    await collect(p, { ...built.request, messages: [reinjected] });
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: mark },
+              { type: "text", text: "请看左图" },
+              { type: "text", text: "请看右图" },
+            ],
+            images: [
+              { ...pngRed, afterBlock: 0 },
+              { ...pngBlue, afterBlock: 1 },
+            ],
+          },
+        ],
+      }),
+    );
     const msgs = capture.body?.["messages"] as Record<string, unknown>[];
     const parts = msgs[1]?.["content"] as Record<string, unknown>[];
     // 逐 part 核对：MARK / 红图 / 请看左图 / 蓝图 / 请看右图——红在左图前、蓝在左图后
@@ -749,7 +646,6 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
           : "blue"
         : `text:${String(part["text"]).slice(0, 12)}`,
     );
-    // 红图紧跟 MARK（在「请看左图」之前），蓝图在「请看左图」之后、「请看右图」之前
     const redIdx = shape.indexOf("red");
     const blueIdx = shape.indexOf("blue");
     const leftIdx = parts.findIndex((part) => part["text"] === "请看左图");
