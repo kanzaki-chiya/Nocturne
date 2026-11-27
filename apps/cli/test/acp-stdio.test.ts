@@ -345,6 +345,12 @@ function spawnAcpCli(options: {
   onPermission?: (
     req: AcpPermissionRequest,
   ) => Promise<"allow_once" | "reject_once" | "cancel" | "hang">;
+  /** elicitation/create 宿主处理器（r1126l）：返回 action 与可选 content */
+  onElicitation?: (
+    req: Record<string, unknown>,
+  ) => Promise<{ action: "accept" | "decline" | "cancel"; content?: Record<string, unknown> }>;
+  /** 捕获到的 elicitation 请求（如果有 onElicitation 则同数组被填充） */
+  elicitations?: Record<string, unknown>[];
 }): SpawnedAcp {
   const isoHome = options.isoHome ?? makeTempDir("nctrn-acp-iso-");
   const nocturneHome = path.join(isoHome, "nocturne-home");
@@ -475,6 +481,20 @@ function spawnAcpCli(options: {
             : { outcome: "selected", optionId: decision };
         sendRaw({ jsonrpc: "2.0", id: reqId, result: { outcome } });
       })();
+      return;
+    }
+    // Agent 向宿主发起的请求：elicitation/create（r1126l 第三阶段）
+    if (msg.method === "elicitation/create" && "id" in msg) {
+      const reqId = msg.id;
+      const reqParams = msg.params as Record<string, unknown>;
+      options.elicitations?.push(reqParams);
+      void (async () => {
+        const decision = (await options.onElicitation?.(reqParams)) ?? { action: "cancel" };
+        const result: Record<string, unknown> = { action: decision.action };
+        if (decision.content !== undefined) result.content = decision.content;
+        sendRaw({ jsonrpc: "2.0", id: reqId, result });
+      })();
+      return;
     }
   });
 
@@ -1772,4 +1792,218 @@ describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () =
     assertAllStdoutLinesValidJsonRpc(childB.stdoutLines);
     expect(findLockFiles(path.join(childB.nocturneHome, "sessions"))).toEqual([]);
   }, 90_000);
+});
+
+describe("ask_user 真实 stdio 客户端（ADR-0127 第三阶段）", () => {
+  it("声明 elicitation.form：客户端接到 elicitation/create 并以 accept 回应，provider 后续请求携带所选答案", async () => {
+    const ws = makeTempDir("nctrn-acp-ask-eli-");
+    const elicitationRequests: Record<string, unknown>[] = [];
+    const child = spawnAcpCli({
+      elicitations: elicitationRequests,
+      onElicitation: async () => ({ action: "accept", content: { q1: "PostgreSQL" } }),
+    });
+
+    const captured: RecordedProviderRequest[] = [];
+    providerHandler = (req) => {
+      captured.push(req);
+      const toolOut = latestToolMessage(req);
+      if (toolOut !== undefined) {
+        return { textParts: [`chosen:${toolOut.slice(0, 80)}`] };
+      }
+      return {
+        toolCalls: [
+          {
+            id: "call_ask_1",
+            name: "ask_user",
+            arguments: {
+              questions: [
+                {
+                  question: "用哪个数据库？",
+                  header: "选型",
+                  options: [{ label: "PostgreSQL", description: "推荐" }, { label: "SQLite" }],
+                },
+              ],
+            },
+          },
+        ],
+      };
+    };
+
+    await child.request("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: { elicitation: { form: {} } },
+    });
+    const { sessionId } = await child.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [],
+    });
+
+    const res = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text: "ask" }],
+    });
+    expect(res.stopReason).toBe("end_turn");
+    // elicitation 确实被发起
+    expect(elicitationRequests.length).toBe(1);
+    const params = elicitationRequests[0] as {
+      sessionId?: string;
+      message?: string;
+      requestedSchema?: { properties?: Record<string, unknown> };
+    };
+    expect(params.sessionId).toBe(sessionId);
+    expect(params.message).toContain("用哪个数据库？");
+    expect(params.requestedSchema?.properties?.q1).toMatchObject({ type: "string" });
+    // provider 第二轮（tool 消息回写）所看到的工具结果包含所选 label
+    const secondReq = captured.find((r) => latestToolMessage(r) !== undefined);
+    expect(secondReq).toBeDefined();
+    const toolText = latestToolMessage(secondReq ?? ({} as RecordedProviderRequest));
+    expect(toolText).toContain("PostgreSQL");
+    expect(toolText).not.toContain("用户拒绝回答");
+
+    child.closeStdin();
+    expect((await child.exit).code).toBe(0);
+    assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
+  }, 60_000);
+
+  it("elicitation 响应 decline：provider 看到「用户拒绝回答」；响应 cancel：stopReason cancelled", async () => {
+    const ws = makeTempDir("nctrn-acp-ask-decline-");
+    const child = spawnAcpCli({
+      onElicitation: async () => ({ action: "decline" }),
+    });
+    const captured: RecordedProviderRequest[] = [];
+    providerHandler = (req) => {
+      captured.push(req);
+      const toolOut = latestToolMessage(req);
+      if (toolOut !== undefined) return { textParts: ["ack"] };
+      return {
+        toolCalls: [
+          {
+            id: "call_ask_d",
+            name: "ask_user",
+            arguments: {
+              questions: [{ question: "q", options: [{ label: "A" }, { label: "B" }] }],
+            },
+          },
+        ],
+      };
+    };
+    await child.request("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: { elicitation: { form: {} } },
+    });
+    const { sessionId } = await child.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [],
+    });
+
+    const r1 = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text: "ask decline" }],
+    });
+    expect(r1.stopReason).toBe("end_turn");
+    const declineReq = captured.find((r) => latestToolMessage(r) !== undefined);
+    expect(latestToolMessage(declineReq ?? ({} as RecordedProviderRequest))).toContain(
+      "用户拒绝回答",
+    );
+
+    // 第二个会话改为 cancel：本轮以 cancelled 收尾
+    const child2 = spawnAcpCli({
+      onElicitation: async () => ({ action: "cancel" }),
+    });
+    providerHandler = (req) => {
+      captured.push(req);
+      const toolOut = latestToolMessage(req);
+      if (toolOut !== undefined) return { textParts: ["ack"] };
+      return {
+        toolCalls: [
+          {
+            id: "call_ask_c",
+            name: "ask_user",
+            arguments: { questions: [{ question: "q2" }] },
+          },
+        ],
+      };
+    };
+    await child2.request("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: { elicitation: { form: {} } },
+    });
+    const { sessionId: sid2 } = await child2.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [],
+    });
+    const r2 = await child2.request<{ stopReason: string }>("session/prompt", {
+      sessionId: sid2,
+      prompt: [{ type: "text", text: "ask cancel" }],
+    });
+    expect(r2.stopReason).toBe("cancelled");
+
+    child.closeStdin();
+    child2.closeStdin();
+    await child.exit;
+    await child2.exit;
+  }, 90_000);
+
+  it("未声明 elicitation（Paseo 风格 {}）：问题文本展示、handoff_suspended、下一轮由用户答案继续", async () => {
+    const ws = makeTempDir("nctrn-acp-ask-text-");
+    const child = spawnAcpCli({});
+    const captured: RecordedProviderRequest[] = [];
+    providerHandler = (req) => {
+      captured.push(req);
+      const toolOut = latestToolMessage(req);
+      if (toolOut !== undefined) {
+        // 第二轮：模型应看到 handoff_suspended 而非「拒绝回答」
+        return { textParts: [`after-handoff:${toolOut.slice(0, 60)}`] };
+      }
+      return {
+        toolCalls: [
+          {
+            id: "call_ask_t",
+            name: "ask_user",
+            arguments: {
+              questions: [
+                {
+                  question: "选择策略？",
+                  options: [{ label: "策略A" }, { label: "策略B" }],
+                },
+              ],
+            },
+          },
+        ],
+      };
+    };
+    await child.request("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: {},
+    });
+    const { sessionId } = await child.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [],
+    });
+    const r1 = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text: "ask text" }],
+    });
+    expect(r1.stopReason).toBe("end_turn");
+    // 用户能看到问题（agent_message_chunk 含问题与选项）
+    const chunks = child.updates.filter(
+      (u) =>
+        u.update.sessionUpdate === "agent_message_chunk" &&
+        u.update.content !== undefined &&
+        typeof u.update.content === "object" &&
+        "text" in u.update.content &&
+        typeof (u.update.content as { text?: unknown }).text === "string" &&
+        ((u.update.content as { text?: string }).text ?? "").includes("选择策略？"),
+    );
+    expect(chunks.length).toBeGreaterThan(0);
+    // 模型在第二轮的请求中看到 handoff_suspended 而非「用户拒绝回答」
+    const secondReq = captured.find((r) => latestToolMessage(r) !== undefined);
+    const toolText = latestToolMessage(secondReq ?? ({} as RecordedProviderRequest)) ?? "";
+    expect(toolText).not.toContain("用户拒绝回答");
+    expect(toolText).toContain("宿主已把问题展示给用户");
+
+    child.closeStdin();
+    expect((await child.exit).code).toBe(0);
+    assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
+  }, 60_000);
 });

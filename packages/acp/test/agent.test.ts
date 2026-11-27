@@ -2067,7 +2067,6 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
   });
 
   it("取消后同一 session 仍可接受下一轮 prompt", async () => {
-    let round = 0;
     const scripts: FakeScript[] = [
       [
         {
@@ -2083,7 +2082,6 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
         { type: "finish", reason: "stop" },
       ],
     ];
-    void round;
     const h = await startElicitationHarness({
       scripts,
       onElicitation: async () => ({ action: "cancel" }),
