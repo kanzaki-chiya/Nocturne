@@ -93,7 +93,8 @@ function isRecordShape(value: unknown): value is ExternalWorkerRecord {
   if (typeof rec.cwd !== "string" || rec.cwd.length === 0) return false;
   if (typeof rec.loadSessionCapable !== "boolean") return false;
   if (typeof rec.createdAt !== "string" || typeof rec.lastUsedAt !== "string") return false;
-  const snap = rec.providerSnapshot as { command?: unknown; args?: unknown; envKeys?: unknown } | null | undefined;
+  const snap = rec.providerSnapshot as
+    { command?: unknown; args?: unknown; envKeys?: unknown } | null | undefined;
   if (typeof snap !== "object" || snap === null) return false;
   if (typeof snap.command !== "string" || !Array.isArray(snap.args)) return false;
   if (!Array.isArray(snap.envKeys)) return false;
