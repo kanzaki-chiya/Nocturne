@@ -578,58 +578,58 @@ beforeAll(async () => {
         const reply = await (toolNamesOf(record).length === 0
           ? { textParts: ["acp-test-title"] }
           : providerHandler(record));
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-      const emit = (delta: Record<string, unknown>, finish?: string) => {
-        res.write(
-          `data: ${JSON.stringify({
-            id: "acp-e2e",
-            object: "chat.completion.chunk",
-            created: 1,
-            model: "e2e-model",
-            choices: [{ index: 0, delta, finish_reason: finish ?? null }],
-          })}\n\n`,
-        );
-      };
-      // OpenAI 流式 stream_options.include_usage 语义：finish chunk 后追加一个
-      // choices:[] 的 chunk 携带非零 usage——核实合成 provider 能让 turn.completed.usage 非零。
-      const emitUsage = () => {
-        res.write(
-          `data: ${JSON.stringify({
-            id: "acp-e2e",
-            object: "chat.completion.chunk",
-            created: 1,
-            model: "e2e-model",
-            choices: [],
-            usage: { prompt_tokens: 1234, completion_tokens: 56, total_tokens: 1290 },
-          })}\n\n`,
-        );
-      };
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        const emit = (delta: Record<string, unknown>, finish?: string) => {
+          res.write(
+            `data: ${JSON.stringify({
+              id: "acp-e2e",
+              object: "chat.completion.chunk",
+              created: 1,
+              model: "e2e-model",
+              choices: [{ index: 0, delta, finish_reason: finish ?? null }],
+            })}\n\n`,
+          );
+        };
+        // OpenAI 流式 stream_options.include_usage 语义：finish chunk 后追加一个
+        // choices:[] 的 chunk 携带非零 usage——核实合成 provider 能让 turn.completed.usage 非零。
+        const emitUsage = () => {
+          res.write(
+            `data: ${JSON.stringify({
+              id: "acp-e2e",
+              object: "chat.completion.chunk",
+              created: 1,
+              model: "e2e-model",
+              choices: [],
+              usage: { prompt_tokens: 1234, completion_tokens: 56, total_tokens: 1290 },
+            })}\n\n`,
+          );
+        };
 
-      if (reply.toolCalls && reply.toolCalls.length > 0) {
-        emit({ role: "assistant" });
-        reply.toolCalls.forEach((tc, index) => {
-          emit({
-            tool_calls: [
-              {
-                index,
-                id: tc.id,
-                type: "function",
-                function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
-              },
-            ],
+        if (reply.toolCalls && reply.toolCalls.length > 0) {
+          emit({ role: "assistant" });
+          reply.toolCalls.forEach((tc, index) => {
+            emit({
+              tool_calls: [
+                {
+                  index,
+                  id: tc.id,
+                  type: "function",
+                  function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+                },
+              ],
+            });
           });
-        });
-        emit({}, "tool_calls");
-        emitUsage();
-      } else {
-        emit({ role: "assistant" });
-        for (const part of reply.textParts ?? ["ok"]) {
-          emit({ content: part });
+          emit({}, "tool_calls");
+          emitUsage();
+        } else {
+          emit({ role: "assistant" });
+          for (const part of reply.textParts ?? ["ok"]) {
+            emit({ content: part });
+          }
+          emit({}, "stop");
+          emitUsage();
         }
-        emit({}, "stop");
-        emitUsage();
-      }
-      res.end("data: [DONE]\n\n");
+        res.end("data: [DONE]\n\n");
       })().catch(() => {
         if (!res.headersSent) res.writeHead(500);
         res.end();
@@ -1976,7 +1976,9 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
     await vi.waitFor(
       () => {
         const ups = child.updates
-          .filter((u) => u.sessionId === sessionId && u.update.sessionUpdate === "compaction_update")
+          .filter(
+            (u) => u.sessionId === sessionId && u.update.sessionUpdate === "compaction_update",
+          )
           .map((u) => u.update as unknown as { compactionId: string; status: string });
         if (!ups.some((u) => u.status === "cancelled")) {
           throw new Error("cancelled terminal not yet on wire");

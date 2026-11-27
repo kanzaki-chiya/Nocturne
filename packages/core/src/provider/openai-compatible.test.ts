@@ -442,7 +442,8 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
   // 两个不同指纹的图片（data 不同），用于在 wire 上区分 image1/image2 的身份与顺序
   const pngRed = { mimeType: "image/png" as const, data: "UkVE" }; // "RED"
   const pngBlue = { mimeType: "image/png" as const, data: "QkxVRQ==" }; // "BLUE"
-  const imgFingerprint = (part: Record<string, unknown>): string => {
+  const imgFingerprint = (part: Record<string, unknown> | undefined): string => {
+    if (part === undefined) return "";
     const url = (part["image_url"] as { url?: string } | undefined)?.url ?? "";
     return url;
   };
@@ -470,7 +471,7 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
     // 图片在最前，不是文字后
     expect(shape).toEqual(["image", "text:lead text"]);
     // 指纹：是红图
-    expect(imgFingerprint(parts[0]!)).toContain("UkVE");
+    expect(imgFingerprint(parts[0])).toContain("UkVE");
   });
 
   it("纯图片（无文本块）：afterBlock=-1 的两张图都输出且不丢失，同槽保持顺序", async () => {
@@ -496,8 +497,8 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
     const images = parts.filter((part) => part["type"] === "image_url");
     // 空 textParts 时两张图都必须输出（不丢图），红前蓝后
     expect(images.length).toBe(2);
-    expect(imgFingerprint(images[0]!)).toContain("UkVE");
-    expect(imgFingerprint(images[1]!)).toContain("QkxVRQ");
+    expect(imgFingerprint(images[0])).toContain("UkVE");
+    expect(imgFingerprint(images[1])).toContain("QkxVRQ");
   });
 
   it("末尾越界位置（afterBlock ≥ 文本块数）：图片追加到末尾，不丢失", async () => {
@@ -547,11 +548,11 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
     // 逐 part 断言类型、顺序与图片指纹身份：红在 textA 前、蓝在 textA 后
     expect(parts.length).toBe(3);
     expect(parts[0]?.["type"]).toBe("image_url");
-    expect(imgFingerprint(parts[0]!)).toContain("UkVE");
+    expect(imgFingerprint(parts[0])).toContain("UkVE");
     expect(parts[1]?.["type"]).toBe("text");
     expect(parts[1]?.["text"]).toBe("text A");
     expect(parts[2]?.["type"]).toBe("image_url");
-    expect(imgFingerprint(parts[2]!)).toContain("QkxVRQ");
+    expect(imgFingerprint(parts[2])).toContain("QkxVRQ");
   });
 });
 

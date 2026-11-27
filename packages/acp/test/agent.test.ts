@@ -2620,13 +2620,20 @@ describe("图片与文本附件（ADR-0127 第四阶段）", () => {
   const lastUserImages = (
     h: { provider: { requests: { messages: unknown[] }[] } },
     marker: string,
-  ): { images: { data?: string; afterBlock?: number }[]; content: { type: string; text?: string }[] } => {
+  ): {
+    images: { data?: string; afterBlock?: number }[];
+    content: { type: string; text?: string }[];
+  } => {
     const req = h.provider.requests.find((r) =>
       (r.messages as { role: string; content: { type: string; text?: string }[] }[]).some(
-        (m) => m.role === "user" && m.content.some((b) => b.type === "text" && (b.text ?? "").includes(marker)),
+        (m) =>
+          m.role === "user" &&
+          m.content.some((b) => b.type === "text" && (b.text ?? "").includes(marker)),
       ),
     );
-    const userMsg = (req?.messages as { role: string; images?: unknown; content: unknown }[] | undefined)
+    const userMsg = (
+      req?.messages as { role: string; images?: unknown; content: unknown }[] | undefined
+    )
       ?.filter((m) => m.role === "user")
       .at(-1);
     return {
@@ -3084,7 +3091,11 @@ describe("执行进度与命令发现（ADR-0127 第四阶段）", () => {
     // 等压缩开始（compaction_update in_progress 投递）
     await vi.waitFor(
       () => {
-        if (updatesOf(h, "compaction_update").some((u) => (u.update as { status?: string }).status === "in_progress")) {
+        if (
+          updatesOf(h, "compaction_update").some(
+            (u) => (u.update as { status?: string }).status === "in_progress",
+          )
+        ) {
           return;
         }
         throw new Error("compaction not yet started");
@@ -3155,7 +3166,11 @@ describe("执行进度与命令发现（ADR-0127 第四阶段）", () => {
     // 等压缩在途
     await vi.waitFor(
       () => {
-        if (updatesOf(h, "compaction_update").some((u) => (u.update as { status?: string }).status === "in_progress")) {
+        if (
+          updatesOf(h, "compaction_update").some(
+            (u) => (u.update as { status?: string }).status === "in_progress",
+          )
+        ) {
           return;
         }
         throw new Error("compaction not yet started");
@@ -3208,7 +3223,11 @@ describe("执行进度与命令发现（ADR-0127 第四阶段）", () => {
     });
     await vi.waitFor(
       () => {
-        if (updatesOf(h, "compaction_update").some((u) => (u.update as { status?: string }).status === "in_progress")) {
+        if (
+          updatesOf(h, "compaction_update").some(
+            (u) => (u.update as { status?: string }).status === "in_progress",
+          )
+        ) {
           return;
         }
         throw new Error("compaction not yet started");
@@ -3216,7 +3235,9 @@ describe("执行进度与命令发现（ADR-0127 第四阶段）", () => {
       { timeout: 8000 },
     );
     // 压缩在途时关闭会话：closeEntry 经 cancelEntry 中断压缩、等待 turnPromise 收尾
-    const closeResult = await h.conn.agent.request(methods.agent.session.close, { sessionId: h.sessionId });
+    const closeResult = await h.conn.agent.request(methods.agent.session.close, {
+      sessionId: h.sessionId,
+    });
     expect(closeResult).toBeDefined();
     // 压缩的 prompt 请求按 cancelled 收尾——close 触发中断，压缩不留在途
     expect(await compactPromise).toEqual({ stopReason: "cancelled" });
@@ -3353,8 +3374,8 @@ describe("执行进度与命令发现（ADR-0127 第四阶段）", () => {
       sessionId,
       prompt: [{ type: "text", text: "/compact" }],
     });
-    // 给压缩足够时间完成后断言：全程无 compaction_update 投递
-    await new Promise((r) => setTimeout(r, 500));
+    // /compact 的 prompt 请求在压缩收尾后才 resolve——此处压缩流程已完整结束，
+    // 无需额外等待即可反向断言：全程无 compaction_update 投递（能力门槛生效）。
     expect(updatesOf(h, "compaction_update").length).toBe(0);
   });
 });

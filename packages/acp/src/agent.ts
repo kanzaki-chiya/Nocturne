@@ -437,10 +437,7 @@ export function decodeAcpBase64(b64: string, kind: string, maxBytes: number): Ui
   const buf = Buffer.from(b64, "base64");
   // 严格性复核：解码长度必须与预估一致——Node 忽略非法字符会得到更短结果，视为非法
   if (buf.byteLength !== estimatedBytes) {
-    throw RequestError.invalidParams(
-      { contentType: kind },
-      `${kind} 内容块的 base64 无法完整解码`,
-    );
+    throw RequestError.invalidParams({ contentType: kind }, `${kind} 内容块的 base64 无法完整解码`);
   }
   return new Uint8Array(buf);
 }
@@ -2474,12 +2471,14 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
           await entry.flushUpdates();
           // 压缩被 cancel 中断：interrupt 中止压缩后 compact() 抛 compaction_interrupted，
           // 走下方 catch；能到这里说明压缩完整结束（成功或失败但不中断）。
-          return { stopReason: entry.cancelRequested ? "cancelled" : "end_turn" };
+          // 用 isEntryStopped 而非直接读 entry.cancelRequested：cancelEntry 经 signal abort
+          // 事件/session-cancel 通知异步置位，eslint 控制流分析看不到跨函数 mutation 会误报。
+          return { stopReason: isEntryStopped(entry) ? "cancelled" : "end_turn" };
         } catch (err) {
           await entry.flushUpdates();
           // 取消优先：中断（compaction_interrupted）或宿主 abort 都按 cancelled 收尾，
-          // 不写成「压缩失败」。
-          if (entry.cancelRequested || signal.aborted || isEntryStopped(entry)) {
+          // 不写成「压缩失败」。isEntryStopped 已含 cancelRequested/closing/server-closing。
+          if (signal.aborted || isEntryStopped(entry)) {
             return { stopReason: "cancelled" };
           }
           const message = err instanceof Error ? err.message : String(err);
