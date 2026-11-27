@@ -93,31 +93,25 @@ function translateSessionMcpServers(
       result.push({ type: "http", name, url: server.url, headers });
       continue;
     }
-    if (type === "stdio") {
-      if (server.command === undefined || server.command.trim().length === 0)
-        throw new AcpFailure("invalid_input", `注入 MCP 服务器 ${name} 缺少 command`);
-      const env: { name: string; value: string }[] = [];
-      for (const [varName, value] of Object.entries(server.env ?? {})) {
-        if (typeof value !== "string")
-          throw new AcpFailure(
-            "invalid_input",
-            `注入 MCP 服务器 ${name} 的环境变量 ${varName} 是宿主凭据引用（stored）；` +
-              `凭据不跨进程泄露——如需注入请由调用方显式提供本次任务的明文值`,
-          );
-        env.push({ name: varName, value });
-      }
-      result.push({
-        name,
-        command: server.command,
-        args: [...(server.args ?? [])],
-        env,
-      });
-      continue;
+    // type 只有 stdio/http 两种（schema 限定），http 分支已 continue——此处必为 stdio。
+    if (server.command === undefined || server.command.trim().length === 0)
+      throw new AcpFailure("invalid_input", `注入 MCP 服务器 ${name} 缺少 command`);
+    const env: { name: string; value: string }[] = [];
+    for (const [varName, value] of Object.entries(server.env ?? {})) {
+      if (typeof value !== "string")
+        throw new AcpFailure(
+          "invalid_input",
+          `注入 MCP 服务器 ${name} 的环境变量 ${varName} 是宿主凭据引用（stored）；` +
+            `凭据不跨进程泄露——如需注入请由调用方显式提供本次任务的明文值`,
+        );
+      env.push({ name: varName, value });
     }
-    throw new AcpFailure(
-      "invalid_input",
-      `注入 MCP 服务器 ${name} 的传输类型不受支持（仅 stdio 与 http）`,
-    );
+    result.push({
+      name,
+      command: server.command,
+      args: [...(server.args ?? [])],
+      env,
+    });
   }
   return result;
 }
@@ -609,7 +603,7 @@ async function runAgent(
             workerId: existingWorker.workerId,
           });
         });
-      } else if (loadSessionCapable && sessionId !== undefined) {
+      } else if (loadSessionCapable) {
         const workerId = createWorkerId();
         const now = new Date().toISOString();
         const record: ExternalWorkerRecord = {

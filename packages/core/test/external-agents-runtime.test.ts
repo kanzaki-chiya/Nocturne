@@ -9,6 +9,7 @@ import {
   loadConfig,
   type ExternalAgentConfig,
   type ExternalAgentConnector,
+  type McpServerConfig,
   type RuntimeSession,
   type SubmitInput,
 } from "../src/index.js";
@@ -68,7 +69,7 @@ function latch() {
 async function setup(
   provider = new FakeProvider({ handler: () => done() }),
   builtin = false,
-  mcpServers: import("../src/index.js").McpServerConfig[] = [],
+  mcpServers: McpServerConfig[] = [],
 ) {
   const root = await mkdtemp(path.join(tmpdir(), "nct-agent-runtime-"));
   roots.push(root);

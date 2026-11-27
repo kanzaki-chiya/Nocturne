@@ -3624,7 +3624,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         }
         const materializeValues = async (
           values: Record<string, McpValue> | undefined,
-          kind: "env" | "headers",
         ): Promise<{ values?: Record<string, McpValue>; error?: string }> => {
           if (values === undefined) return {};
           const out: Record<string, McpValue> = {};
@@ -3641,7 +3640,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             const secret =
               server.origin === "host"
                 ? await sessionMcp?.credentials?.get(id)
-                : await config?.credentials?.get(id, { fresh: true });
+                : await config?.credentials.get(id, { fresh: true });
             if (secret === undefined) {
               return {
                 error:
@@ -3654,14 +3653,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           return { values: out };
         };
         if ((server.type ?? "stdio") === "http") {
-          const headers = await materializeValues(server.headers, "headers");
+          const headers = await materializeValues(server.headers);
           if (headers.error !== undefined) return { error: headers.error };
           resolved.push({
             ...server,
             ...(headers.values !== undefined ? { headers: headers.values } : {}),
           });
         } else {
-          const env = await materializeValues(server.env, "env");
+          const env = await materializeValues(server.env);
           if (env.error !== undefined) return { error: env.error };
           resolved.push({ ...server, ...(env.values !== undefined ? { env: env.values } : {}) });
         }
@@ -4137,7 +4136,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 let resolvedAgentName: string;
                 let workerId: string | undefined;
                 let workerRecord: Awaited<ReturnType<typeof externalWorkerStore.read>> | undefined;
-                if ("workerId" in request && request.workerId !== undefined) {
+                if ("workerId" in request) {
                   workerId = request.workerId;
                   workerRecord = await externalWorkerStore.read(workerId);
                   if (workerRecord === undefined) {
