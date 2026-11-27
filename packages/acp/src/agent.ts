@@ -134,6 +134,10 @@ interface ManagedSession {
   streamedReasoningMessages: Set<string>;
   pendingPermissions: Map<string, AbortController>;
   pendingSubagentPermissions: Map<string, AbortController>;
+  /** 当前活动 turn 的 Core turnId（turn.started 置位、turn.completed 清除）；空闲为 undefined */
+  activeTurnId: string | undefined;
+  /** 进行中的提问：requestId → 发起时的 turnId（ADR-0127 第三阶段返工轮次绑定） */
+  pendingQuestions: Map<string, string>;
   enqueueUpdate: (update: SessionUpdate) => void;
   flushUpdates: () => Promise<void>;
 }
@@ -1016,6 +1020,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     requestId: string,
     callId: string,
     questions: readonly QuestionItem[],
+    turnId: string | undefined,
   ): void => {
     if (!clientSupportsElicitationForm) {
       // 文本退化路径：把问题完整展示给宿主用户（与现有流式文本同轨道），
@@ -1036,10 +1041,22 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     }
 
     // 结构化路径：elicitation/create form。
+    // 轮次绑定（ADR-0127 第三阶段返工）：记录发起时的 turnId，
+    // 响应到达时校验仍是同一活动轮——旧轮迟到的 cancel/错误不得取消新轮。
+    if (turnId !== undefined) entry.pendingQuestions.set(requestId, turnId);
+    const isLiveQuestion = (): boolean => {
+      if (turnId === undefined) return true;
+      // 轮次仍活动：当前活动 turn 仍是发起提问的那一turn。
+      // pendingQuestions 仅用于 turn.completed 时识别过期绑定，不作为存活性判据。
+      return entry.activeTurnId === turnId;
+    };
+    const settleQuestion = (): void => {
+      entry.pendingQuestions.delete(requestId);
+    };
     void (async () => {
       try {
         await entry.flushUpdates();
-        if (isEntryStopped(entry)) return;
+        if (isEntryStopped(entry) || !isLiveQuestion()) return;
         const message = questions.map((q) => q.question).join("\n");
         const response = (await entry.client.request(
           "elicitation/create" as never,
@@ -1054,16 +1071,40 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
           | { action: "accept"; content?: Record<string, unknown> | null }
           | { action: "decline" }
           | { action: "cancel" };
+        settleQuestion();
         if (isEntryStopped(entry)) return;
+        // 迟到响应：发起轮已结束或被新轮取代——不再作答、不取消新轮
+        if (!isLiveQuestion()) {
+          recordDiag({
+            event: "question_response_stale",
+            sessionId: entry.id,
+            detail: `turn ${turnId ?? "?"} 已结束，丢弃迟到响应`,
+          });
+          return;
+        }
         if (response.action === "accept") {
           const answers = elicitationAnswers(questions, response.content);
-          await entry.session.respondQuestion(requestId, { answers }).catch((err: unknown) => {
+          try {
+            await entry.session.respondQuestion(requestId, { answers });
+          } catch (err) {
+            // accept 中缺失/非法答案被 respondQuestion 拒绝（invalid_reply）时，
+            // broker 会继续等待——必须明确收尾而不能悬空。这属于宿主协议错误：
+            // 取消当前轮（绝不写成用户拒答），让 ask_user 以 cancelled 收尾。
+            if (err instanceof RuntimeCommandError && err.code === "invalid_reply") {
+              recordDiag({
+                event: "question_accept_invalid",
+                sessionId: entry.id,
+                detail: "elicitation accept 的答案未通过校验，取消当前轮",
+              });
+              if (!isEntryStopped(entry) && isLiveQuestion()) cancelEntry(entry);
+              return;
+            }
             recordDiag({
               event: "question_respond_failed",
               sessionId: entry.id,
               detail: err instanceof Error ? err.message : String(err),
             });
-          });
+          }
           return;
         }
         if (response.action === "decline") {
@@ -1076,7 +1117,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         }
         // cancel / 未知动作：宿主取消本次提问——取消当前 turn，
         // ask_user 以 cancelled 收尾，不写成「用户拒答」。
-        cancelEntry(entry);
+        if (isLiveQuestion()) cancelEntry(entry);
       } catch (err) {
         // 宿主断连/超时/协议错误：不写成「用户拒答」，取消当前 turn
         recordDiag({
@@ -1084,7 +1125,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
           sessionId: entry.id,
           detail: err instanceof Error ? err.message : String(err),
         });
-        if (!isEntryStopped(entry)) cancelEntry(entry);
+        if (!isEntryStopped(entry) && isLiveQuestion()) cancelEntry(entry);
       }
     })();
   };
@@ -1441,7 +1482,12 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         // - 未声明：把完整问题与选项作为 agent_message_chunk 展示给宿主用户，
         //   结算为 handoff_suspended 让当前轮以可见问题收尾；下一轮用户作答后继续。
         const payload = event.payload;
-        forwardQuestion(entry, payload.requestId, payload.callId, payload.questions);
+        forwardQuestion(entry, payload.requestId, payload.callId, payload.questions, event.turnId);
+        return;
+      }
+
+      case "turn.started": {
+        entry.activeTurnId = event.turnId;
         return;
       }
 
@@ -1500,6 +1546,14 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       case "turn.completed": {
         if (event.payload.error !== undefined) {
           entry.turnError = event.payload.error;
+        }
+        // 本轮结束：清除活动 turn 标记，并丢弃属于本轮的待决提问绑定——
+        // 之后到达的迟到 elicitation 响应不再对应任何活动轮次。
+        if (event.turnId !== undefined && entry.activeTurnId === event.turnId) {
+          entry.activeTurnId = undefined;
+        }
+        for (const [reqId, turnId] of [...entry.pendingQuestions]) {
+          if (turnId === event.turnId) entry.pendingQuestions.delete(reqId);
         }
         return;
       }
@@ -1580,6 +1634,8 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       streamedReasoningMessages: new Set(),
       pendingPermissions: new Map(),
       pendingSubagentPermissions: new Map(),
+      activeTurnId: undefined,
+      pendingQuestions: new Map(),
       enqueueUpdate: (update) => {
         if (entry.closing || isServerClosing()) return;
         entry.notifyQueue = entry.notifyQueue

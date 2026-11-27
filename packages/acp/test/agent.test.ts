@@ -2256,4 +2256,115 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
     expect(oneOf[1]).toMatchObject({ const: "B", title: "B" });
     expect(oneOf[1]?.description).toBeUndefined();
   });
+
+  it("旧轮取消、新轮运行后才收到旧 elicitation 响应：不取消新轮", async () => {
+    // 轮次绑定回归（ADR-0127 第三阶段返工）：
+    // turn1 的 elicitation 响应被挂起；turn1 取消后开启 turn2；
+    // 此时才放行旧响应（cancel）——它不得取消正在运行的 turn2。
+    // turn2 用 wait 挂起持续运行，确保迟到 cancel 到达时它确实 busy——
+    // 否则即完脚本早已收尾，cancelEntry 因 busy=false 直接 return，测不到保护。
+    const scripts: FakeScript[] = [
+      // turn1：ask_user
+      [
+        { type: "tool_call", toolCallId: "q1", name: "ask_user", input: { questions: [{ question: "q1" }] } },
+        { type: "finish", reason: "tool_calls" },
+      ],
+      // turn2：先 wait 挂起（持续运行、可被 interrupt），再发文本
+      [
+        { type: "wait", ms: 400 },
+        { type: "text_delta", text: "turn2 正常运行" },
+        { type: "finish", reason: "stop" },
+      ],
+    ];
+    // 可控的 elicitation 响应：先挂起，由测试手动放行
+    let releaseElicitation!: (value: unknown) => void;
+    const elicitationGate = new Promise<unknown>((resolve) => {
+      releaseElicitation = resolve;
+    });
+    const h = await startElicitationHarness({
+      scripts,
+      onElicitation: async () => (await elicitationGate) as never,
+    });
+    const created = await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    });
+    const sessionId = (created as { sessionId: string }).sessionId;
+
+    // turn1 启动（elicitation 挂起中，turn 停在 waiting_user）
+    const turn1Promise = h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "ask turn1" }],
+    });
+    // 等 elicitation 请求确实发出（turn1 进入等待）
+    for (let i = 0; i < 100; i += 1) {
+      await new Promise((r) => setTimeout(r, 15));
+      // turn1 的 elicitation 已发起（onElicitation 被调用即 gate 等待中）
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 80));
+    // 取消 turn1
+    await h.conn.agent.notify(methods.agent.session.cancel, { sessionId });
+    const r1 = await turn1Promise;
+    expect(r1.stopReason).toBe("cancelled");
+
+    // turn2 启动（新轮，普通文本）——但先不放行旧响应
+    const turn2Promise = h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "turn2" }],
+    });
+    // 让 turn2 开始运行
+    await new Promise((r) => setTimeout(r, 80));
+    // 现在才放行旧轮（turn1）的迟到 cancel 响应
+    releaseElicitation({ action: "cancel" });
+    const r2 = await turn2Promise;
+    // 关键断言：turn2 未被旧轮的迟到 cancel 取消——按自身脚本正常 end_turn
+    expect(r2.stopReason).toBe("end_turn");
+    const text = JSON.stringify(h.updates);
+    expect(text).toContain("turn2 正常运行");
+  });
+
+  it("无效 accept（答案未通过校验）后不悬空：会话仍可用，且绝不写成用户拒答", async () => {
+    // respondQuestion 对缺失/非法答案返回 invalid_reply 时，broker 会继续等待——
+    // 必须明确收尾（取消该轮）而非悬空；明确拒答仍只来自用户 decline。
+    const scripts: FakeScript[] = [
+      [
+        {
+          type: "tool_call",
+          toolCallId: "q1",
+          name: "ask_user",
+          input: { questions: [{ question: "q", options: [{ label: "A" }, { label: "B" }] }] },
+        },
+        { type: "finish", reason: "tool_calls" },
+      ],
+      [
+        { type: "text_delta", text: "恢复后的正常轮" },
+        { type: "finish", reason: "stop" },
+      ],
+    ];
+    const h = await startElicitationHarness({
+      scripts,
+      // accept 但 content 提供了一个不在选项内的非法 label——
+      // respondQuestion 校验（selected 必须属于已提供选项）会返回 invalid_reply
+      onElicitation: async () => ({ action: "accept", content: { q1: "NOT-A-VALID-OPTION" } }),
+    });
+    const created = await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    });
+    const sessionId = (created as { sessionId: string }).sessionId;
+    const r1 = await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "ask" }],
+    });
+    // 无效 accept 明确收尾为取消（不悬空、不写成拒答）
+    expect(r1.stopReason).toBe("cancelled");
+    expect(JSON.stringify(h.updates)).not.toContain("用户拒绝回答");
+    // 会话仍可用：下一轮正常运行
+    const r2 = await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "继续" }],
+    });
+    expect(r2.stopReason).toBe("end_turn");
+  });
 });
