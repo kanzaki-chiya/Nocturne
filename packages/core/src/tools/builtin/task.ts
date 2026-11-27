@@ -129,8 +129,7 @@ export function createTaskTool(
     // ADR-0127 第五阶段：worker 续派——worker id 自带归属与配置，
     // 与选择执行者的字段以及会话级覆盖全部互斥。
     if (input.worker !== undefined) {
-      if (!/^ew-[0-9a-f]{16}$/.test(input.worker))
-        return `worker id 形状非法：${input.worker}`;
+      if (!/^ew-[0-9a-f]{16}$/.test(input.worker)) return `worker id 形状非法：${input.worker}`;
       if (input.agent !== undefined || input.profile !== undefined)
         return "worker 与 agent/profile 互斥（worker 自带归属）";
       if (

@@ -4136,9 +4136,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                 // 这里只读出 agent 名做启用校验与权限主体精确化。
                 let resolvedAgentName: string;
                 let workerId: string | undefined;
-                let workerRecord:
-                  | Awaited<ReturnType<typeof externalWorkerStore.read>>
-                  | undefined;
+                let workerRecord: Awaited<ReturnType<typeof externalWorkerStore.read>> | undefined;
                 if ("workerId" in request && request.workerId !== undefined) {
                   workerId = request.workerId;
                   workerRecord = await externalWorkerStore.read(workerId);
@@ -4161,9 +4159,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                     error: { code: "invalid_input", message },
                   };
                 }
-                const agentConfig = agentSnapshot.find(
-                  (agent) => agent.name === resolvedAgentName,
-                );
+                const agentConfig = agentSnapshot.find((agent) => agent.name === resolvedAgentName);
                 if (agentConfig === undefined) {
                   const message = `外部 agent ${resolvedAgentName} 未启用`;
                   return {

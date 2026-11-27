@@ -89,8 +89,7 @@ function isRecordShape(value: unknown): value is ExternalWorkerRecord {
   if (rec.formatVersion !== EXTERNAL_WORKER_FORMAT_VERSION) return false;
   if (typeof rec.workerId !== "string" || !isWorkerId(rec.workerId)) return false;
   if (typeof rec.agentName !== "string" || rec.agentName.length === 0) return false;
-  if (typeof rec.externalSessionId !== "string" || rec.externalSessionId.length === 0)
-    return false;
+  if (typeof rec.externalSessionId !== "string" || rec.externalSessionId.length === 0) return false;
   if (typeof rec.cwd !== "string" || rec.cwd.length === 0) return false;
   if (typeof rec.loadSessionCapable !== "boolean") return false;
   if (typeof rec.createdAt !== "string" || typeof rec.lastUsedAt !== "string") return false;

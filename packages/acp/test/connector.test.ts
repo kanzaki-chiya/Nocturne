@@ -817,10 +817,7 @@ describe("ADR-0127 第五阶段：worker 续派", () => {
 
   it("workerId 不存在/损坏：worker_not_found，不起进程不写文件", async () => {
     const { connector, ctx, request } = setup("loadable");
-    const result = await connector.run(
-      { ...request, workerId: "ew-0000000000000000" },
-      ctx,
-    );
+    const result = await connector.run({ ...request, workerId: "ew-0000000000000000" }, ctx);
     expect(result.status).toBe("error");
     expect(result.status === "error" && result.error.code).toBe("worker_not_found");
   });
@@ -838,11 +835,7 @@ describe("ADR-0127 第五阶段：worker 续派", () => {
       args: [fixture, "loadable"],
       enabled: true,
     } as unknown as ExternalAgentConfig;
-    const result = await mismatchConnector.run(
-      altConfig,
-      { ...request, workerId },
-      ctx,
-    );
+    const result = await mismatchConnector.run(altConfig, { ...request, workerId }, ctx);
     expect(result.status).toBe("error");
     expect(result.status === "error" && result.error.code).toBe("worker_mismatch");
   });
@@ -853,10 +846,7 @@ describe("ADR-0127 第五阶段：worker 续派", () => {
     const workerId = first.output?.workerId;
     const otherCwd = path.join(root, "other-cwd");
     await fs.mkdir(otherCwd, { recursive: true });
-    const result = await connector.run(
-      { ...request, workerId, cwd: otherCwd },
-      ctx,
-    );
+    const result = await connector.run({ ...request, workerId, cwd: otherCwd }, ctx);
     expect(result.status).toBe("error");
     expect(result.status === "error" && result.error.code).toBe("worker_mismatch");
   });
@@ -956,9 +946,7 @@ describe("ADR-0127 第五阶段：worker 续派", () => {
     // 等 fixture 进入 prompt（ready.txt）
     await vi.waitFor(
       async () => {
-        const ready = await fs
-          .readFile(path.join(root, "ready.txt"), "utf8")
-          .catch(() => "");
+        const ready = await fs.readFile(path.join(root, "ready.txt"), "utf8").catch(() => "");
         expect(ready).toBe("prompt");
       },
       { timeout: 5_000, interval: 20 },
@@ -982,9 +970,7 @@ describe("ADR-0127 第五阶段：worker 续派", () => {
     // 给 fixture 一个进入第一次 prompt 的机会
     await vi.waitFor(
       async () => {
-        const ready = await fs
-          .readFile(path.join(root, "ready.txt"), "utf8")
-          .catch(() => "");
+        const ready = await fs.readFile(path.join(root, "ready.txt"), "utf8").catch(() => "");
         expect(ready).toBe("prompt");
       },
       { timeout: 5_000, interval: 20 },
@@ -1018,15 +1004,10 @@ describe("ADR-0127 第五阶段：按任务注入团队 MCP 工具", () => {
     const { connector, ctx, request } = setup("loadableMcp", {
       env: { NOCTURNE_TEST_PROBE_FILE: probeFile },
     });
-    const result = await connector.run(
-      { ...request, sessionMcpServers: [teamServer()] },
-      ctx,
-    );
+    const result = await connector.run({ ...request, sessionMcpServers: [teamServer()] }, ctx);
     expect(result.status).toBe("ok");
     const probe = JSON.parse(await fs.readFile(probeFile, "utf8"));
-    const newInjection = probe.sessionMcp.find(
-      (entry: { phase: string }) => entry.phase === "new",
-    );
+    const newInjection = probe.sessionMcp.find((entry: { phase: string }) => entry.phase === "new");
     expect(newInjection.servers).toHaveLength(1);
     const server = newInjection.servers[0];
     expect(server.name).toBe("team-tool");
@@ -1089,10 +1070,7 @@ describe("ADR-0127 第五阶段：按任务注入团队 MCP 工具", () => {
       env: { NOCTURNE_TEST_PROBE_FILE: probeFile },
     });
     const storedServer = teamServer({ env: { TEAM_TOKEN: { stored: true } } });
-    const result = await connector.run(
-      { ...request, sessionMcpServers: [storedServer] },
-      ctx,
-    );
+    const result = await connector.run({ ...request, sessionMcpServers: [storedServer] }, ctx);
     expect(result.status).toBe("error");
     expect(result.status === "error" && result.error.code).toBe("invalid_input");
     expect(result.modelContent).toContain("stored");

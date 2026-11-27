@@ -529,10 +529,7 @@ describe("ADR-0127 第五阶段：task(worker=…) 续派", () => {
 
   it("worker 续派：按 worker 记录解析 agent 名，cwd 沿 worker 原工作树，workerId 传给 connector", async () => {
     const workerId = "ew-abcd1234abcd1234";
-    const f = await setup(
-      workerTaskProvider({ worker: workerId, task: "请继续修改" }),
-      true,
-    );
+    const f = await setup(workerTaskProvider({ worker: workerId, task: "请继续修改" }), true);
     const workerCwd = await writeWorker(f.home, workerId);
     await f.session.submit({ text: "go" });
     expect(f.run).toHaveBeenCalledTimes(1);

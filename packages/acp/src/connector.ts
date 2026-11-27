@@ -71,8 +71,7 @@ function translateSessionMcpServers(
   const seenNames = new Set<string>();
   for (const server of servers) {
     const name = server.name.trim();
-    if (name.length === 0)
-      throw new AcpFailure("invalid_input", "注入 MCP 服务器名称不能为空");
+    if (name.length === 0) throw new AcpFailure("invalid_input", "注入 MCP 服务器名称不能为空");
     const lowerName = name.toLowerCase();
     if (seenNames.has(lowerName))
       throw new AcpFailure("invalid_input", `注入 MCP 服务器名称重复：${name}`);
