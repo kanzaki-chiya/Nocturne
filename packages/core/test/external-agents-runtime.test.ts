@@ -65,7 +65,11 @@ function latch() {
   });
   return { promise, release };
 }
-async function setup(provider = new FakeProvider({ handler: () => done() }), builtin = false) {
+async function setup(
+  provider = new FakeProvider({ handler: () => done() }),
+  builtin = false,
+  mcpServers: import("../src/index.js").McpServerConfig[] = [],
+) {
   const root = await mkdtemp(path.join(tmpdir(), "nct-agent-runtime-"));
   roots.push(root);
   const home = path.join(root, "home");
@@ -113,6 +117,7 @@ async function setup(provider = new FakeProvider({ handler: () => done() }), bui
     permissions: { autoApproveAsk: true },
     subagent: { enabled: builtin },
     externalAgents: { run, probe },
+    mcpServers,
   });
   await runtime.saveExternalAgent({ mode: "create", name: "offline", config: entry });
   const session = await runtime.createSession({ model: "fake/fake-1" });
@@ -430,4 +435,239 @@ describe("外部 agent：submit.delegate 持久快照", () => {
       );
     },
   );
+});
+
+describe("ADR-0127 第五阶段：task(worker=…) 续派", () => {
+  /** 用指定 task input 构造一个提交 task 工具调用的 provider */
+  const workerTaskProvider = (input: Record<string, unknown>): FakeProvider =>
+    new FakeProvider({
+      handler: (_req, callIndex) => {
+        if (callIndex === 0) {
+          return [
+            {
+              type: "tool_call",
+              toolCallId: "x",
+              name: "task",
+              input,
+            },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
+        // 工具结算后轮次直接 done，不再触发新的 task 调用
+        return [
+          { type: "text_delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ];
+      },
+    });
+  /** 在 NOCTURNE_HOME 写一份 loadSessionCapable 的 worker 记录 */
+  const writeWorker = async (
+    home: string,
+    workerId: string,
+    overrides: { agentName?: string; cwd?: string; loadSessionCapable?: boolean } = {},
+  ): Promise<string> => {
+    const workerDir = path.join(home, "external-workers");
+    await mkdir(workerDir, { recursive: true });
+    const workerCwd = overrides.cwd ?? path.join(home, "worker-tree");
+    await mkdir(workerCwd, { recursive: true });
+    const now = new Date().toISOString();
+    await writeFile(
+      path.join(workerDir, `${workerId}.json`),
+      JSON.stringify({
+        formatVersion: 1,
+        workerId,
+        agentName: overrides.agentName ?? "offline",
+        externalSessionId: "ext-session-1",
+        cwd: workerCwd,
+        providerSnapshot: { command: "x", args: [], envKeys: [] },
+        loadSessionCapable: overrides.loadSessionCapable ?? true,
+        createdAt: now,
+        lastUsedAt: now,
+      }),
+    );
+    return workerCwd;
+  };
+
+  it("worker 与 agent/profile/preset/tools/outputSchema/model/effort/background 互斥", async () => {
+    const f = await setup(
+      workerTaskProvider({ worker: "ew-0000000000000000", agent: "offline", task: "x" }),
+      true,
+    );
+    await f.session.submit({ text: "go" });
+    const events = f.session.durableEvents();
+    const toolCompleted = events.find((e) => e.type === "tool.completed");
+    expect(toolCompleted?.payload).toMatchObject({
+      status: "error",
+      error: { code: "invalid_input" },
+    });
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it("worker id 形状非法：schema 校验拒绝（invalid_input）", async () => {
+    const f = await setup(workerTaskProvider({ worker: "not-a-worker-id", task: "x" }), true);
+    await f.session.submit({ text: "go" });
+    const events = f.session.durableEvents();
+    const toolCompleted = events.find((e) => e.type === "tool.completed");
+    expect(toolCompleted?.payload).toMatchObject({
+      status: "error",
+      error: { code: "invalid_input" },
+    });
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it("worker 不存在：worker_not_found 错误（connector 不被调用——Core 装配层提前拦截）", async () => {
+    const f = await setup(workerTaskProvider({ worker: "ew-0000000000000000", task: "x" }), true);
+    await f.session.submit({ text: "go" });
+    const events = f.session.durableEvents();
+    const toolCompleted = events.find((e) => e.type === "tool.completed");
+    expect(toolCompleted?.payload).toMatchObject({
+      status: "error",
+      error: { code: "worker_not_found" },
+    });
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it("worker 续派：按 worker 记录解析 agent 名，cwd 沿 worker 原工作树，workerId 传给 connector", async () => {
+    const workerId = "ew-abcd1234abcd1234";
+    const f = await setup(
+      workerTaskProvider({ worker: workerId, task: "请继续修改" }),
+      true,
+    );
+    const workerCwd = await writeWorker(f.home, workerId);
+    await f.session.submit({ text: "go" });
+    expect(f.run).toHaveBeenCalledTimes(1);
+    const callArgs = f.run.mock.calls[0];
+    expect(callArgs?.[0].name).toBe("offline");
+    expect(callArgs?.[1]).toMatchObject({
+      agent: "offline",
+      workerId,
+      cwd: workerCwd,
+      task: "请继续修改",
+    });
+  });
+
+  it("worker 记录的 agent 已停用：按未启用拒绝", async () => {
+    const workerId = "ew-abcd1234abcd1234";
+    const f = await setup(workerTaskProvider({ worker: workerId, task: "x" }), true);
+    await writeWorker(f.home, workerId);
+    await f.runtime.setExternalAgentEnabled({ name: "offline", enabled: false });
+    await f.session.submit({ text: "go" });
+    expect(f.run).not.toHaveBeenCalled();
+    const events = f.session.durableEvents();
+    const toolCompleted = events.find((e) => e.type === "tool.completed");
+    expect(toolCompleted?.payload).toMatchObject({
+      status: "error",
+      error: { code: "invalid_input" },
+    });
+  });
+
+  it("mcpServers 仅外部派工可用：内置档位给出时报 invalid_input", async () => {
+    // 不给 agent/worker 时按内置 default 档位处理——mcpServers 无意义，invalid_input
+    const f = await setup(workerTaskProvider({ task: "x", mcpServers: ["team-tool"] }), true);
+    await f.session.submit({ text: "go" });
+    const events = f.session.durableEvents();
+    const toolCompleted = events.find((e) => e.type === "tool.completed");
+    expect(toolCompleted?.payload).toMatchObject({
+      status: "error",
+      error: { code: "invalid_input" },
+    });
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it("按任务注入：明文 env 物化进 sessionMcpServers 随请求发给 connector", async () => {
+    const teamServer = {
+      name: "team-tool",
+      origin: "project" as const,
+      type: "stdio" as const,
+      command: "team-cmd",
+      args: ["serve"],
+      env: { TEAM_MARK: "plaintext-value" },
+    };
+    const f = await setup(
+      workerTaskProvider({ agent: "offline", task: "x", mcpServers: ["team-tool"] }),
+      true,
+      [teamServer],
+    );
+    await f.session.submit({ text: "go" });
+    expect(f.run).toHaveBeenCalledTimes(1);
+    const requestArg = f.run.mock.calls[0]?.[1];
+    expect(requestArg?.sessionMcpServers).toHaveLength(1);
+    const injected = requestArg?.sessionMcpServers?.[0];
+    expect(injected?.name).toBe("team-tool");
+    expect(injected?.env).toEqual({ TEAM_MARK: "plaintext-value" });
+  });
+
+  it("注入名字未知：invalid_input 并列出可用服务器，不调用 connector", async () => {
+    const teamServer = {
+      name: "team-tool",
+      origin: "project" as const,
+      type: "stdio" as const,
+      command: "team-cmd",
+    };
+    const f = await setup(
+      workerTaskProvider({ agent: "offline", task: "x", mcpServers: ["no-such"] }),
+      true,
+      [teamServer],
+    );
+    await f.session.submit({ text: "go" });
+    expect(f.run).not.toHaveBeenCalled();
+    const events = f.session.durableEvents();
+    const toolCompleted = events.find((e) => e.type === "tool.completed");
+    expect(toolCompleted?.payload).toMatchObject({
+      status: "error",
+      error: { code: "invalid_input" },
+    });
+    expect(JSON.stringify(toolCompleted?.payload)).toContain("team-tool");
+  });
+
+  it("stored 凭据缺失：拒绝整个注入（不注入残缺工具）", async () => {
+    const teamServer = {
+      name: "team-tool",
+      origin: "project" as const,
+      type: "stdio" as const,
+      command: "team-cmd",
+      env: { TEAM_TOKEN: { stored: true } as const },
+    };
+    const f = await setup(
+      workerTaskProvider({ agent: "offline", task: "x", mcpServers: ["team-tool"] }),
+      true,
+      [teamServer],
+    );
+    await f.session.submit({ text: "go" });
+    expect(f.run).not.toHaveBeenCalled();
+    const events = f.session.durableEvents();
+    const toolCompleted = events.find((e) => e.type === "tool.completed");
+    expect(toolCompleted?.payload).toMatchObject({
+      status: "error",
+      error: { code: "invalid_input" },
+    });
+    expect(JSON.stringify(toolCompleted?.payload)).toContain("缺少凭据");
+  });
+
+  it("worker 续派携带 mcpServers：每次任务独立绑定，未列出的服务器不注入", async () => {
+    const workerId = "ew-abcd1234abcd1234";
+    const teamA = {
+      name: "team-a",
+      origin: "project" as const,
+      type: "stdio" as const,
+      command: "cmd-a",
+    };
+    const teamB = {
+      name: "team-b",
+      origin: "project" as const,
+      type: "stdio" as const,
+      command: "cmd-b",
+    };
+    const f = await setup(
+      workerTaskProvider({ worker: workerId, task: "继续", mcpServers: ["team-a"] }),
+      true,
+      [teamA, teamB],
+    );
+    await writeWorker(f.home, workerId);
+    await f.session.submit({ text: "go" });
+    expect(f.run).toHaveBeenCalledTimes(1);
+    const requestArg = f.run.mock.calls[0]?.[1];
+    // 只物化 team-a——team-b 虽在会话池中但本任务未列出，不进入外部进程
+    expect(requestArg?.sessionMcpServers?.map((server) => server.name)).toEqual(["team-a"]);
+  });
 });

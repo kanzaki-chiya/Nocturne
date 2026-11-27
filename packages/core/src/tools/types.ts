@@ -807,6 +807,19 @@ export interface ExternalAgentRequest {
   timeoutMs?: number | undefined;
   cwd: string;
   transcriptPath: string;
+  /**
+   * 续派目标 worker（ADR-0127 第五阶段）。
+   * 提供时尝试复用已有 worker 的 ACP 会话（进程存活则复用；宿主重启后
+   * 若 provider 声明 loadSession 则重启进程并恢复同一外部会话）；
+   * 缺省时创建一次性调用，但若 agent 支持会话恢复仍登记一个新 worker
+   * 并把 id 放进 `output.workerId` 供后续续派。
+   */
+  workerId?: string | undefined;
+  /**
+   * 本次任务显式限定的宿主注入 MCP 服务器（ADR-0127 第五阶段）。
+   * 只在调用方明确传入时生效，缺省时沿用既有空注入（无宿主 MCP）。
+   */
+  sessionMcpServers?: readonly McpServerConfig[] | undefined;
   requestPermission(subjects: SubjectRequest[]): Promise<ExternalAgentPermissionDecision>;
 }
 
@@ -817,6 +830,14 @@ export interface ExternalAgentOutput {
   transcriptError?: true;
   stopReason: string;
   permissionDecisions: { allowed: number; denied: number };
+  /** 本次调用关联的稳定 worker ID（ADR-0127 第五阶段）；一次性旧语义调用缺省 */
+  workerId?: string | undefined;
+  /** 外部 ACP 会话 ID（session/new 返回或 session/load 恢复） */
+  externalSessionId?: string | undefined;
+  /** true 表示本次是 session/load 恢复后继续；false/缺省表示新建 */
+  resumed?: boolean | undefined;
+  /** 恢复失败/不可恢复时的原因说明（不可恢复时仍为 error 结果） */
+  resumeFailure?: string | undefined;
 }
 
 export type ExternalAgentOutcome = ToolResult<ExternalAgentOutput>;

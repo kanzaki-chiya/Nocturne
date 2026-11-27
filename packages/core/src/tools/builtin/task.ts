@@ -35,6 +35,14 @@ interface TaskInput {
   model?: string;
   effort?: ReasoningEffort;
   reason?: string;
+  /** ADR-0127 第五阶段：续派目标 worker id（ew-*）；与 agent/profile 互斥，专属 worker 自带归属 */
+  worker?: string;
+  /**
+   * ADR-0127 第五阶段：按任务显式限定注入外部 worker 的会话 MCP 服务器名列表。
+   * 仅外部派工（agent/worker）可用；名字在装配侧对照当前会话 MCP 池解析，
+   * 未列出的会话服务器不进入外部进程。
+   */
+  mcpServers?: string[];
   /** 工具集预设；缺省 general；与 tools 互斥 */
   preset?: "general" | "explore";
   /** 显式工具名白名单（与 preset 互斥） */
@@ -62,7 +70,14 @@ const DESCRIPTION =
 interface ExternalTaskRunner {
   agents: readonly ExternalAgentInfo[];
   run(
-    request: Pick<ExternalAgentRequest, "agent" | "task" | "timeoutMs">,
+    request:
+      | (Pick<ExternalAgentRequest, "agent" | "task" | "timeoutMs"> & {
+          mcpServers?: string[] | undefined;
+        })
+      | (Pick<ExternalAgentRequest, "task" | "timeoutMs"> & {
+          workerId: string;
+          mcpServers?: string[] | undefined;
+        }),
     ctx: ToolContext,
   ): Promise<ExternalAgentOutcome>;
 }
@@ -104,6 +119,36 @@ export function createTaskTool(
       return "isolation 只在 background: true 时可用";
     if (input.agent !== undefined && input.profile !== undefined)
       return "agent 与 profile 不能同时给出";
+    // ADR-0127 第五阶段：mcpServers 形状校验（不区分派工目标）。
+    if (input.mcpServers !== undefined) {
+      if (!Array.isArray(input.mcpServers) || input.mcpServers.length === 0)
+        return "mcpServers 必须是非空服务器名数组";
+      if (input.mcpServers.some((name) => typeof name !== "string" || name.trim().length === 0))
+        return "mcpServers 服务器名不能为空";
+    }
+    // ADR-0127 第五阶段：worker 续派——worker id 自带归属与配置，
+    // 与选择执行者的字段以及会话级覆盖全部互斥。
+    if (input.worker !== undefined) {
+      if (!/^ew-[0-9a-f]{16}$/.test(input.worker))
+        return `worker id 形状非法：${input.worker}`;
+      if (input.agent !== undefined || input.profile !== undefined)
+        return "worker 与 agent/profile 互斥（worker 自带归属）";
+      if (
+        input.preset !== undefined ||
+        input.tools !== undefined ||
+        input.outputSchema !== undefined ||
+        input.model !== undefined ||
+        input.effort !== undefined
+      )
+        return "worker 与 preset、tools、outputSchema、model、effort 互斥";
+      if (input.background === true) return "worker 续派暂不支持 background";
+      if (!hasExternalAgents) return "当前会话没有可用的外部 agent";
+      return undefined;
+    }
+    // ADR-0127 第五阶段：mcpServers 只服务于外部派工——内置子代理的
+    // MCP 可见性由 preset/tools 过滤表达，不存在按任务注入的语义。
+    if (input.mcpServers !== undefined && selectedAgent(input) === undefined)
+      return "mcpServers 仅在外部派工（agent/worker）时可用";
     const name = input.profile ?? input.agent ?? "default";
     if (!available.includes(name))
       return `档位 ${name} 不存在、已停用或模型不可用；可选：${available.join(", ")}`;
@@ -199,6 +244,19 @@ export function createTaskTool(
                 type: "string",
                 description: `已启用的外部 agent 名称（${agents.map((agent) => agent.name).join("、")}）；与 preset、tools、outputSchema 互斥`,
               },
+              worker: {
+                type: "string",
+                pattern: "^ew-[0-9a-f]{16}$",
+                description:
+                  "续派目标 worker id（ADR-0127 第五阶段，ew- 开头）；与 agent/profile/preset/tools/outputSchema/model/effort/background 互斥",
+              },
+              mcpServers: {
+                type: "array",
+                items: { type: "string", minLength: 1 },
+                minItems: 1,
+                description:
+                  "按任务显式限定注入外部 worker 的会话 MCP 服务器名列表（ADR-0127 第五阶段）。仅外部派工可用；未列出的会话服务器不进入外部进程，每次调用只绑定本任务明确提供的工具",
+              },
             }
           : {}),
         ...(launcher !== undefined
@@ -250,13 +308,20 @@ export function createTaskTool(
 
     permissionSubjects(input: TaskInput): SubjectRequest[] {
       const target =
-        selectedAgent(input) !== undefined
-          ? `external:${selectedAgent(input)?.name}`
-          : input.tools !== undefined
-            ? "custom"
-            : (input.preset ??
-              profiles.find((profile) => profile.name === input.profile)?.tools ??
-              "general");
+        input.worker !== undefined
+          ? // ADR-0127 第五阶段：worker 续派主体无法在权限判定的同步阶段解析出
+            // 精确 agent 名（worker 记录需异步读盘）。用占位后缀 worker 表示
+            // 「worker 续派」这一具体动作——命中通配规则 `subagent external:*`，
+            // 与原外部调用同样默认 ask；用户可写 `subagent external:worker → allow`
+            // 精确放行续派，或写 `subagent external:* → allow` 一并放行。
+            "external:worker"
+          : selectedAgent(input) !== undefined
+            ? `external:${selectedAgent(input)?.name}`
+            : input.tools !== undefined
+              ? "custom"
+              : (input.preset ??
+                profiles.find((profile) => profile.name === input.profile)?.tools ??
+                "general");
       return [{ kind: "subagent", target }];
     },
 
@@ -265,11 +330,28 @@ export function createTaskTool(
       if (invalidReason !== undefined) return invalid(invalidReason);
       const timeoutMs = input.timeoutMs;
       const agent = selectedAgent(input);
+      // ADR-0127 第五阶段：worker 续派——agent 名由 worker 记录决定，
+      // 但本层仍要传 worker id 让 connector 走恢复路径。Core 装配侧的
+      // externalRunner 接受 agent+worker 二选一（互斥已在 validateInput 校验）。
+      if (input.worker !== undefined && externalAgents !== undefined) {
+        return externalAgents.run(
+          {
+            task: input.task,
+            workerId: input.worker,
+            ...(input.mcpServers !== undefined ? { mcpServers: input.mcpServers } : {}),
+            ...((timeoutMs ?? defaultTimeoutMs) !== undefined
+              ? { timeoutMs: timeoutMs ?? defaultTimeoutMs }
+              : {}),
+          },
+          ctx,
+        );
+      }
       if (agent !== undefined && externalAgents !== undefined) {
         return externalAgents.run(
           {
             agent: agent.name,
             task: input.task,
+            ...(input.mcpServers !== undefined ? { mcpServers: input.mcpServers } : {}),
             ...((timeoutMs ?? defaultTimeoutMs) !== undefined
               ? { timeoutMs: timeoutMs ?? defaultTimeoutMs }
               : {}),

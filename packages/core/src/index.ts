@@ -26,6 +26,7 @@ import type {
   McpProbeResult,
   McpSaveInput,
   McpServerOverview,
+  McpValue,
 } from "./protocol/index.js";
 
 import {
@@ -341,6 +342,7 @@ import {
   SUITE_COORDINATOR_TOOL_NAMES,
   type SuiteController,
 } from "./suites/index.js";
+import { createExternalWorkerStore } from "./external-workers/store.js";
 import {
   residentCallId,
   residentKindOf,
@@ -1572,6 +1574,16 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
   });
   const suiteStore = createSuiteStore(platform, nocturneHome);
+  // ADR-0127 第五阶段：Core 侧读取 worker 记录以做启用校验与权限主体精确化；
+  // 持久化写入由 connector 完成（同一份磁盘数据，按 workerId 寻址）。
+  const externalWorkerStore = createExternalWorkerStore({
+    fs: platform.fs,
+    paths,
+    dir: paths.join(nocturneHome, "external-workers"),
+    onCorrupt: (workerId, reason) => {
+      diagnostics.record("external_worker.store_corrupt", { workerId, reason });
+    },
+  });
   const subagentObservation = createSubagentObservation({
     platform,
     sessionsDir,
@@ -2872,6 +2884,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     }
     const mcpServerConfigs: McpServerConfig[] = [...configuredMcpServerConfigs, ...hostMcpServers];
+    // ADR-0127 第五阶段：外部派工按任务注入时的名字解析池。
+    // 初始为会话装配池；配置重载的 reconcile 分支同步更新，
+    // 使"会话当前可用的 MCP 服务器"语义在会话期内保持鲜活。
+    let latestMcpPool: readonly McpServerConfig[] = mcpServerConfigs;
     let mcpSession: McpSession | undefined;
     const recordMcpAvailability = async (signal: AbortSignal): Promise<void> => {
       if (signal.aborted || meta.parent !== undefined || mcpSession === undefined) return;
@@ -3090,7 +3106,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
             sessionPlugins = nextPlugins;
             refreshSessionExternalAgents();
             if (mcpSession !== undefined) {
-              await mcpSession.reconcile([
+              const nextPool: McpServerConfig[] = [
                 ...(options.mcpServers ?? []),
                 ...next.map((s) => ({ ...s.entry, name: s.name, origin: s.origin, dir: s.dir })),
                 ...nextPlugins.mcpServers.map((s) => ({
@@ -3100,7 +3116,11 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                   pluginId: s.pluginId,
                   ...(s.cache !== undefined ? { pluginCache: s.cache } : {}),
                 })),
-              ]);
+              ];
+              // ADR-0127 第五阶段：同步外部派工注入的解析池——
+              // 宿主注入条目会话期恒定，追加在配置池之后（reconcile 内部保留它们）。
+              latestMcpPool = [...nextPool, ...hostMcpServers];
+              await mcpSession.reconcile(nextPool);
             }
           }
           if (mcpSession === undefined) return;
@@ -3570,6 +3590,85 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       },
     };
 
+    /**
+     * ADR-0127 第五阶段：把 task.mcpServers 的名字列表解析为可上线的注入配置。
+     *
+     * 语义与 MCP 连接器的 expandEnv 对齐：明文值做 ${NAME} 环境变量展开，
+     * `{ stored: true }` 凭据按服务器来源解析（host 来源只读会话级内存凭据，
+     * 严禁回退用户凭据库；其余来源用用户凭据库 fresh 读取）。解析结果
+     * 只在内存中传给 connector、序列化进目标 worker 的 session/new|load 请求，
+     * 不写盘、不入事件/诊断/transcript。每次派工重新解析——凭据轮换后
+     * 下一次任务自然取到新值，worker 记录永不持久化凭据。
+     *
+     * 隔离边界：只有本任务显式列出的服务器被物化并随请求发出；
+     * 未列出的会话服务器不进入外部进程，其他 worker 既看不到也调不到。
+     */
+    const materializeSessionMcpServers = async (
+      names: readonly string[],
+    ): Promise<{ servers?: McpServerConfig[]; error?: string }> => {
+      const pool = latestMcpPool.filter((server) => server.enabled !== false);
+      const resolved: McpServerConfig[] = [];
+      const seen = new Set<string>();
+      for (const rawName of names) {
+        const key = rawName.trim().toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const server = pool.find((candidate) => candidate.name.toLowerCase() === key);
+        if (server === undefined) {
+          const available = pool.map((candidate) => candidate.name).join(", ") || "无";
+          return {
+            error:
+              `会话中没有名为 ${rawName} 的 MCP 服务器，无法按任务注入；` +
+              `当前会话可用：${available}`,
+          };
+        }
+        const materializeValues = async (
+          values: Record<string, McpValue> | undefined,
+          kind: "env" | "headers",
+        ): Promise<{ values?: Record<string, McpValue>; error?: string }> => {
+          if (values === undefined) return {};
+          const out: Record<string, McpValue> = {};
+          for (const [entryName, value] of Object.entries(values)) {
+            if (typeof value === "string") {
+              const expanded = value.replaceAll(
+                /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
+                (_match, envName: string) => platform.env(envName) ?? "",
+              );
+              out[entryName] = expanded;
+              continue;
+            }
+            const id = `mcp/${server.name}/${server.type === "http" ? entryName.toLowerCase() : entryName}`;
+            const secret =
+              server.origin === "host"
+                ? await sessionMcp?.credentials?.get(id)
+                : await config?.credentials?.get(id, { fresh: true });
+            if (secret === undefined) {
+              return {
+                error:
+                  `MCP 服务器 ${server.name} 缺少凭据 ${entryName}，` +
+                  `无法完整注入外部 worker（不注入残缺工具）`,
+              };
+            }
+            out[entryName] = secret;
+          }
+          return { values: out };
+        };
+        if ((server.type ?? "stdio") === "http") {
+          const headers = await materializeValues(server.headers, "headers");
+          if (headers.error !== undefined) return { error: headers.error };
+          resolved.push({
+            ...server,
+            ...(headers.values !== undefined ? { headers: headers.values } : {}),
+          });
+        } else {
+          const env = await materializeValues(server.env, "env");
+          if (env.error !== undefined) return { error: env.error };
+          resolved.push({ ...server, ...(env.values !== undefined ? { env: env.values } : {}) });
+        }
+      }
+      return { servers: resolved };
+    };
+
     const installTask = (): void => {
       enabledExternalAgents =
         externalConnector === undefined
@@ -4021,12 +4120,52 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           ? {
               agents: agentSnapshot,
               async run(
-                request: Pick<ExternalAgentRequest, "agent" | "task" | "timeoutMs">,
+                request:
+                  | (Pick<ExternalAgentRequest, "agent" | "task" | "timeoutMs"> & {
+                      mcpServers?: string[] | undefined;
+                    })
+                  | (Pick<ExternalAgentRequest, "task" | "timeoutMs"> & {
+                      workerId: string;
+                      mcpServers?: string[] | undefined;
+                    }),
                 ctx: ToolContext,
               ) {
-                const agentConfig = agentSnapshot.find((agent) => agent.name === request.agent);
+                // ADR-0127 第五阶段：续派路径先按 workerId 解析 worker 记录得到 agent 名，
+                // 再走与同 agent 一次性调用相同的启用校验、并发槽、权限 gate、connector 路径。
+                // 记录不存在/损坏/不匹配由 connector 报错（worker_not_found / worker_mismatch），
+                // 这里只读出 agent 名做启用校验与权限主体精确化。
+                let resolvedAgentName: string;
+                let workerId: string | undefined;
+                let workerRecord:
+                  | Awaited<ReturnType<typeof externalWorkerStore.read>>
+                  | undefined;
+                if ("workerId" in request && request.workerId !== undefined) {
+                  workerId = request.workerId;
+                  workerRecord = await externalWorkerStore.read(workerId);
+                  if (workerRecord === undefined) {
+                    const message = `外部 worker ${workerId} 不存在或记录已损坏`;
+                    return {
+                      status: "error" as const,
+                      modelContent: message,
+                      error: { code: "worker_not_found", message },
+                    };
+                  }
+                  resolvedAgentName = workerRecord.agentName;
+                } else if ("agent" in request) {
+                  resolvedAgentName = request.agent;
+                } else {
+                  const message = `外部调用缺少 agent 或 workerId`;
+                  return {
+                    status: "error" as const,
+                    modelContent: message,
+                    error: { code: "invalid_input", message },
+                  };
+                }
+                const agentConfig = agentSnapshot.find(
+                  (agent) => agent.name === resolvedAgentName,
+                );
                 if (agentConfig === undefined) {
-                  const message = `外部 agent ${request.agent} 未启用`;
+                  const message = `外部 agent ${resolvedAgentName} 未启用`;
                   return {
                     status: "error" as const,
                     modelContent: message,
@@ -4042,6 +4181,22 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                   };
                 }
                 try {
+                  // ADR-0127 第五阶段：按任务显式限定的注入 MCP——
+                  // 仅当调用方给出名字列表时解析物化；缺省沿用既有空注入。
+                  // 每次派工（新建或恢复）重新解析：恢复只绑定当前任务明确
+                  // 提供的工具，worker 首次创建时的注入不残留到后续任务。
+                  let sessionMcpServers: McpServerConfig[] | undefined;
+                  if (request.mcpServers !== undefined) {
+                    const materialized = await materializeSessionMcpServers(request.mcpServers);
+                    if (materialized.error !== undefined) {
+                      return {
+                        status: "error" as const,
+                        modelContent: materialized.error,
+                        error: { code: "invalid_input", message: materialized.error },
+                      };
+                    }
+                    sessionMcpServers = materialized.servers;
+                  }
                   const externalGate = createPolicyGate(
                     {
                       evaluate: (subjects, evaluationOptions) =>
@@ -4065,7 +4220,14 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                     agentConfig,
                     {
                       ...request,
-                      cwd: currentWorkspaceRoot(),
+                      // ADR-0127 第五阶段：worker 路径的 request 不带 agent 字段，
+                      // 用 worker 记录解析出的 agent 名补齐；workerId 一并传给 connector。
+                      agent: agentConfig.name,
+                      ...(workerId !== undefined ? { workerId } : {}),
+                      // worker 续派沿 worker 的原工作树——它的所有路径上下文都已
+                      // 绑定到创建时的 cwd；首次调用则用当前会话工作区。
+                      cwd: workerRecord?.cwd ?? currentWorkspaceRoot(),
+                      ...(sessionMcpServers !== undefined ? { sessionMcpServers } : {}),
                       transcriptPath: paths.join(
                         sessionsDir,
                         "attachments",
@@ -9177,6 +9339,14 @@ export {
   type LocalPluginCheckOptions,
   type LocalPluginCheckResult,
 } from "./plugins/check.js";
+export {
+  createExternalWorkerStore,
+  createWorkerId,
+  EXTERNAL_WORKER_FORMAT_VERSION,
+  isWorkerId,
+  type ExternalWorkerRecord,
+  type ExternalWorkerStore,
+} from "./external-workers/store.js";
 export {
   createMcpOnDemandTools,
   estimateMcpToolsTokens,
