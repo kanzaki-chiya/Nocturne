@@ -8,6 +8,7 @@ import {
   ensembleEnabledModelsTable,
   type EnsembleAuthorKind,
   type EnsembleMemberStatus,
+  type EnsembleOverview,
   type ModelPricing,
   type ReasoningEffort,
   type SubagentProfileConfig,
@@ -94,6 +95,18 @@ export interface EnsembleReadOutput {
   posts: EnsembleReadPostItem[];
   hasMore: boolean;
   members: EnsembleReadMemberItem[];
+  /**
+   * 指挥维护的合奏概览快照（ADR-0131）：完整结构与当前 revision。
+   * 旧合奏从未写入概览时缺省。
+   */
+  overview?: EnsembleOverview | undefined;
+}
+
+/** `ensemble_overview` 更新成功后的返回值 */
+export interface EnsembleOverviewWriteOutput {
+  revision: number;
+  /** true 表示输入与最后一次成功更新完全相同，按幂等重试处理（未新增 revision） */
+  deduplicated: boolean;
 }
 
 export const ENSEMBLE_READ_DEFAULT_LIMIT = 20;
@@ -115,6 +128,7 @@ export interface EnsembleMaestroToolHandlers {
     text: string;
   }): Promise<EnsembleToolActionResult<{ number: number; recipients: string[] }>>;
   read(input: EnsembleReadInput): Promise<EnsembleToolActionResult<EnsembleReadOutput>>;
+  overview(input: unknown): Promise<EnsembleToolActionResult<EnsembleOverviewWriteOutput>>;
   changeModel(input: {
     name: string;
     model?: string | undefined;
@@ -152,6 +166,7 @@ export const ENSEMBLE_MAESTRO_TOOL_NAMES = [
   "ensemble_add_member",
   "ensemble_post",
   "ensemble_read",
+  "ensemble_overview",
   "ensemble_change_model",
   "ensemble_remove_member",
   "ensemble_end",
@@ -262,6 +277,8 @@ export function createEnsembleMaestroTools(
   const postTool = createEnsemblePostTool((input) => handlers.post(input));
   const readTool = createEnsembleReadTool((input) => handlers.read(input));
 
+  const overviewTool = createEnsembleOverviewTool((input) => handlers.overview(input));
+
   const changeModelTool: ToolDefinition<{
     name: string;
     model?: string;
@@ -342,7 +359,139 @@ export function createEnsembleMaestroTools(
     },
   };
 
-  return [initTool, addMemberTool, postTool, readTool, changeModelTool, removeMemberTool, endTool];
+  return [
+    initTool,
+    addMemberTool,
+    postTool,
+    readTool,
+    overviewTool,
+    changeModelTool,
+    removeMemberTool,
+    endTool,
+  ];
+}
+
+/**
+ * 指挥专用的概览维护工具（ADR-0131 §3）。输入为非平凡的增量结构，
+ * 深层规范化与校验在控制器内完成并一次性返回全部错误，保证失败时零写入。
+ */
+export function createEnsembleOverviewTool(
+  update: (input: unknown) => Promise<EnsembleToolActionResult<EnsembleOverviewWriteOutput>>,
+): ToolDefinition {
+  const lineUpdateSchema = {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Stable line id; reused ids update in place." },
+      title: { type: "string", description: "Line title (required for new lines)." },
+      owner: {
+        type: "string",
+        description: 'Owner: a member name or "maestro" (required for new lines).',
+      },
+      post: {
+        type: ["integer", "null"],
+        description: "Optional source post number; null clears it.",
+      },
+      progress: {
+        type: ["object", "null"],
+        description: "Current progress snapshot; null clears it.",
+        properties: {
+          text: { type: "string", description: "Progress summary in the ensemble's working language." },
+          post: { type: "integer", description: "Optional source post number for this progress." },
+          wait: { type: "boolean", description: "True when the line is blocked or waiting on someone." },
+        },
+        additionalProperties: false,
+      },
+      before: {
+        type: "string",
+        description:
+          "Insert or move this line before the given line id. The target must already exist or appear earlier in this update's lines array. Omit to keep position (existing) or append (new).",
+      },
+    },
+    required: ["id"],
+    additionalProperties: false,
+  };
+  const taskUpdateSchema = {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Stable task id; reused ids update in place (idempotent retries never duplicate)." },
+      line: { type: "string", description: "Id of the line this task belongs to." },
+      title: { type: "string", description: "Task title (required for new tasks)." },
+      status: {
+        type: "string",
+        enum: ["todo", "work", "wait", "done"],
+        description: "Task status (required for new tasks).",
+      },
+      owner: {
+        type: "string",
+        description: 'Owner: a member name or "maestro" (required for new tasks).',
+      },
+      post: {
+        type: ["integer", "null"],
+        description: "Optional source post number; null clears it.",
+      },
+    },
+    required: ["id", "line"],
+    additionalProperties: false,
+  };
+  return {
+    name: "ensemble_overview",
+    description: [
+      "Update the ensemble overview board (goal, checkpoints, ordered work lines, and tasks) that the user sees in real time.",
+      "You own this board: write the initial plan right after decomposing, and update it whenever tasks are dispatched, make progress, get blocked, or finish — including member posts you receive.",
+      "- `base` is required: pass the `revision` from your latest overview read (via `ensemble_read`); use `base: 0` for the very first update. A mismatched `base` is rejected so stale updates never overwrite newer progress — read again and reapply.",
+      "- Lines and tasks are upserts keyed by stable `id`: the same `id` updates in place and retries never duplicate entries. `removeLines`/`removeTasks` delete by id (removing a line also removes its tasks).",
+      "- Everything validates atomically before writing: all errors are reported together and failed updates write nothing.",
+      "- `post` references must point to posts that already exist on the board.",
+      "- Keep it concise and current; do not cap the number of lines or tasks artificially.",
+    ].join("\n"),
+    inputSchema: {
+      type: "object",
+      properties: {
+        base: {
+          type: "integer",
+          minimum: 0,
+          description:
+            "The `revision` from your latest overview read; 0 before the first update. Guards against overwriting newer progress.",
+        },
+        goal: {
+          type: ["string", "null"],
+          description: "Full replacement of the ensemble goal; null clears it.",
+        },
+        checkpoints: {
+          type: "array",
+          items: { type: "string" },
+          description: "Full replacement of the checkpoint list.",
+        },
+        lines: {
+          type: "array",
+          items: lineUpdateSchema,
+          description: "Line upserts applied in array order.",
+        },
+        tasks: {
+          type: "array",
+          items: taskUpdateSchema,
+          description: "Task upserts applied in array order.",
+        },
+        removeLines: {
+          type: "array",
+          items: { type: "string" },
+          description: "Line ids to remove (their tasks are removed too).",
+        },
+        removeTasks: {
+          type: "array",
+          items: { type: "string" },
+          description: "Task ids to remove.",
+        },
+      },
+      required: ["base"],
+      additionalProperties: false,
+    },
+    traits: ENSEMBLE_TOOL_TRAITS,
+    permissionSubjects: () => [],
+    async execute(input) {
+      return toToolResult(await update(input));
+    },
+  };
 }
 
 export function createEnsemblePostTool(

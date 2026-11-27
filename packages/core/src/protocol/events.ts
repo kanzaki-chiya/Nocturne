@@ -11,6 +11,7 @@ import type {
   EnsembleMemberModelChangedPayload,
   EnsembleMemberRemovedPayload,
   EnsembleMemberUpdatedPayload,
+  EnsembleOverviewUpdatedPayload,
   EnsemblePostDelivery,
   EnsemblePostedPayload,
 } from "./ensemble.js";
@@ -518,6 +519,7 @@ export interface DurablePayloadMap {
   "ensemble.posted": EnsemblePostedPayload;
   "ensemble.member_model_changed": EnsembleMemberModelChangedPayload;
   "ensemble.member_removed": EnsembleMemberRemovedPayload;
+  "ensemble.overview_updated": EnsembleOverviewUpdatedPayload;
   "ensemble.ended": EnsembleEndedPayload;
   "suite.thread_started": SuiteThreadStartedPayload;
   "suite.thread_reported": SuiteThreadReportedPayload;
@@ -642,6 +644,7 @@ export const DURABLE_EVENT_TYPES: readonly DurableType[] = [
   "ensemble.posted",
   "ensemble.member_model_changed",
   "ensemble.member_removed",
+  "ensemble.overview_updated",
   "ensemble.ended",
   "suite.thread_started",
   "suite.thread_reported",

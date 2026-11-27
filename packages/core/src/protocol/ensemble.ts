@@ -86,6 +86,201 @@ export interface EnsembleEndedPayload {
   unmerged?: EnsembleUnmergedWorktree[] | undefined;
 }
 
+// ── 合奏概览（ADR-0131）────────────────────────────────────
+
+/** 合奏概览任务状态；显示顺序固定 待办→进行中→等待→完成 */
+export type EnsembleTaskStatus = "todo" | "work" | "wait" | "done";
+
+/**
+ * 概览中的负责人引用本场身份（ADR-0131 §2）：
+ * "maestro" 表示指挥本人，其余为成员名；已移除成员的名字继续保留在历史负责人上。
+ */
+export type EnsembleOwnerRef = string;
+
+/** 工作线当前进展（可选）；`wait` 为 true 时界面以阻塞样式显示 */
+export interface EnsembleLineProgress {
+  text: string;
+  /** 进展来源帖号（可选，1 起） */
+  post?: number | undefined;
+  /** 阻塞/等待标记 */
+  wait?: boolean | undefined;
+}
+
+/** 概览任务：稳定 ID 持久，标题、状态、负责人与来源可更新 */
+export interface EnsembleTask {
+  id: string;
+  title: string;
+  status: EnsembleTaskStatus;
+  owner: EnsembleOwnerRef;
+  /** 来源帖号（可选，1 起） */
+  post?: number | undefined;
+}
+
+/** 有序工作线；任务在线内按创建顺序排列 */
+export interface EnsembleLine {
+  id: string;
+  title: string;
+  owner: EnsembleOwnerRef;
+  /** 工作线来源帖号（可选，1 起） */
+  post?: number | undefined;
+  progress?: EnsembleLineProgress | undefined;
+  tasks: EnsembleTask[];
+}
+
+/**
+ * 合奏概览（ADR-0131 §2）。指挥显式维护；`revision` 随每次接受的更新递增（首次为 1）。
+ * 从未写入概览时整个字段缺省——这也是旧合奏的降级入口。
+ */
+export interface EnsembleOverview {
+  revision: number;
+  goal?: string | undefined;
+  checkpoints: string[];
+  lines: EnsembleLine[];
+}
+
+export interface EnsembleOverviewLineDelta {
+  id: string;
+  title?: string | undefined;
+  owner?: string | undefined;
+  /** null 表示清除来源帖引用 */
+  post?: number | null | undefined;
+  /** null 表示清除进展 */
+  progress?: EnsembleLineProgress | null | undefined;
+  /** 移动/插入到该线之前；省略时新线排到末尾、既有线保持原位 */
+  before?: string | undefined;
+}
+
+export interface EnsembleOverviewTaskDelta {
+  id: string;
+  line: string;
+  title?: string | undefined;
+  status?: EnsembleTaskStatus | undefined;
+  owner?: string | undefined;
+  /** null 表示清除来源帖引用 */
+  post?: number | null | undefined;
+}
+
+/**
+ * `ensemble.overview_updated` 持久事件 payload（ADR-0131 §4）：
+ * 规范化后的概览增量。应用顺序固定为「先移除线（级联删除其任务）→ 移除任务 →
+ * 线 upsert（按数组顺序，`before` 立即生效）→ 任务 upsert」；校验已在写入前完成。
+ */
+export interface EnsembleOverviewUpdatedPayload {
+  /** 本次接受后的 revision；首次写入为 1 */
+  revision: number;
+  /** 规范化输入的 sha256（幂等重试识别，跨重启可用） */
+  fingerprint: string;
+  /** 完整替换目标；null 表示清除 */
+  goal?: string | null | undefined;
+  /** 完整替换检查点列表（元素已 trim 且非空） */
+  checkpoints?: string[] | undefined;
+  lines?: EnsembleOverviewLineDelta[] | undefined;
+  tasks?: EnsembleOverviewTaskDelta[] | undefined;
+  removeLines?: string[] | undefined;
+  removeTasks?: string[] | undefined;
+}
+
+/** 应用一条规范化概览增量（纯函数；reducer 与控制器共用，调用方负责先校验） */
+export function applyOverviewDelta(
+  overview: EnsembleOverview | undefined,
+  delta: EnsembleOverviewUpdatedPayload,
+): EnsembleOverview {
+  const next: EnsembleOverview = {
+    revision: delta.revision,
+    ...(overview?.goal !== undefined ? { goal: overview.goal } : {}),
+    checkpoints: overview !== undefined ? [...overview.checkpoints] : [],
+    lines:
+      overview !== undefined
+        ? overview.lines.map((line) => ({
+            ...line,
+            ...(line.progress !== undefined ? { progress: { ...line.progress } } : {}),
+            tasks: line.tasks.map((task) => ({ ...task })),
+          }))
+        : [],
+  };
+  if (delta.goal !== undefined) {
+    if (delta.goal === null) delete next.goal;
+    else next.goal = delta.goal;
+  }
+  if (delta.checkpoints !== undefined) next.checkpoints = [...delta.checkpoints];
+  const removeLines = new Set(delta.removeLines ?? []);
+  if (removeLines.size > 0) next.lines = next.lines.filter((line) => !removeLines.has(line.id));
+  const removeTasks = new Set(delta.removeTasks ?? []);
+  if (removeTasks.size > 0) {
+    for (const line of next.lines) {
+      line.tasks = line.tasks.filter((task) => !removeTasks.has(task.id));
+    }
+  }
+  for (const update of delta.lines ?? []) {
+    let line = next.lines.find((item) => item.id === update.id);
+    if (line === undefined) {
+      line = {
+        id: update.id,
+        title: update.title ?? "",
+        owner: update.owner ?? "",
+        tasks: [],
+        ...(update.post !== undefined && update.post !== null ? { post: update.post } : {}),
+        ...(update.progress !== undefined && update.progress !== null
+          ? { progress: { ...update.progress } }
+          : {}),
+      };
+      const at =
+        update.before !== undefined
+          ? next.lines.findIndex((item) => item.id === update.before)
+          : -1;
+      next.lines.splice(at < 0 ? next.lines.length : at, 0, line);
+      continue;
+    }
+    if (update.title !== undefined) line.title = update.title;
+    if (update.owner !== undefined) line.owner = update.owner;
+    if (update.post !== undefined) {
+      if (update.post === null) delete line.post;
+      else line.post = update.post;
+    }
+    if (update.progress !== undefined) {
+      if (update.progress === null) delete line.progress;
+      else line.progress = { ...update.progress };
+    }
+    if (update.before !== undefined) {
+      const from = next.lines.indexOf(line);
+      if (from >= 0) next.lines.splice(from, 1);
+      const at = next.lines.findIndex((item) => item.id === update.before);
+      next.lines.splice(at < 0 ? next.lines.length : at, 0, line);
+    }
+  }
+  for (const update of delta.tasks ?? []) {
+    const line = next.lines.find((item) => item.id === update.line);
+    if (line === undefined) continue;
+    let task = next.lines
+      .flatMap((item) => item.tasks)
+      .find((item) => item.id === update.id);
+    if (task !== undefined) {
+      const origin = next.lines.find((item) => item.tasks.some((t) => t.id === update.id));
+      if (origin !== undefined && origin !== line) {
+        origin.tasks = origin.tasks.filter((item) => item.id !== update.id);
+        line.tasks.push(task);
+      }
+    } else {
+      task = {
+        id: update.id,
+        title: update.title ?? "",
+        status: update.status ?? "todo",
+        owner: update.owner ?? "",
+        ...(update.post !== undefined && update.post !== null ? { post: update.post } : {}),
+      };
+      line.tasks.push(task);
+    }
+    if (update.title !== undefined) task.title = update.title;
+    if (update.status !== undefined) task.status = update.status;
+    if (update.owner !== undefined) task.owner = update.owner;
+    if (update.post !== undefined) {
+      if (update.post === null) delete task.post;
+      else task.post = update.post;
+    }
+  }
+  return next;
+}
+
 // ── 指挥会话临时事件 payload ──────────────────────────────
 
 export interface EnsembleMemberPermission {
@@ -184,6 +379,8 @@ export interface EnsembleView {
   /** 当前在等待用户确认权限的成员名列表（ADR-0089 §8） */
   awaitingPermissionMembers: string[];
   posts: EnsemblePostView[];
+  /** 指挥维护的概览（ADR-0131）；从未写入时缺省，旧合奏客户端据此降级显示 */
+  overview?: EnsembleOverview | undefined;
 }
 
 // ── 名字校验与提及解析 ──────────────────────────────────────
@@ -621,6 +818,12 @@ export function reduceEnsembleDurable(
           p.reason !== undefined ? { kind: "removed", reason: p.reason } : { kind: "removed" };
         recomputeAwaitingPermissionMembers(ensemble);
       }
+      return ensemble;
+    }
+    case "ensemble.overview_updated": {
+      if (ensemble === undefined) return undefined;
+      // 已规范化并校验过的增量直接应用；结束后不再接收新事件，快照保持只读（ADR-0131 §5）
+      ensemble.overview = applyOverviewDelta(ensemble.overview, event.payload);
       return ensemble;
     }
     case "ensemble.ended": {

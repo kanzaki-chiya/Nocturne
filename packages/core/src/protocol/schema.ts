@@ -590,6 +590,45 @@ const payloadSchemas = {
     name: z.string(),
     reason: z.string().optional(),
   }),
+  "ensemble.overview_updated": z.object({
+    revision: z.number().int().positive(),
+    fingerprint: z.string(),
+    goal: z.string().nullable().optional(),
+    checkpoints: z.array(z.string()).optional(),
+    lines: z
+      .array(
+        z.object({
+          id: z.string(),
+          title: z.string().optional(),
+          owner: z.string().optional(),
+          post: z.number().int().positive().nullable().optional(),
+          progress: z
+            .object({
+              text: z.string(),
+              post: z.number().int().positive().optional(),
+              wait: z.boolean().optional(),
+            })
+            .nullable()
+            .optional(),
+          before: z.string().optional(),
+        }),
+      )
+      .optional(),
+    tasks: z
+      .array(
+        z.object({
+          id: z.string(),
+          line: z.string(),
+          title: z.string().optional(),
+          status: z.enum(["todo", "work", "wait", "done"]).optional(),
+          owner: z.string().optional(),
+          post: z.number().int().positive().nullable().optional(),
+        }),
+      )
+      .optional(),
+    removeLines: z.array(z.string()).optional(),
+    removeTasks: z.array(z.string()).optional(),
+  }),
   "ensemble.ended": z.object({
     reason: z.enum(["maestro", "user", "rewound"]),
     summary: z.string().optional(),
@@ -700,6 +739,7 @@ export const durableEventSchema = z.discriminatedUnion("type", [
   envelope("ensemble.posted", payloadSchemas["ensemble.posted"]),
   envelope("ensemble.member_model_changed", payloadSchemas["ensemble.member_model_changed"]),
   envelope("ensemble.member_removed", payloadSchemas["ensemble.member_removed"]),
+  envelope("ensemble.overview_updated", payloadSchemas["ensemble.overview_updated"]),
   envelope("ensemble.ended", payloadSchemas["ensemble.ended"]),
   envelope("suite.thread_started", payloadSchemas["suite.thread_started"]),
   envelope("suite.thread_reported", payloadSchemas["suite.thread_reported"]),

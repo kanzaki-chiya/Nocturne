@@ -74,6 +74,24 @@ describe("Ensemble RPC 方法与成员子会话通道", { timeout: 20_000 }, () 
             { type: "finish", reason: "tool_calls" },
           ];
         }
+        // ADR-0131：概览写入后第二批请求触发；验证 RPC 订阅推送的视图含概览结构
+        if (!req.messages.some((m) => m.role === "tool" && typeof m.content === "string" && m.content.includes("Overview updated to revision 1"))) {
+          return [
+            {
+              type: "tool_call",
+              toolCallId: "ov1",
+              name: "ensemble_overview",
+              input: {
+                base: 0,
+                goal: "RPC 概览",
+                checkpoints: ["写入 rpc-out.txt"],
+                lines: [{ id: "l1", title: "写入", owner: "writer" }],
+                tasks: [{ id: "t1", line: "l1", title: "写 rpc-out.txt", status: "work", owner: "writer" }],
+              },
+            },
+            { type: "finish", reason: "tool_calls" },
+          ];
+        }
         return textScript("maestro ack");
       },
     });
@@ -111,6 +129,15 @@ describe("Ensemble RPC 方法与成员子会话通道", { timeout: 20_000 }, () 
       expect(view.ensemble?.status).toBe("active");
       expect(view.ensemble?.members).toHaveLength(2);
     });
+
+    // ADR-0131：概览经持久事件进 RPC 订阅推送，客户端本地 reducer 还原完整结构
+    await vi.waitFor(() => {
+      expect(view.ensemble?.overview?.revision).toBe(1);
+    });
+    expect(view.ensemble?.overview?.goal).toBe("RPC 概览");
+    expect(view.ensemble?.overview?.checkpoints).toEqual(["写入 rpc-out.txt"]);
+    expect(view.ensemble?.overview?.lines[0]?.title).toBe("写入");
+    expect(view.ensemble?.overview?.lines[0]?.tasks[0]?.status).toBe("work");
 
     // 用户经 RPC 发帖 @writer -> 触发 default 预设下的权限确认冒泡
     const posted = await coord.postToEnsemble({ text: "@writer please write rpc-out.txt" });
