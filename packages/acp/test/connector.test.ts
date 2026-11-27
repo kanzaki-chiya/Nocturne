@@ -1050,9 +1050,13 @@ describe("ADR-0127 第五阶段：worker 续派", () => {
     // 用它的 pid 构造锁——避免硬编码 pid 在 Windows 上被 process.kill(pid, 0)
     // 误判为存活（pid 复用/系统保留进程行为不确定）。
     const { spawn } = await import("node:child_process");
-    const deadPid = await new Promise((resolve, reject) => {
+    const deadPid = await new Promise<number>((resolve, reject) => {
       const probe = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
       const pid = probe.pid;
+      if (pid === undefined) {
+        reject(new Error("probe spawn 未分配 pid"));
+        return;
+      }
       probe.on("close", () => resolve(pid));
       probe.on("error", reject);
     });
