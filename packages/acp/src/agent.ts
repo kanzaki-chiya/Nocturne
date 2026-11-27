@@ -1809,11 +1809,40 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     const toolStarted = new Map<string, { name: string; input: unknown }>();
     const pendingTools = new Map<string, { name: string; input: unknown }>();
 
+    // ADR-0127 第三阶段返工·恢复可见问题：文本退化路径的问题块是当轮临时
+    // agent_message_chunk（不持久化），但 handoff 的 ask_user 输入（含完整 questions）
+    // 随 tool.started.input 持久化。恢复回放时从 input 重建同一份问题展示——
+    // 用户在提问后、回答前重开会话仍能看到问题与选项；历史恰一份、不重新发
+    // elicitation（这里只是历史投影，不触发任何新的提问请求）。
+    const handoffQuestionText = (
+      ev: RuntimeEvent & { type: "tool.completed" },
+      input: unknown,
+    ): string | undefined => {
+      if (ev.payload.error?.code !== "handoff_suspended") return undefined;
+      if (ev.payload.name !== "ask_user") return undefined;
+      const questions = (input as { questions?: unknown } | undefined)?.questions;
+      if (!Array.isArray(questions) || questions.length === 0) return undefined;
+      try {
+        return formatTextQuestions(questions as readonly QuestionItem[]);
+      } catch {
+        return undefined;
+      }
+    };
+
     const flushTool = (callId: string, ev: RuntimeEvent & { type: "tool.completed" }): void => {
       const started = toolStarted.get(callId);
       const name = started?.name ?? ev.payload.name;
       const input = started?.input;
       const status = mapToolCompletedStatus(ev.payload.status);
+      // 先投影 handoff 问题文本（在 tool_call 帧之前），使用户先看到问题、再看到
+      // 该提问工具帧——与当轮「agent_message_chunk 问题块先于工具结算」的时序一致。
+      const handoffText = handoffQuestionText(ev, input);
+      if (handoffText !== undefined) {
+        entry.enqueueUpdate({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: `${handoffText}\n` },
+        });
+      }
       const text =
         ev.payload.modelContent.length > 0
           ? ev.payload.modelContent

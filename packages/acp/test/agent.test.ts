@@ -2159,9 +2159,12 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
     expect(text2).toContain("问题X");
   });
 
-  it("session/load 不重新弹出已结束的 ask_user：handoff 后的 interrupted 工具帧终态", async () => {
-    // 文本退化路径：handoff 结束后 ask_user tool.completed(error/handoff_suspended)，
-    // 若进程退出，恢复修复会写 interrupted；session/load 不应重新弹出提问。
+  it("提问后、回答前重开会话：恢复回放仍能看到问题与选项，恰一份且不重发 elicitation", async () => {
+    // ADR-0127 第三阶段返工·恢复可见问题：提问后、回答前重开会话，
+    // 用户仍应能看到此前的问题与选项；历史展示恰一份、不重新发 elicitation。
+    // 机制：文本退化路径的问题块是当轮临时 chunk（不持久化），但 handoff 的
+    // ask_user 输入（含完整 questions）随 tool.started.input 持久化——恢复回放时
+    // 从 input 重建同一份问题展示。
     const h = await startHarness({
       handler: async (req) => {
         if (req.messages.some((m) => m.role === "tool")) {
@@ -2204,12 +2207,21 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
       cwd: workspaceA,
       mcpServers: [],
     });
-    // load 之后没有新的 elicitation/create（退化路径本就不用），
-    // 也没有「再次发出问题 chunk 的 agent_message_chunk」——
-    // 历史回放里确实会出现原始文本（用户消息与 agent 文本），但不会出现新的
-    // handoff 后第二批相同问题 chunk。宽松的判定：load 之后的 update 数
-    // 与回放文本规模存在但有限——关键是 session 可继续 prompt。
-    expect(h.updates.length).toBeGreaterThan(updatesBefore);
+    // 确定性断言：load 回放中用户仍能看到此前的问题与选项
+    const loadUpdates = h.updates.slice(updatesBefore);
+    const loadText = JSON.stringify(loadUpdates);
+    expect(loadText).toContain("曾经的问题");
+    // 问题展示恰一份（不重复累积）——「曾经的问题」在 agent_message_chunk 中只出现一次，
+    // 且选项文本一并展示（A/B）
+    const questionChunks = loadUpdates.filter(
+      (u) =>
+        u.update.sessionUpdate === "agent_message_chunk" &&
+        JSON.stringify(u).includes("曾经的问题"),
+    );
+    expect(questionChunks.length).toBe(1);
+    const questionText = JSON.stringify(questionChunks[0]);
+    expect(questionText).toContain("1. A");
+    expect(questionText).toContain("2. B");
     // 新轮仍可正常进行
     const r = await h.conn.agent.request(methods.agent.session.prompt, {
       sessionId,
