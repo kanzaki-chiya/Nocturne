@@ -733,7 +733,7 @@ export async function runTurn(
         }
         // 注入的结束谓词（subagent.md 第 2 节）：调用方判定 Turn 已完成，
         // 正常 done 收尾——Agent Loop 不读工具名
-        if (deps.shouldFinish?.(session.state()) === true) {
+        if (deps.shouldFinish?.(session.state(), turnId) === true) {
           return await finish("done");
         }
         status("thinking");

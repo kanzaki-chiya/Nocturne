@@ -5318,6 +5318,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
               if (!refresh || meta.parent !== undefined) return;
               await prepareMcpBoundary(signal);
             },
+            // ADR-0127 第三阶段返工：宿主挂起的提问（handoff_suspended）使本 turn
+            // 有序收尾——交还控制、不再发起下一次推理或执行依赖答复的批内后续调用。
+            // broker 在 suspend 结算时登记 turnId；这里按结果语义（非工具名）判定，
+            // 与 loop guard / shouldFinish 注入点同一手法，不写工具名分支。
+            shouldFinish: (_state, turnId) =>
+              turnId !== undefined && questions.isTurnSuspended(turnId),
             // ADR-0076 §4.3：目标模式在 Turn 想结束时决定是否续跑
             ...(meta.parent === undefined ? { continueTurn: continueGoal } : {}),
             ...(residentChild !== undefined

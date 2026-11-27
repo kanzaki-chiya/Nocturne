@@ -91,6 +91,10 @@ export interface QuestionBrokerOptions {
 
 export function createQuestionBroker(options: QuestionBrokerOptions = {}): QuestionBroker {
   const pending = new Map<string, PendingQuestion>();
+  // ADR-0127 第三阶段返工：被宿主挂起的提问所属 turnId 集。
+  // suspend 结算时登记，供 Agent Loop 的 shouldFinish 注入点识别
+  // 「本 turn 已交还宿主」，从而有序收尾、不再发起下一次推理。
+  const suspendedTurns = new Set<string>();
   let counter = 0;
   const newRequestId =
     options.newRequestId ?? ((callId: string) => `q-${String(++counter)}-${callId}`);
@@ -167,11 +171,15 @@ export function createQuestionBroker(options: QuestionBrokerOptions = {}): Quest
     },
 
     suspend(requestId) {
-      if (!pending.has(requestId)) return "unknown_request";
+      const p = pending.get(requestId);
+      if (p === undefined) return "unknown_request";
+      suspendedTurns.add(p.turn.turnId);
       settle(requestId)?.resolve({ kind: "suspended" });
       return "ok";
     },
 
+    suspendedTurns: () => suspendedTurns.values(),
+    isTurnSuspended: (turnId: string) => suspendedTurns.has(turnId),
     pendingKeys() {
       return pending.keys();
     },

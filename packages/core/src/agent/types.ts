@@ -106,7 +106,7 @@ export interface TurnDeps {
    * - toolChoice：进入本 Turn 每个 ModelRequest（强制调用指定工具）
    */
   basePrompt?: string | undefined;
-  shouldFinish?: ((state: SessionState) => boolean) | undefined;
+  shouldFinish?: ((state: SessionState, turnId?: string) => boolean) | undefined;
   toolChoice?: { name: string } | undefined;
   /**
    * 本轮若由用户输入发起，提供 UserPromptSubmit 所需原文与技能调用参数（hooks.md）：

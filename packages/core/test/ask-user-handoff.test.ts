@@ -162,4 +162,102 @@ describe("ask_user 宿主挂起（r1126l / ADR-0127 第三阶段）", () => {
     await turn;
     await session.close();
   });
+
+  it("挂起后本轮有序收尾：不再发起下一次推理，依赖答复的合成写操作不落盘；新一轮按真实值继续", async () => {
+    // 测试 provider 用 handler 精确计数推理次数：
+    // 第 1 次推理发起 ask_user；之后即便模型「想」继续，运行时也不再请求。
+    // 若错误地在 handoff 轮内发起第 2 次推理，handler 会返回一个合成 write 调用；
+    // 该 write 在 default 权限预设下会请求审批——测试用权限停滞作为哨兵：
+    // 正确行为下根本不应到达第 2 次推理（handoff 轮内推理恒为 1 次）。
+    const inferenceLog: string[] = [];
+    // 记录每次推理发生时，当前是否仍处于 handoff 那一轮（turn 尚未 done）。
+    const inferenceDuringHandoffTurn: number[] = [];
+    let handoffTurnDone = false;
+    const handler = (request: { messages: unknown }, callIndex: number): FakeScript => {
+      inferenceLog.push(`inference-${callIndex}`);
+      if (!handoffTurnDone && callIndex > 0) inferenceDuringHandoffTurn.push(callIndex);
+      if (callIndex === 0) {
+        return [
+          {
+            type: "tool_call",
+            toolCallId: "q1",
+            name: "ask_user",
+            input: {
+              questions: [
+                { question: "用哪个方案？", options: [{ label: "方案A" }, { label: "方案B" }] },
+              ],
+            },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ];
+      }
+      // 多余推理（错误路径才会到达）：提出依赖答复的合成写操作。
+      return [
+        {
+          type: "tool_call",
+          toolCallId: "w1",
+          name: "write",
+          input: { path: "dependent-write.txt", content: "ASSUMED-WRITE" },
+        },
+        { type: "finish", reason: "tool_calls" },
+      ];
+    };
+    const ws = makeTmp("nct-auh-ws-");
+    const provider = new FakeProvider({ handler });
+    const runtime = await createRuntime({
+      cwd: ws,
+      sessionsDir: makeTmp("nct-auh-sd-"),
+      providers: [provider],
+      interactive: true,
+    });
+    const session = await makeSession(runtime);
+    const events = collect(session);
+    const turn = session.submit({ text: "ask" });
+    const req = await waitEvent(session, events, (e) => e.type === "question.requested");
+    if (req.type !== "question.requested") throw new Error("missing question.requested");
+
+    // 宿主展示问题后挂起交还
+    await session.questionSuspend(req.payload.requestId);
+    const reason = await turn;
+    handoffTurnDone = true;
+    // 本轮以 done 有序收尾（交还控制，不是 error/cancelled）
+    expect(reason).toBe("done");
+    // 钉住核心行为：handoff 轮内没有发起第二次推理
+    expect(inferenceLog).toEqual(["inference-0"]);
+    expect(inferenceDuringHandoffTurn).toEqual([]);
+    // 依赖答复的合成写操作从未执行（无 tool.completed、无落盘）
+    const writeCompleted = events.filter(
+      (e) => e.type === "tool.completed" && e.payload.name === "write",
+    );
+    expect(writeCompleted).toHaveLength(0);
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(path.join(ws, "dependent-write.txt"))).toBe(false);
+    // ask_user 以 handoff_suspended 结算、非用户拒答
+    const askCompleted = events.filter(
+      (e): e is DurableEvent<"tool.completed"> =>
+        e.type === "tool.completed" && e.payload.name === "ask_user",
+    );
+    expect(askCompleted[0]?.payload.error?.code).toBe("handoff_suspended");
+
+    // 新一轮：用户给出真实答复后，按真实值继续（而非按假设）
+    // 第 2 次推理在新 turn 发生；handler 此时返回 write 探测，
+    // 但该 write 需审批——这里只验证请求历史带上真实答复后立即中断，
+    // 不让审批挂起阻塞测试。
+    const turn2 = session.submit({ text: "方案A" });
+    // 等第 2 次推理确实发出（新一轮的证明）
+    await waitEvent(session, events, (e) => e.type === "turn.completed" || inferenceLog.length >= 2);
+    // 轮询直到第 2 次推理记录出现
+    for (let i = 0; i < 50 && inferenceLog.length < 2; i += 1) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(inferenceLog.length).toBeGreaterThanOrEqual(2);
+    const secondReq = provider.requests[1];
+    expect(secondReq).toBeDefined();
+    const secondText = JSON.stringify(secondReq?.messages ?? []);
+    expect(secondText).toContain("方案A");
+    // write 探测的审批挂起不代表失败——中断本轮收尾，避免阻塞
+    session.interrupt();
+    await turn2.catch(() => undefined);
+    await session.close();
+  });
 });

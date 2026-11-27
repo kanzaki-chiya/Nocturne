@@ -432,6 +432,14 @@ export interface QuestionBroker {
    * 未知或已结算返回 "unknown_request"。
    */
   suspend(requestId: string): "ok" | "unknown_request";
+  /**
+   * 被宿主挂起的提问所属 turnId 集（ADR-0127 第三阶段返工）。
+   * Agent Loop 的 shouldFinish 注入点据此识别本 turn 已交还宿主，
+   * 有序收尾而不再发起下一次推理；turnId 唯一，无需清理。
+   */
+  suspendedTurns(): IterableIterator<string>;
+  /** 指定 turn 是否已有提问被宿主挂起（shouldFinish 判定用） */
+  isTurnSuspended(turnId: string): boolean;
   /** 测试用：当前等待中的 requestId 集（不保证顺序） */
   pendingKeys(): IterableIterator<string>;
   /** 会话关闭：取消全部等待中的请求（ask 返回的 Promise 拒绝） */
