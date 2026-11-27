@@ -1952,7 +1952,7 @@ describe("ask_user 真实 stdio 客户端（ADR-0127 第三阶段）", () => {
       captured.push(req);
       const toolOut = latestToolMessage(req);
       if (toolOut !== undefined) {
-        // 第二轮：模型应看到 handoff_suspended 而非「拒绝回答」
+        // 下一轮（用户答复后）：模型应看到 handoff_suspended 而非「拒绝回答」
         return { textParts: [`after-handoff:${toolOut.slice(0, 60)}`] };
       }
       return {
@@ -1996,9 +1996,29 @@ describe("ask_user 真实 stdio 客户端（ADR-0127 第三阶段）", () => {
         ((u.update.content as { text?: string }).text ?? "").includes("选择策略？"),
     );
     expect(chunks.length).toBeGreaterThan(0);
-    // 模型在第二轮的请求中看到 handoff_suspended 而非「用户拒绝回答」
-    const secondReq = captured.find((r) => latestToolMessage(r) !== undefined);
-    const toolText = latestToolMessage(secondReq ?? ({} as RecordedProviderRequest)) ?? "";
+    // ADR-0127 第三阶段返工：handoff_suspended 后本轮有序收尾、不再发起下一次推理——
+    // 此时捕获到的只有初始这一次推理请求，ask_user 之后没有第二次推理。
+    expect(captured.length).toBe(1);
+
+    // 用户答复（下一轮普通消息）——模型按真实回答继续，
+    // 在请求中看到 handoff_suspended 文案而非「用户拒绝回答」。
+    const r2 = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text: "策略A" }],
+    });
+    expect(r2.stopReason).toBe("end_turn");
+    // 第二轮（用户答复后）的请求里应携带上轮 ask_user 的 handoff 结果——
+    // 判定：请求消息中任一 tool 消息含 handoff_suspended 文案（末条是用户答复，不是 tool）。
+    const secondReq = captured.find((r) =>
+      messagesOf(r).some(
+        (m) => m.role === "tool" && messageText(m.content).includes("宿主已把问题展示给用户"),
+      ),
+    );
+    expect(secondReq).toBeDefined();
+    const toolText = messagesOf(secondReq as RecordedProviderRequest)
+      .filter((m) => m.role === "tool")
+      .map((m) => messageText(m.content))
+      .join("\n");
     expect(toolText).not.toContain("用户拒绝回答");
     expect(toolText).toContain("宿主已把问题展示给用户");
 
