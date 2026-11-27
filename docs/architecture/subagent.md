@@ -339,7 +339,11 @@ launch(request, ctx)
 
 入口主体为 `subagent external:<name>`，所有交互式预设默认 `ask`。执行期 connector 仅按 [ADR-0049 第 3 节](../decisions/ADR-0049-external-agent-subagent.md#3-权限入口把关加上外部请求进权限层) 映射 ACP 请求，权限层用父策略重建非交互 gate：同一审查器与只读会话 Grant，剩余 `ask` 拒绝，不产生新 Grant。回调返回决定及来源，供审计记录。只选择 `allow_once`；没有该选项也拒绝，永不选择 `allow_always`。不支持客户端文件系统或终端能力。
 
-每次调用新进程，依次 `initialize`、`session/new`（工作区根）、可选 `session/set_mode`、逐项 `session/set_config_option`、`session/prompt`，完成后清理整个进程树；中断先 `session/cancel`，短宽限后清理。`configOptions` 的键和值是不透明字符串；对方拒绝某项时返回 `external_agent_config_rejected` 并指出该 id。需要认证时返回 `external_agent_auth_required`，由用户去相应命令行工具登录。外部调用与内置子代理共用 Runtime 级并发槽，不常驻、不复用会话。
+每次调用新进程，依次 `initialize`、`session/new`（工作区根）、可选 `session/set_mode`、逐项 `session/set_config_option`、`session/prompt`，完成后清理整个进程树；中断先 `session/cancel`，短宽限后清理。`configOptions` 的键和值是不透明字符串；对方拒绝某项时返回 `external_agent_config_rejected` 并指出该 id。需要认证时返回 `external_agent_auth_required`，由用户去相应命令行工具登录。外部调用与内置子代理共用 Runtime 级并发槽，不常驻；会话复用仅经下述 worker 续派的显式恢复路径。
+
+**worker 续派（ADR-0127 第五阶段）**：一次性 `task(agent=…)` 语义不变，但 agent 在 `initialize` 声明 `agentCapabilities.loadSession` 时，connector 在首个成功 `session/new` 后把 worker 记录原子写入 `<NOCTURNE_HOME>/external-workers/<workerId>.json`（`workerId` 形如 `ew-<16 hex>`），内容含归属 agent 名、外部会话 ID、原工作树 cwd、provider 快照（command/args/env 键名/mode/configOptions，不含 env 值与凭据）、`loadSessionCapable`、创建与最后使用时间；损坏记录按不存在处理并记诊断。`output.workerId`/`externalSessionId`/`resumed` 随工具结果返回，模型可持之续派。`task(worker=ew-…)` 与 `agent`/`profile`/`preset`/`tools`/`outputSchema`/`model`/`effort`/`background` 互斥（worker 自带归属），权限主体为 `subagent external:worker`（命中 `external:*` 通配，可写 `subagent external:worker → allow` 精确放行）。续派按 worker 记录解析 agent 名并走同一启用校验；记录缺失/损坏 `worker_not_found`、归属不符或 cwd 不匹配 `worker_mismatch`、`loadSessionCapable=false` `worker_unresumable`——全部在 spawn 进程前拒绝。续派每次仍新起进程，但握手后改发 `session/load`（`sessionId` 为记录中的外部会话 ID，cwd 沿 worker 原工作树）；mode 与 configOptions 只在新建时下发，恢复路径不重发以避免重置外部会话状态。`session/load` 失败返回 `worker_resume_failed`——**绝不**静默新建会话冒充恢复。同一 connector 实例内同 workerId 的调用经 Promise 链串行，杜绝并发恢复同一外部会话；取消与超时仍走 `session/cancel` 与进程树清理，worker 记录只在成功后 touch `lastUsedAt`，其余字段不可变。跨进程并发由外部 agent 自身的会话锁拒绝（第二阶段 `session_locked` 语义）。
+
+**按任务注入 MCP（ADR-0127 第五阶段）**：`task` 输入新增可选 `mcpServers`（非空字符串数组），仅外部派工（`agent`/`worker`）可用；内置子代理给出时 `invalid_input`。Core 把名字对照会话当前 MCP 池（配置层 ∪ 宿主注入 ∪ 插件，随配置重载刷新）解析并物化：明文值做 `${NAME}` 环境展开，`{ stored: true }` 凭据按服务器来源解析（host 来源只读会话级内存凭据，严禁回退用户凭据库；其余来源用户凭据库 fresh 读取），缺失即拒绝整个注入（不注入残缺工具）。物化结果只经内存传给 connector、序列化进本次 `session/new`/`session/load` 的 `mcpServers` 线格式，不落盘、不入事件/诊断/transcript，每次派工重新解析（凭据轮换自然生效，worker 记录永不持久化凭据）。恢复路径同样只绑定本次任务显式列出的服务器——首次创建时的注入不残留到后续任务。connector 侧二次校验：`{ stored: true }` 残留、缺 command/url、名称重复（不区分大小写）在 spawn 前以 `invalid_input` 拒绝。未列出的会话服务器不进入外部进程——其他 worker 既看不到也不能调用。
 
 外部 `task` 无默认超时；显式输入由执行器和 connector 计时，Runtime 显式值由 connector 计时。外部调用不使用内置 profile。connector 不另设隐式默认超时，已有可选 `request.timeoutMs` 设置对应计时器。
 
@@ -349,7 +353,7 @@ launch(request, ctx)
 
 进程退出通过 `PipeProcess.exited()` 提前检测，异常时 `detachOutput()` 关闭本地输出，避免后代继承管道拖住调用。Windows 清树沿 MCP 的 `taskkill /T /F`，覆盖根进程仍存活时的正常关闭与取消；根已崩溃形成的孤儿后代是该机制的限制，见 [ADR 修订](../decisions/ADR-0049-external-agent-subagent.md#修订)。POSIX 清理独立进程组。
 
-外部过程不创建 Nocturne 子会话或事件类型。只转发带配置名称前缀的单行工具进度，不转发回复片段；最终回复作为 `modelContent`，沿现有预算截断与落盘。`output` 为 `{ agent, agentVersion?, transcriptPath, transcriptError?: true, stopReason, permissionDecisions: { allowed, denied } }`，不填 `usage`。原始 `session/update` 与权限判定（主体、结果、来源）逐行写入父附件目录的 `external/<callId>.jsonl`；初始化或追加写入失败只记录一次 `external_agent.transcript_failed` 诊断，设置 `output.transcriptError: true`，停止后续写入，调用与权限判定继续正常进行。此时 `transcriptPath` 可能指向缺失或不完整的审计文件。
+外部过程不创建 Nocturne 子会话或事件类型。只转发带配置名称前缀的单行工具进度，不转发回复片段；最终回复作为 `modelContent`，沿现有预算截断与落盘。`output` 为 `{ agent, agentVersion?, transcriptPath, transcriptError?: true, stopReason, permissionDecisions: { allowed, denied }, workerId?, externalSessionId?, resumed?, resumeFailure? }`（worker 字段见上文续派契约），不填 `usage`。原始 `session/update` 与权限判定（主体、结果、来源）逐行写入父附件目录的 `external/<callId>.jsonl`；初始化或追加写入失败只记录一次 `external_agent.transcript_failed` 诊断，设置 `output.transcriptError: true`，停止后续写入，调用与权限判定继续正常进行。此时 `transcriptPath` 可能指向缺失或不完整的审计文件。
 
 **保证边界**：只拦截外部 agent 主动请求的操作，应配置其逐项询问模式；费用与额度计在对方账号上；检查点和回退不追踪外部 agent 改动的文件；外部 agent 看不到 Nocturne 的 `task`，不能嵌套。配置与默认禁用的 omp/Codex 预设见 [config.md](config.md#外部-agent-配置)。
 

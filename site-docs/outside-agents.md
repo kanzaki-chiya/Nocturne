@@ -38,6 +38,8 @@
 
 - **启动前审批**：委派外部 Agent 属于 `subagent` 权限类别（目标为 `external:<name>`），由于外部进程开启后将使用其自身的工具链直接读写文件或执行命令，Nocturne 在全部权限预设下默认均会先询问你（`ask`），批准后才会启动进程。
 - **Worktree 隔离改动**：主会话委派时若传入 `isolation: "worktree"`，外部 Agent 会在独立的 Git worktree 目录中工作；任务完成后，主会话可调用 `apply_subagent_changes`（「并回子代理改动」）将外部 Agent 的代码修改合入主会话当前工作树（见 [子代理](subagents.md) 与 [切换工作树](context.md#切换工作树)）。
+- **续派回原 worker（把后续任务交给同一个外部会话）**：对支持会话恢复的外部 Agent（声明 ACP `loadSession` 能力，例如 `nctrn acp`），首次 `task` 委派成功后结果中会带出一个稳定的 worker ID（`ew-` 开头）。主会话后续可用 `task(worker=ew-…)` 把新任务派回**同一个外部会话**——对方仍记得此前的工作内容与约定，适合「审查 → 返工」这类多轮协作。worker 与外部会话 ID、原工作树的关联持久化在本机（`~/.nocturne/external-workers/`），重启 Nocturne 后依然可续派；外部会话不可恢复（记录损坏、归属不符、对方不支持恢复或恢复失败）时会得到明确错误，不会悄悄新建会话冒充恢复。续派同样属于 `subagent` 权限类别（目标为 `external:worker`），默认先询问你。
+- **按任务注入团队 MCP 工具**：委派时可用 `mcpServers` 显式列出本次任务允许注入的、当前会话已有的 MCP 服务器名——只有列出的服务器会随该次派工提供给外部 worker，未列出的会话服务器对方既看不到也调不到；每次派工独立绑定，前一次任务的注入不会残留到下一次。
 
 ## 在外部宿主（如 Paseo）中运行 Nocturne（`nctrn acp`）
 
