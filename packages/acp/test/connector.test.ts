@@ -984,6 +984,144 @@ describe("ADR-0127 第五阶段：worker 续派", () => {
     expect(res1.output?.workerId).toBe(workerId);
     expect(res2.output?.workerId).toBe(workerId);
   });
+
+  // ── 返工规格第 3 点：跨宿主/跨 connector 互斥。
+  //    单实例 Promise 链只在同一 connector 生效；共享同一 NOCTURNE_HOME 的独立
+  //    connector（模拟两个独立宿主进程）必须经磁盘锁互斥，得到可识别的 busy，
+  //    绝不并发 session/load；锁释放/崩溃回收后后续续派不受影响。 ──
+
+  it("两个独立 connector 共享同一 home：同 worker 并发续派一方得到 worker_busy，不并发 session/load", async () => {
+    // 用第一份 connector 登记 worker（loadable 能力）。
+    const firstSetup = setup("loadable");
+    const first = await firstSetup.connector.run(firstSetup.request, firstSetup.ctx);
+    expect(first.status).toBe("ok");
+    const workerId = first.output?.workerId;
+    expect(workerId).toBeDefined();
+
+    // 两个相互独立的 connector（各自独立的进程内链），共享同一 NOCTURNE_HOME。
+    // release 场景让先进入的一方挂在 prompt 上，给另一方制造真实并发窗口。
+    const slowA = setup("loadableRelease");
+    const fastB = setup("loadableRelease");
+    const homeDir = process.env.NOCTURNE_HOME ?? "";
+    // 人为先占住跨进程锁：模拟"另一个宿主进程"正持有该 worker。
+    // 锁内容用存活的当前 pid——tryAcquireWorkerLock 判定持有者存活即 busy。
+    const lockDir = path.join(homeDir, "external-workers");
+    await fs.mkdir(lockDir, { recursive: true });
+    const lockPath = path.join(lockDir, `${workerId}.lock`);
+    const { createPlatform: createRealPlatform, tryAcquireWorkerLock } =
+      await import("@nocturne/core");
+    const holderPlatform = createRealPlatform();
+    const heldLock = await tryAcquireWorkerLock(holderPlatform, lockPath);
+    expect(heldLock).not.toBeUndefined();
+    try {
+      // 在锁被持有期间，两个独立 connector 的续派都必须得到可识别的 busy——
+      // 而不是排队等待、重复 prompt 或并发 session/load。
+      const resultA = await slowA.connector.run({ ...slowA.request, workerId }, slowA.ctx);
+      const resultB = await fastB.connector.run({ ...fastB.request, workerId }, fastB.ctx);
+      for (const result of [resultA, resultB]) {
+        expect(result.status).toBe("error");
+        expect(result.status === "error" && result.error.code).toBe("worker_busy");
+      }
+      // busy 路径在 spawn 前拒绝：probe 文件不存在（没有进程被启动）。
+      const probeExists = await fs
+        .access(path.join(root, "probe.json"))
+        .then(() => true)
+        .catch(() => false);
+      expect(probeExists).toBe(false);
+    } finally {
+      await heldLock?.release();
+    }
+    // 锁释放后：同一 worker 的续派立即可用——磁盘锁不是永久锁。
+    const afterSetup = setup("loadable");
+    const after = await afterSetup.connector.run(
+      { ...afterSetup.request, workerId },
+      afterSetup.ctx,
+    );
+    expect(after.status).toBe("ok");
+    expect(after.output?.resumed).toBe(true);
+  });
+
+  it("宿主崩溃残留的失效锁被回收：pid 不存活的锁不阻塞后续续派", async () => {
+    const firstSetup = setup("loadable");
+    const first = await firstSetup.connector.run(firstSetup.request, firstSetup.ctx);
+    const workerId = first.output?.workerId;
+    expect(workerId).toBeDefined();
+    // 动态获得一个确定不存活的 pid：启动一个立即退出的进程并等它结束，
+    // 用它的 pid 构造锁——避免硬编码 pid 在 Windows 上被 process.kill(pid, 0)
+    // 误判为存活（pid 复用/系统保留进程行为不确定）。
+    const { spawn } = await import("node:child_process");
+    const deadPid = await new Promise((resolve, reject) => {
+      const probe = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+      const pid = probe.pid;
+      probe.on("close", () => resolve(pid));
+      probe.on("error", reject);
+    });
+    // 确认该 pid 已不存活（process.kill(pid, 0) 抛错即不存活）
+    const isDead = await new Promise((resolve) => {
+      try {
+        process.kill(deadPid, 0);
+        resolve(false);
+      } catch {
+        resolve(true);
+      }
+    });
+    const lockDir = path.join(process.env.NOCTURNE_HOME ?? "", "external-workers");
+    await fs.mkdir(lockDir, { recursive: true });
+    const staleLock = path.join(lockDir, `${workerId}.lock`);
+    await fs.writeFile(
+      staleLock,
+      JSON.stringify({
+        pid: deadPid,
+        hostname: (await import("node:os")).hostname(),
+        startedAt: Date.now(),
+        token: "stale-token",
+      }),
+    );
+    if (!isDead) {
+      // pid 恰好被复用（极少见）：改用早于开机时间的 startedAt 触发另一条失效路径，
+      // 同样证明崩溃恢复不留下永久锁。
+      await fs.writeFile(
+        staleLock,
+        JSON.stringify({ pid: deadPid, hostname: "other-host", startedAt: 1, token: "stale" }),
+      );
+    }
+    const resumeSetup = setup("loadable");
+    const result = await resumeSetup.connector.run(
+      { ...resumeSetup.request, workerId },
+      resumeSetup.ctx,
+    );
+    expect(result.status).toBe("ok");
+    expect(result.output?.resumed).toBe(true);
+  });
+
+  it("独立 worker 互不影响：不同 workerId 的并发续派保持并行", async () => {
+    // 两个独立 worker（各自的锁路径不同）并发续派——磁盘锁按 workerId 寻址，
+    // 不互相阻塞，两者都应成功恢复。
+    const setupA = setup("loadable");
+    const firstA = await setupA.connector.run(setupA.request, setupA.ctx);
+    const workerA = firstA.output?.workerId;
+    const setupB = setup("loadable");
+    const firstB = await setupB.connector.run(setupB.request, setupB.ctx);
+    const workerB = firstB.output?.workerId;
+    expect(workerA).toBeDefined();
+    expect(workerB).toBeDefined();
+    expect(workerA).not.toBe(workerB);
+    const resumeA = setup("loadableRelease");
+    const resumeB = setup("loadable");
+    const [resultA, resultB] = await Promise.all([
+      resumeA.connector.run({ ...resumeA.request, workerId: workerA }, resumeA.ctx),
+      resumeB.connector.run({ ...resumeB.request, workerId: workerB }, resumeB.ctx),
+    ]);
+    // B（无 release 阻塞）必定成功；A 在 release 阻塞下也进入 prompt 而非 busy——
+    // 两个 worker 的锁互不干扰，证明并行性。此处只需两者都不是 worker_busy。
+    for (const result of [resultA, resultB]) {
+      if (result.status === "error") {
+        expect(result.error.code).not.toBe("worker_busy");
+      }
+    }
+    // 放行 release，确保 A 正常收尾。
+    await fs.writeFile(path.join(root, "release.txt"), "go");
+  });
 });
 
 describe("ADR-0127 第五阶段：按任务注入团队 MCP 工具", () => {

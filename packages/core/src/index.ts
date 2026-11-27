@@ -342,7 +342,7 @@ import {
   SUITE_COORDINATOR_TOOL_NAMES,
   type SuiteController,
 } from "./suites/index.js";
-import { createExternalWorkerStore } from "./external-workers/store.js";
+import { createExternalWorkerStore, computeProviderDigest } from "./external-workers/store.js";
 import {
   residentCallId,
   residentKindOf,
@@ -4167,6 +4167,72 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                     error: { code: "invalid_input", message },
                   };
                 }
+                // ADR-0127 第五阶段返工：归属核对按调用方真实工作区，而非 worker 记录自身。
+                // 合法重启续派（同一原工作区）仍放行；从不同项目/工作树续派即拒绝，
+                // 在披露外部会话 ID、注入 MCP 或启动任何进程之前拦截。
+                if (workerRecord !== undefined) {
+                  // 同一物理工作区按真实路径判定（permissions.md 4.2 语义）：
+                  // 词法比较会被 Windows 8.3 短名（ADMINI~1 vs Administrator）、
+                  // junction/symlink 等同一位置的合法别名误判为不匹配。两侧都经
+                  // resolveReal 解析后再比较；解析失败（目录已删）按不匹配处理——
+                  // 原工作树消失本就是不可恢复状态，不应放行。
+                  const [workerReal, workspaceReal] = await Promise.all([
+                    platform.resolveReal(workerRecord.cwd).catch(() => undefined),
+                    platform.resolveReal(currentWorkspaceRoot()).catch(() => undefined),
+                  ]);
+                  const sameWorkspace =
+                    workerReal !== undefined &&
+                    workspaceReal !== undefined &&
+                    platform.paths.equals(workerReal, workspaceReal);
+                  if (!sameWorkspace) {
+                    const message =
+                      `外部 worker ${workerRecord.workerId} 归属工作区 ${workerRecord.cwd}，` +
+                      `与当前工作区 ${currentWorkspaceRoot()} 不匹配；` +
+                      `worker 只能在其创建时的工作区续派`;
+                    return {
+                      status: "error" as const,
+                      modelContent: message,
+                      error: { code: "worker_mismatch", message },
+                    };
+                  }
+                  // provider 变更识别（返工）：同名 agent 的启动目标（command/args 等）
+                  // 相对 worker 创建时改变时，外部会话 ID 属于旧进程上下文——继续注入或
+                  // 恢复会把工具/凭据暴露给非预期执行者。用身份摘要在副作用前拒绝。
+                  // 缺失摘要的历史记录按"不可验证"一律拒绝，需重新创建 worker。
+                  const currentDigest = computeProviderDigest({
+                    command: agentConfig.command,
+                    args: agentConfig.args,
+                    envKeys: Object.keys(agentConfig.env ?? {}),
+                    ...(agentConfig.mode !== undefined ? { mode: agentConfig.mode } : {}),
+                    ...(agentConfig.configOptions !== undefined
+                      ? { configOptions: agentConfig.configOptions }
+                      : {}),
+                  });
+                  if (
+                    workerRecord.providerDigest === undefined ||
+                    workerRecord.providerDigest !== currentDigest
+                  ) {
+                    const message =
+                      workerRecord.providerDigest === undefined
+                        ? `外部 worker ${workerRecord.workerId} 的记录缺少 provider 身份摘要` +
+                          `（历史格式），无法验证同名 agent 启动目标未变；` +
+                          `请重新创建 worker，不以此记录续派`
+                        : `外部 agent ${agentConfig.name} 的启动配置已改变，` +
+                          `与 worker ${workerRecord.workerId} 创建时不一致；` +
+                          `不把外部会话与注入工具交给改变后的执行者——请用新配置重新创建 worker`;
+                    return {
+                      status: "error" as const,
+                      modelContent: message,
+                      error: { code: "worker_mismatch", message },
+                    };
+                  }
+                }
+                // ADR-0127 第五阶段返工：创建与续派的权限都在执行管线完成——
+                // task 工具的 permissionSubjects 对创建产出精确主体
+                // `subagent external:<agent 名>`、对续派产出通用主体 `subagent external:worker`，
+                // 两者都经同一权限层的完整判定（deny 在 executor 结算、ask 走交互/审批），
+                // 且在调用本 runner 之前就拦截——进程、注入、session/load、worker 记录读取
+                // 均不发生。本装配层不再重复判定，避免双重结算与状态不一致。
                 if (!subagentLimiter.tryAcquire()) {
                   const message = `子代理并发上限已满（${subagentLimits.maxConcurrent}），请稍后重试`;
                   return {
@@ -9337,11 +9403,14 @@ export {
 export {
   createExternalWorkerStore,
   createWorkerId,
+  computeProviderDigest,
   EXTERNAL_WORKER_FORMAT_VERSION,
   isWorkerId,
   type ExternalWorkerRecord,
   type ExternalWorkerStore,
+  type ProviderIdentityInput,
 } from "./external-workers/store.js";
+export { tryAcquireWorkerLock, type WorkerLock } from "./external-workers/lock.js";
 export {
   createMcpOnDemandTools,
   estimateMcpToolsTokens,

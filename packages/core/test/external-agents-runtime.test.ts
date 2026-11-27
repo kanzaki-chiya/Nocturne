@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createPlatform,
   createRuntime,
+  computeProviderDigest,
   FakeProvider,
   loadConfig,
   type ExternalAgentConfig,
@@ -70,6 +71,7 @@ async function setup(
   provider = new FakeProvider({ handler: () => done() }),
   builtin = false,
   mcpServers: McpServerConfig[] = [],
+  permissionRules: { kind?: string; pattern: string; action: "allow" | "ask" | "deny" }[] = [],
 ) {
   const root = await mkdtemp(path.join(tmpdir(), "nct-agent-runtime-"));
   roots.push(root);
@@ -83,6 +85,7 @@ async function setup(
       modelsDev: false,
       skills: { sources: { agents: false, claude: false } },
       externalAgents: [{ name: "handwritten", command: "user-command", args: [], enabled: false }],
+      ...(permissionRules.length > 0 ? { permissions: { rules: permissionRules } } : {}),
     }),
   );
   const platform = {
@@ -123,7 +126,7 @@ async function setup(
   await runtime.saveExternalAgent({ mode: "create", name: "offline", config: entry });
   const session = await runtime.createSession({ model: "fake/fake-1" });
   sessions.push(session);
-  return { runtime, session, provider, run, probe, home, config };
+  return { runtime, session, provider, run, probe, home, config, workspace };
 }
 
 describe("外部 agent：Runtime 管理与 Turn 快照", () => {
@@ -465,13 +468,28 @@ describe("ADR-0127 第五阶段：task(worker=…) 续派", () => {
   const writeWorker = async (
     home: string,
     workerId: string,
-    overrides: { agentName?: string; cwd?: string; loadSessionCapable?: boolean } = {},
+    overrides: {
+      agentName?: string;
+      cwd?: string;
+      loadSessionCapable?: boolean;
+      /** 控制摘要字段：缺省写入与 entry 匹配的合法摘要；"missing" 表示历史无摘要记录 */
+      digest?: "match" | "stale" | "missing";
+    } = {},
   ): Promise<string> => {
     const workerDir = path.join(home, "external-workers");
     await mkdir(workerDir, { recursive: true });
     const workerCwd = overrides.cwd ?? path.join(home, "worker-tree");
     await mkdir(workerCwd, { recursive: true });
     const now = new Date().toISOString();
+    const matchDigest = computeProviderDigest({
+      command: entry.command,
+      args: entry.args,
+      envKeys: Object.keys(entry.env ?? {}),
+      ...(entry.configOptions !== undefined ? { configOptions: entry.configOptions } : {}),
+    });
+    const digestMode = overrides.digest ?? "match";
+    const providerDigest =
+      digestMode === "match" ? matchDigest : digestMode === "stale" ? "0".repeat(64) : undefined;
     await writeFile(
       path.join(workerDir, `${workerId}.json`),
       JSON.stringify({
@@ -480,6 +498,7 @@ describe("ADR-0127 第五阶段：task(worker=…) 续派", () => {
         agentName: overrides.agentName ?? "offline",
         externalSessionId: "ext-session-1",
         cwd: workerCwd,
+        ...(providerDigest !== undefined ? { providerDigest } : {}),
         providerSnapshot: { command: "x", args: [], envKeys: [] },
         loadSessionCapable: overrides.loadSessionCapable ?? true,
         createdAt: now,
@@ -531,7 +550,8 @@ describe("ADR-0127 第五阶段：task(worker=…) 续派", () => {
   it("worker 续派：按 worker 记录解析 agent 名，cwd 沿 worker 原工作树，workerId 传给 connector", async () => {
     const workerId = "ew-abcd1234abcd1234";
     const f = await setup(workerTaskProvider({ worker: workerId, task: "请继续修改" }), true);
-    const workerCwd = await writeWorker(f.home, workerId);
+    // 归属核对按调用方真实工作区：worker 必须创建于当前会话工作区才可续派。
+    const workerCwd = await writeWorker(f.home, workerId, { cwd: f.workspace });
     await f.session.submit({ text: "go" });
     expect(f.run).toHaveBeenCalledTimes(1);
     const callArgs = f.run.mock.calls[0];
@@ -661,11 +681,118 @@ describe("ADR-0127 第五阶段：task(worker=…) 续派", () => {
       true,
       [teamA, teamB],
     );
-    await writeWorker(f.home, workerId);
+    await writeWorker(f.home, workerId, { cwd: f.workspace });
     await f.session.submit({ text: "go" });
     expect(f.run).toHaveBeenCalledTimes(1);
     const requestArg = f.run.mock.calls[0]?.[1];
     // 只物化 team-a——team-b 虽在会话池中但本任务未列出，不进入外部进程
     expect(requestArg?.sessionMcpServers?.map((server) => server.name)).toEqual(["team-a"]);
+  });
+
+  // ── 返工规格第 2 点：防御性回归——归属不符、provider 改变、执行者被禁用/拒绝时，
+  //    进程、工具注入、session/load 与历史读取均不发生。这些用例全部经公开 task
+  //    入口驱动，断言 connector（run）从未被调用作为"无副作用"的证据。 ──
+
+  it("归属不符：worker 创建于其他工作区时续派在副作用前拒绝（worker_mismatch）", async () => {
+    const workerId = "ew-abcd1234abcd1234";
+    const f = await setup(workerTaskProvider({ worker: workerId, task: "x" }), true);
+    // worker 记录归属工作区是 worker-tree，而当前会话工作区是 workspace——不匹配
+    await writeWorker(f.home, workerId, { cwd: path.join(f.home, "worker-tree") });
+    await f.session.submit({ text: "go" });
+    expect(f.run).not.toHaveBeenCalled();
+    const toolCompleted = f.session.durableEvents().find((e) => e.type === "tool.completed");
+    expect(toolCompleted?.payload).toMatchObject({
+      status: "error",
+      error: { code: "worker_mismatch" },
+    });
+  });
+
+  it("provider 启动目标改变：摘要与当前配置不符，续派在披露会话 ID 前拒绝", async () => {
+    const workerId = "ew-abcd1234abcd1234";
+    const f = await setup(workerTaskProvider({ worker: workerId, task: "x" }), true);
+    // digest: "stale" 写入与当前 entry 配置不匹配的摘要，模拟同名 agent 启动目标已被改写
+    await writeWorker(f.home, workerId, { cwd: f.workspace, digest: "stale" });
+    await f.session.submit({ text: "go" });
+    expect(f.run).not.toHaveBeenCalled();
+    const toolCompleted = f.session.durableEvents().find((e) => e.type === "tool.completed");
+    expect(toolCompleted?.payload).toMatchObject({
+      status: "error",
+      error: { code: "worker_mismatch" },
+    });
+    expect(JSON.stringify(toolCompleted?.payload)).toContain("启动配置已改变");
+  });
+
+  it("历史记录缺少身份摘要：按不可验证拒绝，不以宽松匹配放行", async () => {
+    const workerId = "ew-abcd1234abcd1234";
+    const f = await setup(workerTaskProvider({ worker: workerId, task: "x" }), true);
+    await writeWorker(f.home, workerId, { cwd: f.workspace, digest: "missing" });
+    await f.session.submit({ text: "go" });
+    expect(f.run).not.toHaveBeenCalled();
+    const toolCompleted = f.session.durableEvents().find((e) => e.type === "tool.completed");
+    expect(toolCompleted?.payload).toMatchObject({
+      status: "error",
+      error: { code: "worker_mismatch" },
+    });
+    expect(JSON.stringify(toolCompleted?.payload)).toContain("缺少 provider 身份摘要");
+  });
+
+  it("原执行者被权限规则禁用：创建与续派都在副作用前拒绝（permission_denied）", async () => {
+    // 合成配置：精确禁止外部 agent offline 的一切派工/续派
+    const denyRule = [{ kind: "subagent", pattern: "external:offline", action: "deny" as const }];
+    const workerId = "ew-abcd1234abcd1234";
+    // 创建路径：task(agent=offline) 的 permissionSubjects 同步产出精确主体
+    // `subagent external:offline`，命中 deny 规则后由 executor 权限管线直接结算为
+    // status:"denied"——创建路径的权限本就在副作用前由既有管线保证，不经 connector。
+    const createSetup = await setup(
+      workerTaskProvider({ agent: "offline", task: "x" }),
+      true,
+      [],
+      denyRule,
+    );
+    await createSetup.session.submit({ text: "go" });
+    expect(createSetup.run).not.toHaveBeenCalled();
+    const createCompleted = createSetup.session
+      .durableEvents()
+      .find((e) => e.type === "tool.completed");
+    expect(createCompleted?.payload).toMatchObject({
+      status: "denied",
+    });
+    // 续派路径：permissionSubjects 同步阶段只能给占位主体 external:worker（无法读盘
+    // 解析归属），真正的判定在装配层副作用前完成。deny external:* 命中通用主体后
+    // 续派被拒绝——进程、注入、session/load、历史读取均不发生（run 未被调用）。
+    const denyAllExternal = [{ kind: "subagent", pattern: "external:*", action: "deny" as const }];
+    const resumeSetup = await setup(
+      workerTaskProvider({ worker: workerId, task: "x" }),
+      true,
+      [],
+      denyAllExternal,
+    );
+    await writeWorker(resumeSetup.home, workerId, { cwd: resumeSetup.workspace });
+    await resumeSetup.session.submit({ text: "go" });
+    expect(resumeSetup.run).not.toHaveBeenCalled();
+    const resumeCompleted = resumeSetup.session
+      .durableEvents()
+      .find((e) => e.type === "tool.completed");
+    // 续派的占位主体 external:worker 在 executor 权限管线即命中 deny external:*，
+    // 在调用装配层/connector 之前结算为 status:"denied"——deny 路径下连 worker
+    // 记录读取都不会发生，这是最严格的副作用前拦截。
+    expect(resumeCompleted?.payload).toMatchObject({
+      status: "denied",
+    });
+  });
+
+  it("续派权限主体为 external:worker（命中通配），创建主体为 external:<agent 名>", async () => {
+    // 权限层规则为"倒序最后命中优先"（permissions.md 5.3）：deny external:* 在前、
+    // allow external:worker 在后时，精确续派主体命中 allow——续派可通过权限关。
+    const rules = [
+      { kind: "subagent", pattern: "external:*", action: "deny" as const },
+      { kind: "subagent", pattern: "external:worker", action: "allow" as const },
+    ];
+    const workerId = "ew-abcd1234abcd1234";
+    const f = await setup(workerTaskProvider({ worker: workerId, task: "x" }), true, [], rules);
+    await writeWorker(f.home, workerId, { cwd: f.workspace });
+    await f.session.submit({ text: "go" });
+    // 续派命中 external:worker → allow，连接器真实被调用
+    expect(f.run).toHaveBeenCalledTimes(1);
   });
 });

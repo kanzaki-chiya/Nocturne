@@ -25,6 +25,7 @@ import type {
   ToolContext,
 } from "@nocturne/core";
 import { createExternalWorkerStore, createWorkerId } from "@nocturne/core";
+import { computeProviderDigest, tryAcquireWorkerLock } from "@nocturne/core";
 import { stripVTControlCharacters } from "node:util";
 import { probeAgent } from "./probe.js";
 import { permissionOutcome, permissionSubjects } from "./permissions.js";
@@ -131,11 +132,39 @@ export function createAcpConnector(
       diagnostics?.record("external_worker.store_corrupt", { workerId, reason });
     },
   });
-  // ADR-0127 第五阶段：同一 worker 的并发续派在本进程内串行。
-  // 不同 Runtime/会话共享同一 connector 实例（CLI 装配单例），
-  // 这里的 worker 级 Promise 链防止两个 task(worker=…) 同时 session/load
-  // 同一外部会话导致外部 agent 状态错乱（重复轮次、上下文错序）。
+  // ADR-0127 第五阶段返工：同一 worker 的并发续派需要跨进程互斥。
+  // 进程内 Promise 链只在单 connector 实例生效，且完成后键不释放会单调增长；
+  // 共享同一 NOCTURNE_HOME 的独立宿主/connector（两个 CLI 进程、宿主重启叠加）
+  // 不受其约束，可能同时 session/load 同一外部会话导致重复轮次与上下文错序。
+  // 因此互斥改为两层：
+  //   1. 进程内链（本实例内严格串行，且完成后删除键——Map 不再单调增长）；
+  //   2. `<NOCTURNE_HOME>/external-workers/<workerId>.lock` 跨进程存在性锁
+  //      （tryAcquireWorkerLock，失效按 pid/开机时间回收）。持有者存活时返回
+  //      可识别的 worker_busy——不等待、不重复 prompt、崩溃不留下永久锁。
+  // 独立 worker（不同 workerId）锁路径不同，天然保持并行。
   const workerChains = new Map<string, Promise<unknown>>();
+  const runSerialized = (
+    workerId: string,
+    config: ExternalAgentConfig,
+    request: ExternalAgentRequest,
+    ctx: ToolContext,
+  ): Promise<ExternalAgentOutcome> => {
+    const invoke = (): Promise<ExternalAgentOutcome> =>
+      runAgent(platform, config, request, ctx, diagnostics, store);
+    const previous = workerChains.get(workerId) ?? Promise.resolve();
+    const current = previous.then(invoke, invoke);
+    // 完成后删除键：链尾 Promise 只作串行纽带，保留已完成键会让 Map 单调增长。
+    const tail = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    workerChains.set(workerId, tail);
+    void tail.then(() => {
+      // 只在自己仍是链尾时删除——后续调用已接上新链则保留纽带。
+      if (workerChains.get(workerId) === tail) workerChains.delete(workerId);
+    });
+    return current;
+  };
   return {
     async run(config, request, ctx) {
       // 续派或新建可续派 worker 的调用按 workerId 串行；
@@ -144,19 +173,7 @@ export function createAcpConnector(
       if (chainKey === undefined) {
         return runAgent(platform, config, request, ctx, diagnostics, store);
       }
-      const previous = workerChains.get(chainKey) ?? Promise.resolve();
-      const current = previous.then(
-        () => runAgent(platform, config, request, ctx, diagnostics, store),
-        () => runAgent(platform, config, request, ctx, diagnostics, store),
-      );
-      workerChains.set(
-        chainKey,
-        current.then(
-          () => undefined,
-          () => undefined,
-        ),
-      );
-      return current;
+      return runSerialized(chainKey, config, request, ctx);
     },
     async probe(config, input) {
       return probeAgent(platform, config, input);
@@ -289,9 +306,39 @@ async function runAgent(
     return transcript;
   };
   const wait = <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, failed]);
+  // ADR-0127 第五阶段返工：跨进程互斥锁在 worker 记录校验通过之后、任何副作用
+  // （transcript 落盘、spawn、session/load）之前取得。顺序很关键——若先取锁再读记录，
+  // 对不存在/归属不符/不可恢复的 worker 也会空持锁，且 external-workers 目录可能
+  // 尚未创建（worker_not_found 场景）导致 createExclusive 以 ENOENT 失败。
+  // 用 holder 变量把锁带进 try/finally：只有成功取锁才在 finally 释放；
+  // 校验失败（worker_not_found 等早期 return）发生在取锁之前，不触碰锁。
+  let workerLock: Awaited<ReturnType<typeof tryAcquireWorkerLock>> | undefined;
+  if (existingWorker !== undefined) {
+    const lockDir = platform.paths.join(platform.nocturneHome(), "external-workers");
+    await platform.fs.mkdir(lockDir, { mode: 0o700 }).catch(() => undefined);
+    const lockPath = platform.paths.join(lockDir, `${existingWorker.workerId}.lock`);
+    workerLock = await tryAcquireWorkerLock(platform, lockPath);
+    if (workerLock === undefined) {
+      const message =
+        `外部 worker ${existingWorker.workerId} 正被另一个宿主进程续派（锁 ${lockPath}）；` +
+        `同一 worker 不能并发恢复，请稍后重试`;
+      output.stopReason = "worker_busy";
+      output.resumeFailure = message;
+      return {
+        status: "error",
+        modelContent: message,
+        error: { code: "worker_busy", message },
+        output,
+      };
+    }
+  }
   try {
-    // ADR-0127 第五阶段：续派时工作树必须与 worker 原 cwd 一致——
-    // 不匹配在 spawn 进程前拒绝，不浪费一次进程启动。
+    // ADR-0127 第五阶段返工：真正的归属核对已上移到 Core 装配侧
+    // （按调用方真实工作区比对 worker 记录 cwd，见 externalRunner）。
+    // 这里的比较是纵深防御的兜底一致性检查：Core 现在传入的 request.cwd
+    // 已是「worker 原工作树」，正常情况下恒等于 existingWorker.cwd；
+    // 仅在调用方绕过装配层直传不一致 cwd 时才可能触发。保留它作为
+    // spawn 前的最后防线，不依赖上层必然正确。
     if (existingWorker !== undefined && !platform.paths.equals(existingWorker.cwd, request.cwd)) {
       const message =
         `外部 worker ${existingWorker.workerId} 的原工作树是 ${existingWorker.cwd}，` +
@@ -606,12 +653,24 @@ async function runAgent(
       } else if (loadSessionCapable) {
         const workerId = createWorkerId();
         const now = new Date().toISOString();
+        const identity = {
+          command: config.command,
+          args: [...config.args],
+          envKeys: Object.keys(config.env ?? {}),
+          ...(config.mode !== undefined ? { mode: config.mode } : {}),
+          ...(config.configOptions !== undefined
+            ? { configOptions: { ...config.configOptions } }
+            : {}),
+        };
         const record: ExternalWorkerRecord = {
           formatVersion: 1,
           workerId,
           agentName: config.name,
           externalSessionId: sessionId,
           cwd: request.cwd,
+          // 返工：写入身份摘要——续派时 Core 重算当前同名 agent 配置的摘要并比对，
+          // 启动目标改变（command/args 等）在披露会话 ID 或注入 MCP 前拒绝。
+          providerDigest: computeProviderDigest(identity),
           providerSnapshot: {
             command: config.command,
             args: [...config.args],
@@ -676,5 +735,8 @@ async function runAgent(
     abortInput?.();
     proc?.stdin.end();
     await transcript.catch(() => undefined);
+    // 跨进程互斥锁最后释放——保证进程树清理、transcript 落盘全部完成后，
+    // 其他宿主才允许对同一 worker 发起新的 session/load。
+    await workerLock?.release();
   }
 }

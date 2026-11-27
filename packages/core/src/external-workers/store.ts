@@ -5,10 +5,17 @@
  * - 一个 worker 一份 JSON 文件 `<NOCTURNE_HOME>/external-workers/<workerId>.json`，
  *   原子写入（写临时文件 + rename）；文件损坏按不存在处理（返回 undefined 并记录诊断）。
  * - worker 记录什么：归属 agent 名、外部 ACP 会话 id、工作树（cwd 绝对路径）、
- *   provider 启动配置快照（command/args/env/mode/configOptions——快照而非引用，
- *   配置改写后已登记的 worker 仍按创建时的命令恢复）、`loadSession` 能力
+ *   provider 身份摘要（`providerDigest`，见下）与启动配置快照（command/args/env 键名——
+ *   快照而非引用，配置改写后已登记的 worker 仍按创建时的命令恢复）、`loadSession` 能力
  *   （来自 initialize 回报）、创建/最近使用时间。不记录任何凭据、env 实值
  *   或宿主注入的工具列表。
+ * - provider 变更识别（返工）：`providerDigest` 是 command/args/env 键名/mode/
+ *   configOptions 结构归一化后的 sha256 摘要。同名 agent 的启动目标（command/args）
+ *   改变时摘要不匹配，续派在披露外部会话 ID 或注入 MCP 之前拒绝（worker_mismatch）。
+ *   摘要按结构哈希、不含任何 env 值——args 中可能含敏感路径但属启动身份本身；
+ *   摘要单向不可逆，落盘不泄露原值。缺失摘要的历史记录（formatVersion 1 早期）
+ *   按"不可验证"处理：读取时 `providerDigest` 为 undefined，续派拒绝并说明需重建，
+ *   不以宽松匹配放行（文档 subagent.md 第 17 节与此行为一致）。
  * - 跨重启语义：进程 id 与存活状态不入档——每次续派调用方重新起进程，
  *   凭 `externalSessionId` 与 `loadSession` 能力决定走 `session/load` 还是
  *   视为不可恢复。只支持一次性运行的 agent 不创建 worker
@@ -17,7 +24,7 @@
  * - 归属校验：worker 续派只匹配同一 agent 名（不区分大小写）与同一工作树
  *   （按平台路径语义比较）；二者不匹配即返回 `worker_mismatch` 错误，不静默重建。
  */
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { fsErrorCode, type FileSystem, type PathOps } from "../platform/index.js";
 
 export const EXTERNAL_WORKER_FORMAT_VERSION = 1;
@@ -32,6 +39,12 @@ export interface ExternalWorkerRecord {
   externalSessionId: string;
   /** 创建时的工作树（绝对路径，按平台 canonicalize 前的原文） */
   cwd: string;
+  /**
+   * provider 身份摘要（sha256 hex）：创建时 command/args/envKeys/mode/configOptions
+   * 结构归一化后的单向哈希，用于续派前识别同名 agent 的启动目标变更。
+   * undefined = 历史记录（早期 formatVersion 1）缺失摘要，续派按不可验证拒绝。
+   */
+  providerDigest?: string | undefined;
   /** provider 启动配置快照（command/args；env 不含值只含键名——值不持久化） */
   providerSnapshot: {
     command: string;
@@ -72,6 +85,38 @@ export function isWorkerId(value: string): boolean {
   return WORKER_ID_RE.test(value);
 }
 
+/**
+ * provider 身份输入（计算摘要用的最小归一化结构）。
+ * env 只取键名排序、不取值；configOptions 键排序后按序拼接。
+ */
+export interface ProviderIdentityInput {
+  command: string;
+  args: readonly string[];
+  envKeys: readonly string[];
+  mode?: string | undefined;
+  configOptions?: Record<string, string> | undefined;
+}
+
+/**
+ * 计算 provider 身份摘要。结构归一化（envKeys 与 configOptions 键排序、
+ * 字段定界明确）后 sha256；单向、不含任何 env 值，可安全落盘与比对。
+ */
+export function computeProviderDigest(identity: ProviderIdentityInput): string {
+  const normalized = {
+    command: identity.command,
+    args: [...identity.args],
+    envKeys: [...identity.envKeys].sort(),
+    mode: identity.mode ?? null,
+    configOptions:
+      identity.configOptions === undefined
+        ? null
+        : Object.keys(identity.configOptions)
+            .sort()
+            .map((key) => [key, identity.configOptions?.[key] ?? ""]),
+  };
+  return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+}
+
 interface StoreDeps {
   fs: FileSystem;
   paths: PathOps;
@@ -98,6 +143,10 @@ function isRecordShape(value: unknown): value is ExternalWorkerRecord {
   if (typeof snap !== "object" || snap === null) return false;
   if (typeof snap.command !== "string" || !Array.isArray(snap.args)) return false;
   if (!Array.isArray(snap.envKeys)) return false;
+  // providerDigest 缺失（历史记录）不视为损坏——作为可识别的"不可验证"状态保留；
+  // 但若存在必须是字符串形状。
+  const digest = (rec as { providerDigest?: unknown }).providerDigest;
+  if (digest !== undefined && typeof digest !== "string") return false;
   return true;
 }
 
