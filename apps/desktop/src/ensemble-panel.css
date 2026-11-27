@@ -14,7 +14,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1-5) var(--space-3);
+  padding: var(--space-1) var(--space-3);
   border-bottom: 1px solid var(--a-border);
   flex: none;
 }
@@ -32,8 +32,8 @@
   border: none;
   border-radius: var(--radius-2);
   background: transparent;
-  color: var(--a-text-2);
-  font-size: var(--font-size-sm);
+  color: var(--a-secondary);
+  font-size: var(--fs-2);
   cursor: pointer;
 }
 
@@ -42,7 +42,7 @@
 }
 
 .ensemble-seg button.on {
-  background: var(--a-hover);
+  background: var(--a-sel);
   color: var(--a-text);
   font-weight: 600;
 }
@@ -62,14 +62,14 @@
   border: none;
   border-radius: var(--radius-2);
   background: transparent;
-  color: var(--a-text-3);
+  color: var(--a-muted);
   cursor: pointer;
   position: relative;
 }
 
 .ensemble-ib:hover {
   color: var(--a-text);
-  background: var(--a-hover);
+  background: var(--a-sel);
 }
 
 .ensemble-ib.on {
@@ -155,10 +155,6 @@
   cursor: pointer;
 }
 
-.ensemble-mem-coord {
-  padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--a-border);
-}
 
 .ensemble-mem-col {
   flex: 1;
@@ -171,7 +167,7 @@
 .ensemble-mem-top {
   display: flex;
   align-items: center;
-  gap: var(--space-1-5);
+  gap: var(--space-1);
   min-width: 0;
 }
 
@@ -187,7 +183,7 @@
 }
 
 .ensemble-dot.ask {
-  background: var(--a-warn);
+  background: var(--a-warning);
 }
 
 .ensemble-dot.pause {
@@ -201,7 +197,7 @@
 
 .ensemble-dot.retired {
   background: transparent;
-  box-shadow: inset 0 0 0 1px var(--a-text-3);
+  box-shadow: inset 0 0 0 1px var(--a-muted);
 }
 
 .ensemble-mem-name {
@@ -210,28 +206,28 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-size-sm);
+  font-size: var(--fs-2);
   color: var(--a-text);
   font-weight: 600;
 }
 
 .ensemble-mem-name i {
   font-style: normal;
-  color: var(--a-text-3);
+  color: var(--a-muted);
   font-weight: 400;
   margin-left: var(--space-1);
 }
 
 .ensemble-mem-no {
   flex: none;
-  color: var(--a-text-3);
-  font-size: var(--font-size-xs);
+  color: var(--a-muted);
+  font-size: var(--fs-1);
   font-variant-numeric: tabular-nums;
 }
 
 .ensemble-mem-last {
-  color: var(--a-text-2);
-  font-size: var(--font-size-xs);
+  color: var(--a-secondary);
+  font-size: var(--fs-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -239,13 +235,13 @@
 
 .ensemble-mem.retired .ensemble-mem-name,
 .ensemble-mem.retired .ensemble-mem-last {
-  color: var(--a-text-3);
+  color: var(--a-muted);
 }
 
 .ensemble-grp {
-  color: var(--a-text-3);
-  font-size: var(--font-size-xs);
-  letter-spacing: var(--ls-wider);
+  color: var(--a-muted);
+  font-size: var(--fs-1);
+  letter-spacing: 0.05em;
   margin-top: var(--space-1);
 }
 
@@ -287,9 +283,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--a-hover);
-  color: var(--a-text-2);
-  font-size: var(--font-size-xs);
+  background: var(--a-sel);
+  color: var(--a-secondary);
+  font-size: var(--fs-1);
   font-weight: 600;
 }
 
@@ -309,23 +305,18 @@
   height: 12px;
 }
 
-.ensemble-av.k-member {
-  color: var(--_c);
-  background: color-mix(in srgb, var(--_c) 14%, transparent);
+/* 成员着色经内联变量 --ensemble-av-color（EnsembleAvatar）注入；未着色时保持中性底色 */
+.ensemble-av.tinted {
+  color: var(--ensemble-av-color);
+  background: color-mix(in srgb, var(--ensemble-av-color) 14%, transparent);
 }
 
-.ensemble-av.k-maestro {
-  color: var(--a-accent);
-  background: color-mix(in srgb, var(--a-accent) 12%, transparent);
-}
-
-.ensemble-av.k-user {
-  color: var(--a-info);
-  background: color-mix(in srgb, var(--a-info) 12%, transparent);
+.ensemble-av.warn {
+  box-shadow: 0 0 0 1.5px var(--a-warning);
 }
 
 .ensemble-av.k-runtime {
-  color: var(--a-text-3);
+  color: var(--a-muted);
 }
 
 .ensemble-post-col {
@@ -350,23 +341,23 @@
 
 .ensemble-post-from {
   font-weight: 600;
-  font-size: var(--font-size-sm);
+  font-size: var(--fs-2);
 }
 
 .ensemble-post-to {
-  color: var(--a-text-2);
-  font-size: var(--font-size-xs);
+  color: var(--a-secondary);
+  font-size: var(--fs-1);
 }
 
 .ensemble-post-meta {
   flex: none;
-  color: var(--a-text-3);
-  font-size: var(--font-size-xs);
+  color: var(--a-muted);
+  font-size: var(--fs-1);
   font-variant-numeric: tabular-nums;
 }
 
 .ensemble-post-txt {
-  font-size: var(--font-size-sm);
+  font-size: var(--fs-2);
   color: var(--a-text);
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -381,8 +372,8 @@
 }
 
 /* 留言板搜索命中高亮（ADR-0131 §7） */
-.ensemble-hit {
-  background: color-mix(in srgb, var(--a-warn) 30%, transparent);
+.ensemble-pane mark, .ensemble-body mark {
+  background: color-mix(in srgb, var(--a-warning) 30%, transparent);
   color: inherit;
   border-radius: 2px;
   padding: 0 1px;
@@ -402,31 +393,31 @@
 }
 
 .ensemble-sys-text {
-  color: var(--a-text-3);
-  font-size: var(--font-size-xs);
+  color: var(--a-muted);
+  font-size: var(--fs-1);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .ensemble-charter-row {
   display: flex;
-  gap: var(--space-1-5);
+  gap: var(--space-1);
   align-items: baseline;
   margin-top: 2px;
 }
 
 .ensemble-charter-tag {
   flex: none;
-  color: var(--a-text-3);
-  font-size: var(--font-size-xs);
+  color: var(--a-muted);
+  font-size: var(--fs-1);
   border: 1px solid var(--a-border);
   border-radius: var(--radius-1);
   padding: 0 var(--space-1);
 }
 
 .ensemble-nomatch {
-  color: var(--a-text-3);
-  font-size: var(--font-size-sm);
+  color: var(--a-muted);
+  font-size: var(--fs-2);
   text-align: center;
   margin: var(--space-4) 0;
 }
@@ -434,34 +425,62 @@
 /* ── 留言板工具行（搜索 + 筛选按钮）────────────────────── */
 .ensemble-boardbar {
   flex: none;
-  padding: var(--space-1-5) var(--space-3) 0;
+  padding: var(--space-1) var(--space-3) 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1-5);
+  gap: var(--space-1);
 }
 
 .ensemble-boardbar-row {
   display: flex;
-  gap: var(--space-1-5);
+  gap: var(--space-1);
   align-items: center;
+}
+
+/* 搜索框：命中数嵌在输入框右侧（原型 eb-search/eb-hits） */
+.ensemble-q-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 26px;
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  background: var(--a-input);
+  padding: 0 var(--space-1) 0 var(--space-2);
+}
+
+.ensemble-q-wrap:focus-within {
+  border-color: var(--a-accent-border);
 }
 
 .ensemble-q {
   flex: 1;
   min-width: 0;
-  height: 26px;
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
-  background: var(--a-input);
+  height: 100%;
+  border: 0;
+  background: transparent;
   color: var(--a-text);
-  padding: 0 var(--space-2);
-  font-size: var(--font-size-sm);
+  padding: 0;
+  font-size: var(--fs-2);
   min-height: 0;
 }
 
 .ensemble-q:focus-visible {
-  border-color: var(--a-accent);
   outline: none;
+}
+
+.ensemble-q::placeholder {
+  color: var(--a-faint);
+}
+
+.ensemble-q-hits {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-1);
+  color: var(--a-faint);
+  font-variant-numeric: tabular-nums;
+  padding: 0 2px;
 }
 
 /* ── 筛选面板与条件 chip（ADR-0131 §7）──────────────────── */
@@ -473,12 +492,12 @@
   right: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: var(--space-1-5);
+  gap: var(--space-1);
   padding: var(--space-2);
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
-  background: var(--a-popover);
-  box-shadow: var(--shadow-pop);
+  background: var(--a-raised);
+  box-shadow: var(--shadow-popover);
   max-height: 60%;
   overflow-y: auto;
 }
@@ -497,8 +516,8 @@
 .ensemble-flab {
   flex: none;
   width: 2.5em;
-  color: var(--a-text-2);
-  font-size: var(--font-size-sm);
+  color: var(--a-secondary);
+  font-size: var(--fs-2);
 }
 
 .ensemble-fsel {
@@ -513,7 +532,7 @@
   border-radius: var(--radius-2);
   background: var(--a-input);
   color: var(--a-text);
-  font-size: var(--font-size-sm);
+  font-size: var(--fs-2);
   cursor: pointer;
 }
 
@@ -534,8 +553,8 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--space-1-5);
-  padding-bottom: var(--space-1-5);
+  gap: var(--space-1);
+  padding-bottom: var(--space-1);
   border-bottom: 1px solid var(--a-border);
 }
 
@@ -549,7 +568,7 @@
   border-radius: var(--radius-2);
   background: var(--a-input);
   color: var(--a-text);
-  font-size: var(--font-size-xs);
+  font-size: var(--fs-1);
   max-width: 100%;
 }
 
@@ -562,21 +581,21 @@
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: var(--a-text-3);
+  color: var(--a-muted);
   cursor: pointer;
   padding: 0;
 }
 
 .ensemble-fchip button:hover {
   color: var(--a-text);
-  background: var(--a-hover);
+  background: var(--a-sel);
 }
 
 .ensemble-fclear {
   border: none;
   background: transparent;
   color: var(--a-accent);
-  font-size: var(--font-size-xs);
+  font-size: var(--fs-1);
   cursor: pointer;
   padding: 0 var(--space-1);
 }
@@ -589,8 +608,8 @@
 .ensemble-meta {
   flex: none;
   padding: 0 var(--space-3) var(--space-0-5);
-  color: var(--a-text-3);
-  font-size: var(--font-size-xs);
+  color: var(--a-muted);
+  font-size: var(--fs-1);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -609,10 +628,10 @@
   border-radius: var(--radius-2);
   background: var(--a-input);
   color: var(--a-text);
-  padding: var(--space-1-5) var(--space-2);
-  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--fs-2);
   font-family: inherit;
-  line-height: var(--lh-normal);
+  line-height: var(--lh-base);
   max-height: 132px;
   overflow-y: auto;
 }
@@ -633,8 +652,8 @@
   overflow-y: auto;
   border: 1px solid var(--a-border-strong);
   border-radius: var(--radius-2);
-  background: var(--a-popover);
-  box-shadow: var(--shadow-pop);
+  background: var(--a-raised);
+  box-shadow: var(--shadow-popover);
   padding: var(--space-1);
 }
 
@@ -642,14 +661,14 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-1-5);
+  padding: var(--space-1) var(--space-1);
   border-radius: var(--radius-1);
   cursor: pointer;
-  font-size: var(--font-size-sm);
+  font-size: var(--fs-2);
 }
 
 .ensemble-ac-row.is-active {
-  background: var(--a-hover);
+  background: var(--a-sel);
 }
 
 .ensemble-ac-name {
@@ -663,8 +682,8 @@
 
 .ensemble-ac-meta {
   flex: none;
-  color: var(--a-text-3);
-  font-size: var(--font-size-xs);
+  color: var(--a-muted);
+  font-size: var(--fs-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -673,7 +692,7 @@
 
 /* ── 概览（ADR-0131 §6）─────────────────────────────────── */
 .overview-body {
-  gap: var(--space-2-5);
+  gap: var(--space-3);
 }
 
 .ensemble-ov-block {
@@ -684,15 +703,15 @@
 
 .ensemble-ov-h {
   margin: 0;
-  color: var(--a-text-3);
-  font-size: var(--font-size-xs);
+  color: var(--a-muted);
+  font-size: var(--fs-1);
   font-weight: 600;
-  letter-spacing: var(--ls-wider);
+  letter-spacing: 0.05em;
 }
 
 .ensemble-ov-goal {
   margin: 0;
-  font-size: var(--font-size-sm);
+  font-size: var(--fs-2);
   color: var(--a-text);
   word-break: break-word;
 }
@@ -709,154 +728,206 @@
 .ensemble-ov-cps li {
   display: flex;
   align-items: baseline;
-  gap: var(--space-1-5);
-  font-size: var(--font-size-sm);
-  color: var(--a-text-2);
+  gap: var(--space-1);
+  font-size: var(--fs-2);
+  color: var(--a-secondary);
 }
 
-.ensemble-cp-box {
+/* 检查点：前导小标签 + 文本（原型 eo-check） */
+.ensemble-cp-tag {
   flex: none;
-  width: 9px;
-  height: 9px;
-  border: 1px solid var(--a-border-strong);
-  border-radius: 2px;
-  transform: translateY(0.5px);
+  color: var(--a-muted);
+  font-size: var(--fs-1);
 }
 
 .ensemble-ov-progress {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  border-top: 1px solid var(--a-border);
+  padding-top: var(--space-3);
+  margin-top: var(--space-2);
 }
 
-.ensemble-ov-progress-head {
+/* 合计行：任务 4/6 已完成 …… 1 进行中 1 等待（原型 eo-sum） */
+.ensemble-ov-sum {
   display: flex;
   align-items: baseline;
-  gap: var(--space-2);
-  font-size: var(--font-size-sm);
+  gap: 6px;
+}
+
+.ensemble-ov-sum h3 {
+  margin: 0;
+  font-size: var(--fs-3);
+  font-weight: var(--fw-semibold);
   color: var(--a-text);
-  font-weight: 600;
 }
 
-.ensemble-ov-ended {
-  color: var(--a-text-3);
-  font-weight: 400;
-  font-size: var(--font-size-xs);
+.ensemble-ov-sum .n {
+  font-family: var(--mono);
+  font-weight: var(--fw-medium);
+  font-size: var(--fs-3);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--a-text);
 }
 
-.ensemble-ov-bar {
-  height: 4px;
-  border-radius: 2px;
-  background: var(--a-hover);
-  overflow: hidden;
+.ensemble-ov-sum .t {
+  color: var(--a-secondary);
+  font-size: var(--fs-3);
 }
 
-.ensemble-ov-bar i {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: var(--a-accent);
-  transition: width 0.25s ease;
-}
-
-/* 工作线 */
-.ensemble-line {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-1-5) var(--space-2);
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
-  background: var(--a-bg);
-}
-
-.ensemble-line.wait {
-  border-color: color-mix(in srgb, var(--a-warn) 45%, transparent);
-}
-
-.ensemble-line-head {
+.ensemble-ov-sum .flags {
+  margin-left: auto;
   display: flex;
   align-items: center;
-  gap: var(--space-1-5);
-  min-width: 0;
+  gap: var(--space-3);
+  font-size: var(--fs-1);
+  color: var(--a-secondary);
 }
 
-.ensemble-line-toggle {
-  flex: none;
+.ensemble-ov-sum .flag {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border: none;
-  border-radius: var(--radius-1);
-  background: transparent;
-  color: var(--a-text-3);
-  cursor: pointer;
-  padding: 0;
-}
-
-.ensemble-line-toggle:hover {
-  color: var(--a-text);
-  background: var(--a-hover);
-}
-
-.ensemble-line-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: var(--a-text);
-}
-
-.ensemble-line-count {
-  flex: none;
-  color: var(--a-text-3);
-  font-size: var(--font-size-xs);
+  gap: 6px;
   font-variant-numeric: tabular-nums;
 }
 
-.ensemble-line-owner {
-  flex: none;
-  color: var(--a-text-2);
-  font-size: var(--font-size-xs);
-  max-width: 40%;
+.ensemble-ov-sum .flag.wait {
+  color: var(--a-warning);
+}
+
+.ensemble-ov-sum .flag .ui-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.ensemble-ov-ended {
+  color: var(--a-muted);
+  font-weight: 400;
+  font-size: var(--fs-1);
+}
+
+/* 分段进度条：一个任务一格，颜色按状态（原型 eo-bar） */
+.ensemble-ov-bar {
+  display: flex;
+  gap: 3px;
+  margin: 10px 0 4px;
+}
+
+.ensemble-ov-bar i {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--a-border-strong);
+}
+
+.ensemble-ov-bar i.done {
+  background: var(--a-success);
+}
+
+.ensemble-ov-bar i.work {
+  background: var(--a-accent);
+}
+
+.ensemble-ov-bar i.wait {
+  background: var(--a-warning);
+}
+
+/* 工作线（原型 ensemble-overview：扁平分隔行，不是卡片） */
+.ensemble-line {
+  border-top: 1px solid var(--a-border);
+}
+
+.ensemble-line:first-of-type {
+  margin-top: var(--space-2);
+}
+
+.ensemble-line-head {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  column-gap: var(--space-2);
+  row-gap: var(--space-0-5);
+  width: 100%;
+  padding: var(--space-2) var(--space-1) var(--space-2) 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  border-radius: var(--radius-1);
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.ensemble-line-head:hover .ensemble-line-name {
+  color: var(--a-text);
+}
+
+.ensemble-line-head:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.ensemble-line-head > .ui-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--a-muted);
+  align-self: start;
+  margin-top: 4px;
+}
+
+.ensemble-line-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ensemble-line-name {
+  font-size: var(--fs-3);
+  font-weight: var(--fw-medium);
+  color: var(--a-text);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.ensemble-line-count {
+  font-family: var(--mono);
+  font-size: var(--fs-1);
+  color: var(--a-muted);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.ensemble-line-count.full {
+  color: var(--a-success);
+}
+
+.ensemble-line-owners {
+  display: flex;
+  gap: 3px;
+  justify-self: end;
+  align-items: center;
 }
 
 .ensemble-postref {
   flex: none;
-  color: var(--a-accent);
-  font-size: var(--font-size-xs);
+  font-family: var(--mono);
+  font-size: var(--fs-1);
+  color: var(--a-faint);
   font-variant-numeric: tabular-nums;
 }
 
-.ensemble-line-bar {
-  height: 3px;
-  border-radius: 2px;
-  background: var(--a-hover);
-  overflow: hidden;
-}
-
-.ensemble-line-bar i {
-  display: block;
-  height: 100%;
-  background: var(--a-accent);
-  border-radius: 2px;
-  transition: width 0.25s ease;
-}
-
+/* 行内进展：占满第二行，等待时警告色，参考号靠右 */
 .ensemble-line-progress {
+  grid-column: 2 / 4;
   display: flex;
   align-items: baseline;
-  gap: var(--space-1-5);
-  font-size: var(--font-size-xs);
-  color: var(--a-text-2);
+  gap: 6px;
+  color: var(--a-secondary);
+  font-size: var(--fs-2);
+  line-height: var(--lh-base);
   min-width: 0;
 }
 
@@ -864,102 +935,133 @@
   width: 12px;
   height: 12px;
   flex: none;
-  transform: translateY(1.5px);
+  align-self: center;
 }
 
 .ensemble-line-progress.wait {
-  color: var(--a-warn);
+  color: var(--a-warning);
 }
 
-.ensemble-line-progress-text {
-  flex: 1;
+.ensemble-line-progress .txt {
   min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-/* 任务行：勾选框三态 + 状态文字顺序（待办→进行中→等待→完成，ADR-0131 §6） */
+.ensemble-line-progress .ref {
+  flex: none;
+  margin-left: auto;
+}
+
+/* 任务行（待办→进行中→等待→完成，ADR-0131 §6）：状态字形 + 标题（附状态文字）+ 负责人徽标 */
 .ensemble-tasks {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  padding: 0 0 0 22px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-top: var(--space-0-5);
 }
 
 .ensemble-task {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5);
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  column-gap: 10px;
+  align-items: start;
+  padding: 7px 0;
+  border-top: 1px solid var(--a-border);
   min-width: 0;
-  font-size: var(--font-size-sm);
-  min-height: 20px;
 }
 
-.ensemble-task-check {
-  flex: none;
+.ensemble-task:first-child {
+  border-top-color: transparent;
+}
+
+.ensemble-task-glyph {
+  width: 16px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+}
+
+.ensemble-task-glyph .ui-icon {
   width: 14px;
   height: 14px;
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--radius-1);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--a-on-accent);
 }
 
-.ensemble-task-check .ui-icon {
-  width: 10px;
-  height: 10px;
+.ensemble-task.done .ensemble-task-glyph .ui-icon {
+  color: var(--a-success);
 }
 
-.ensemble-task.done .ensemble-task-check {
-  background: var(--a-accent);
-  border-color: var(--a-accent);
+.ensemble-task.wait .ensemble-task-glyph .ui-icon {
+  color: var(--a-warning);
 }
 
-.ensemble-task.work .ensemble-task-check {
-  border-color: var(--a-accent);
-}
-
-.ensemble-task.wait .ensemble-task-check {
-  border-color: var(--a-warn);
-  color: var(--a-warn);
-}
-
-.ensemble-task-spin {
-  width: 6px;
-  height: 6px;
+.ensemble-task-glyph .todo {
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: var(--a-accent);
+  border: 1.5px solid var(--a-faint);
 }
 
-.ensemble-task-title {
-  flex: 1;
+.ensemble-task-glyph .work {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--a-accent);
+  background: color-mix(in srgb, var(--a-accent) 40%, transparent);
+}
+
+.ensemble-task-ttl {
+  font-size: var(--fs-2);
+  line-height: 20px;
+  color: var(--a-text);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--a-text);
 }
 
-.ensemble-task.done .ensemble-task-title {
-  color: var(--a-text-3);
-  text-decoration: line-through;
+.ensemble-task.done .ensemble-task-ttl {
+  color: var(--a-secondary);
 }
 
-.ensemble-task.wait .ensemble-task-title {
-  color: var(--a-warn);
+.ensemble-task-st {
+  margin-left: var(--space-2);
+  font-size: var(--fs-1);
+  white-space: nowrap;
 }
 
-.ensemble-task-owner {
-  flex: none;
-  color: var(--a-text-2);
-  font-size: var(--font-size-xs);
-  max-width: 34%;
+.ensemble-task-st.work {
+  color: var(--a-accent);
+}
+
+.ensemble-task-st.wait {
+  color: var(--a-warning);
+}
+
+.ensemble-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 150px;
+  min-width: 0;
+  height: 20px;
+  color: var(--a-secondary);
+  font-size: var(--fs-2);
+}
+
+.ensemble-owner > span:last-child {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ensemble-task .ensemble-postref {
+  align-self: start;
+  padding-top: 3px;
 }
 
 /* ── 旧合奏降级（ADR-0131 §5）───────────────────────────── */
@@ -971,15 +1073,15 @@
 
 .ensemble-legacy-title {
   margin: 0;
-  font-size: var(--font-size-base);
+  font-size: var(--fs-3);
   color: var(--a-text);
 }
 
 .ensemble-legacy-summary,
 .ensemble-legacy-note {
   margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--a-text-2);
+  font-size: var(--fs-2);
+  color: var(--a-secondary);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -991,8 +1093,8 @@
 }
 
 .ensemble-legacy-branch {
-  font-size: var(--font-size-xs);
-  color: var(--a-text-2);
+  font-size: var(--fs-1);
+  color: var(--a-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1003,11 +1105,11 @@
 
 /* ── 手机端差异 ─────────────────────────────────────────── */
 .phone .ensemble-subbar {
-  padding: var(--space-1-5) var(--space-4);
+  padding: var(--space-1) var(--space-4);
 }
 
 .phone .ensemble-boardbar {
-  padding: var(--space-1-5) var(--space-4) 0;
+  padding: var(--space-1) var(--space-4) 0;
 }
 
 .phone .ensemble-body,

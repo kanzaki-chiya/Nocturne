@@ -33,7 +33,6 @@ import {
   ensembleDefaultOpenLines,
   ensembleLineStats,
   ensembleOverviewStats,
-  ensembleOwnerLabel,
   filterEnsembleBoardPosts,
   formatEnsembleTime,
   groupEnsembleMembers,
@@ -106,9 +105,10 @@ interface EnsemblePaneState {
   lineToggles: Record<string, boolean>;
 }
 
-function initialPaneState(): EnsemblePaneState {
+function initialPaneState(boardNonce?: number | undefined): EnsemblePaneState {
   return {
-    tab: "overview",
+    // 首次打开就是被 /ensemble board 触发（nonce > 0）时直接落在留言板（ADR-0131 §6）
+    tab: (boardNonce ?? 0) > 0 ? "board" : "overview",
     query: "",
     filterFrom: undefined,
     filterTo: undefined,
@@ -146,9 +146,10 @@ export function EnsemblePane({
   // （存上一次 key，不一致就同步 setState 触发丢弃式重渲染）
   const [store, setStore] = useState<{ key: number; state: EnsemblePaneState }>(() => ({
     key: ensemble.createdSeq,
-    state: initialPaneState(),
+    state: initialPaneState(boardNonce),
   }));
   if (store.key !== ensemble.createdSeq) {
+    // 场次变化只重置页内状态；boardNonce 是打开意图，不随新场再次生效
     setStore({ key: ensemble.createdSeq, state: initialPaneState() });
   }
   const pane = store.key === ensemble.createdSeq ? store.state : initialPaneState();
@@ -374,6 +375,7 @@ export function EnsemblePane({
   const overview = ensemble.overview;
   const defaultOpenLines = new Set(overview !== undefined ? ensembleDefaultOpenLines(overview) : []);
   const stats = overview !== undefined ? ensembleOverviewStats(overview) : undefined;
+  const allTasks = overview !== undefined ? overview.lines.flatMap((line) => line.tasks) : [];
   const ended = ensemble.status === "ended";
 
   const filterIdentities = (which: "from" | "to") => {
@@ -535,24 +537,50 @@ export function EnsemblePane({
     );
   };
 
-  const taskRow = (line: EnsembleLine, task: EnsembleTask) => {
-    const stateClass =
-      task.status === "done" ? "done" : task.status === "work" ? "work" : task.status === "wait" ? "wait" : "todo";
+  const ownerBadge = (owner: string) => {
+    if (owner === "maestro") {
+      return (
+        <span className="ensemble-owner" title="指挥">
+          <EnsembleAvatar kind="maestro" size="sm" />
+          <span>指挥</span>
+        </span>
+      );
+    }
+    const member = ensemble.members.find((item) => item.name === owner);
+    const color = member !== undefined ? ensembleAuthorColor(ensemble.members, owner, "member") : undefined;
     return (
-      <div key={task.id} className={`ensemble-task ${stateClass}`}>
-        <span className="ensemble-task-check" aria-hidden="true">
+      <span className="ensemble-owner" title={`@${owner}`}>
+        <EnsembleAvatar kind="member" color={color} size="sm" />
+        <span>{`@${owner}`}</span>
+      </span>
+    );
+  };
+
+  const taskRow = (task: EnsembleTask) => {
+    const label =
+      task.status === "done" ? "已完成" : task.status === "work" ? "进行中" : task.status === "wait" ? "等待" : "待办";
+    return (
+      <li key={task.id} className={`ensemble-task ${task.status}`}>
+        <span className="ensemble-task-glyph" title={label} aria-label={label}>
           {task.status === "done" ? (
             <Icon name="check" size={ICON_SM} />
-          ) : task.status === "work" ? (
-            <span className="ensemble-task-spin" />
           ) : task.status === "wait" ? (
             <Icon name="time" size={ICON_SM} />
-          ) : null}
+          ) : task.status === "todo" ? (
+            <span className="todo" aria-hidden="true" />
+          ) : (
+            <span className="work" aria-hidden="true" />
+          )}
         </span>
-        <span className="ensemble-task-title">{task.title}</span>
-        <span className="ensemble-task-owner">{ensembleOwnerLabel(task.owner)}</span>
+        <span className="ensemble-task-ttl">
+          {task.title}
+          {(task.status === "work" || task.status === "wait") && (
+            <span className={`ensemble-task-st ${task.status}`}>{label}</span>
+          )}
+        </span>
+        {ownerBadge(task.owner)}
         {task.post !== undefined && <span className="ensemble-postref">#{task.post}</span>}
-      </div>
+      </li>
     );
   };
 
@@ -566,48 +594,60 @@ export function EnsemblePane({
     const lineStats = ensembleLineStats(line);
     const open = isLineOpen(line, defaultOpenLines, lineToggles);
     const waiting = line.progress?.wait === true;
+    const owners = [...new Set(line.tasks.map((task) => task.owner))];
+    if (owners.length === 0) owners.push(line.owner);
     return (
       <section key={line.id} className={`ensemble-line${open ? " open" : ""}${waiting ? " wait" : ""}`}>
-        <div className="ensemble-line-head">
-          <button
-            type="button"
-            className="ensemble-line-toggle"
-            aria-expanded={open}
-            onClick={() => {
-              patch({ lineToggles: { ...lineToggles, [line.id]: !open } });
-            }}
-          >
-            <Icon
-              name="right_small"
-              size={ICON_SM}
-              className={`fold-arrow${open ? " down" : ""}`}
-            />
-          </button>
-          <span className="ensemble-line-title">{line.title}</span>
-          {lineStats.total > 0 && (
-            <span className="ensemble-line-count">
-              {lineStats.done}/{lineStats.total}
+        <button
+          type="button"
+          className="ensemble-line-head"
+          aria-expanded={open}
+          onClick={() => {
+            patch({ lineToggles: { ...lineToggles, [line.id]: !open } });
+          }}
+        >
+          <Icon
+            name="right_small"
+            size={ICON_SM}
+            className={`fold-arrow${open ? " down" : ""}`}
+          />
+          <span className="ensemble-line-title">
+            <span className="ensemble-line-name">{line.title}</span>
+            {lineStats.total > 0 && (
+              <span
+                className={`ensemble-line-count${lineStats.done === lineStats.total && lineStats.total > 0 ? " full" : ""}`}
+              >
+                {lineStats.done}/{lineStats.total}
+              </span>
+            )}
+            {line.post !== undefined && <span className="ensemble-postref">#{line.post}</span>}
+          </span>
+          <span className="ensemble-line-owners">
+            {owners.slice(0, 4).map((owner) =>
+              owner === "maestro" ? (
+                <EnsembleAvatar key={owner} kind="maestro" size="sm" />
+              ) : (
+                <EnsembleAvatar
+                  key={owner}
+                  kind="member"
+                  color={ensembleAuthorColor(ensemble.members, owner, "member")}
+                  size="sm"
+                />
+              ),
+            )}
+          </span>
+          {line.progress !== undefined && (
+            <span className={`ensemble-line-progress${waiting ? " wait" : ""}`}>
+              {waiting && <Icon name="time" size={ICON_SM} />}
+              <span className="txt">{line.progress.text}</span>
+              {line.progress.post !== undefined && (
+                <span className="ensemble-postref ref">#{line.progress.post}</span>
+              )}
             </span>
           )}
-          <span className="ensemble-line-owner">{ensembleOwnerLabel(line.owner)}</span>
-          {line.post !== undefined && <span className="ensemble-postref">#{line.post}</span>}
-        </div>
-        {lineStats.total > 0 && (
-          <div className="ensemble-line-bar" aria-hidden="true">
-            <i style={{ width: `${Math.round(lineStats.ratio * 100)}%` }} />
-          </div>
-        )}
-        {line.progress !== undefined && (
-          <div className={`ensemble-line-progress${waiting ? " wait" : ""}`}>
-            {waiting && <Icon name="time" size={ICON_SM} />}
-            <span className="ensemble-line-progress-text">{line.progress.text}</span>
-            {line.progress.post !== undefined && (
-              <span className="ensemble-postref">#{line.progress.post}</span>
-            )}
-          </div>
-        )}
+        </button>
         {open && line.tasks.length > 0 && (
-          <div className="ensemble-tasks">{sortTasks(line.tasks).map((task) => taskRow(line, task))}</div>
+          <ul className="ensemble-tasks">{sortTasks(line.tasks).map((task) => taskRow(task))}</ul>
         )}
       </section>
     );
@@ -648,32 +688,47 @@ export function EnsemblePane({
           </section>
         )}
         {overview.checkpoints.length > 0 && (
-          <section className="ensemble-ov-block">
-            <h4 className="ensemble-ov-h">检查点</h4>
-            <ul className="ensemble-ov-cps">
-              {overview.checkpoints.map((checkpoint) => (
-                <li key={checkpoint}>
-                  <span className="ensemble-cp-box" aria-hidden="true" />
-                  <span>{checkpoint}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+          <ul className="ensemble-ov-cps">
+            {overview.checkpoints.map((checkpoint) => (
+              <li key={checkpoint}>
+                <span className="ensemble-cp-tag">检查点</span>
+                <span>{checkpoint}</span>
+              </li>
+            ))}
+          </ul>
         )}
         {stats !== undefined && stats.total > 0 && (
           <div className="ensemble-ov-progress">
-            <div className="ensemble-ov-progress-head">
-              <span>{`任务 ${stats.done}/${stats.total} 已完成`}</span>
-              {ended && <span className="ensemble-ov-ended">已结束</span>}
+            <div className="ensemble-ov-sum">
+              <h3>任务</h3>
+              <span className="n">{`${stats.done}/${stats.total}`}</span>
+              <span className="t">已完成</span>
+              <span className="flags">
+                {ended && <span className="ensemble-ov-ended">已结束</span>}
+                {stats.work > 0 && (
+                  <span className="flag">
+                    <span className="ensemble-dot work" aria-hidden="true" />
+                    {`${stats.work} 进行中`}
+                  </span>
+                )}
+                {stats.wait > 0 && (
+                  <span className="flag wait">
+                    <Icon name="time" size={ICON_SM} />
+                    {`${stats.wait} 等待`}
+                  </span>
+                )}
+              </span>
             </div>
             <div className="ensemble-ov-bar" aria-hidden="true">
-              <i style={{ width: `${Math.round(stats.ratio * 100)}%` }} />
+              {allTasks.map((task) => (
+                <i key={task.id} className={task.status} />
+              ))}
             </div>
           </div>
         )}
         {ended && stats?.total === 0 && (
           <div className="ensemble-ov-progress">
-            <div className="ensemble-ov-progress-head">
+            <div className="ensemble-ov-sum">
               <span className="ensemble-ov-ended">已结束</span>
             </div>
           </div>
@@ -785,16 +840,38 @@ export function EnsemblePane({
         <>
           <div className="ensemble-boardbar">
             <div className="ensemble-boardbar-row">
-              <input
-                type="text"
-                className="ensemble-q"
-                aria-label="搜索留言"
-                placeholder="搜索留言"
-                value={query}
-                onChange={(event) => {
-                  patch({ query: event.target.value });
-                }}
-              />
+              <div className="ensemble-q-wrap">
+                <input
+                  type="text"
+                  className="ensemble-q"
+                  aria-label="搜索留言"
+                  placeholder="搜索留言"
+                  value={query}
+                  onChange={(event) => {
+                    patch({ query: event.target.value });
+                  }}
+                />
+                {query.trim() !== "" && (
+                  <span className="ensemble-q-hits">{`${posts.length}/${ensemble.posts.length}`}</span>
+                )}
+                {query.trim() !== "" && (
+                  <span className="ensemble-q-hits" aria-hidden="true">
+                    {posts.length}
+                  </span>
+                )}
+                {query !== "" && (
+                  <button
+                    type="button"
+                    className="ensemble-q-x"
+                    aria-label="清空搜索"
+                    onClick={() => {
+                      patch({ query: "" });
+                    }}
+                  >
+                    <Icon name="close" size={ICON_SM} />
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 className={filterOpen || filterCount > 0 ? "ensemble-ib on" : "ensemble-ib"}

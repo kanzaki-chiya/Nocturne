@@ -25,7 +25,8 @@ export interface EnsembleToolOutcome<T = unknown> {
 
 export interface EnsembleToolFailure {
   ok: false;
-  code: "invalid_input" | "ensemble_error";
+  /** `invalid_input` 输入校验失败；`ensemble_error` 合奏状态不满足；`write_failed` 持久写入失败（未落盘、可安全重试） */
+  code: "invalid_input" | "ensemble_error" | "write_failed";
   message: string;
   userMessage?: string | undefined;
 }

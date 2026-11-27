@@ -212,6 +212,15 @@ describe("Ensemble 面板页签与概览", () => {
     expect(screen.getByRole("tab", { name: "概览" }).getAttribute("aria-selected")).toBe("true");
   });
 
+  it("首次打开就带着 boardNonce（/ensemble board 直达）时落在留言板页签", () => {
+    renderPane({
+      ensemble: makeEnsemble({ overview: makeOverview() }),
+      boardNonce: 3,
+    });
+    expect(screen.getByRole("tab", { name: "留言板" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "概览" }).getAttribute("aria-selected")).toBe("false");
+  });
+
   it("boardNonce 变化时强制切到留言板页签", () => {
     const page = renderPane({
       ensemble: makeEnsemble({ overview: makeOverview() }),
@@ -228,10 +237,10 @@ describe("Ensemble 面板页签与概览", () => {
     });
     expect(page.container.textContent).toContain("实现 REST API v1");
     expect(texts(page.container, ".ensemble-ov-cps li")).toEqual([
-      "所有验收标准通过",
-      "无 lint 错误",
+      "检查点所有验收标准通过",
+      "检查点无 lint 错误",
     ]);
-    expect(page.container.textContent).toContain("任务 2/6 已完成");
+    expect(page.container.textContent).toContain("2/6");
 
     const lines = nodes(page.container, ".ensemble-line");
     expect(lines).toHaveLength(3);
@@ -240,16 +249,14 @@ describe("Ensemble 面板页签与概览", () => {
     expect(lines[1]?.classList.contains("open")).toBe(true);
     expect(lines[2]?.classList.contains("open")).toBe(false);
     // 展开线内任务按 待办→进行中 排序（ADR-0131 §6）
-    expect(texts(lines[1] as HTMLElement, ".ensemble-task-title")).toEqual([
+    expect(texts(lines[1] as HTMLElement, ".ensemble-task-ttl")).toEqual([
       "任务单 schema",
-      "失败重派策略",
+      "失败重派策略进行中",
     ]);
-    expect(texts(lines[1] as HTMLElement, ".ensemble-task-owner")).toEqual(["@runtime", "@runtime"]);
-    // 负责人与帖号引用
-    expect(texts(lines[1] as HTMLElement, ".ensemble-line-owner")).toEqual(["@runtime"]);
-    expect(lines[1]?.querySelector(".ensemble-line-head .ensemble-postref")?.textContent).toBe(
-      "#5",
-    );
+    expect(texts(lines[1] as HTMLElement, ".ensemble-owner > span:last-child")).toEqual(["@runtime", "@runtime"]);
+    // 线头负责人为头像组，帖号引用在进展行右端
+    expect(lines[1]?.querySelectorAll(".ensemble-line-owners .ensemble-av").length).toBeGreaterThan(0);
+    expect(lines[1]?.querySelector(".ensemble-line-head .ensemble-postref")?.textContent).toBe("#5");
     // 等待中的线显示 time 图标与 warning 进度
     expect(lines[2]?.classList.contains("wait")).toBe(true);
     expect(lines[2]?.querySelector(".ensemble-line-progress")?.textContent).toContain(
@@ -268,7 +275,7 @@ describe("Ensemble 面板页签与概览", () => {
       ensemble: makeEnsemble({ overview: makeOverview() }),
     });
     const toggleOf = (index: number) =>
-      nodes(page.container, ".ensemble-line-toggle")[index] as HTMLElement;
+      nodes(page.container, ".ensemble-line-head")[index] as HTMLElement;
     // 折叠默认展开的 l2
     fireEvent.click(toggleOf(1));
     expect(nodes(page.container, ".ensemble-line")[1]?.classList.contains("open")).toBe(false);

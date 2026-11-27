@@ -473,8 +473,11 @@ describe("作者、提及、筛选、搜索与分组", () => {
     expect(ensembleOverviewStats({ lines: [line("a", ["done", "done"]), line("b", ["todo"])] })).toEqual({
       total: 3,
       done: 2,
+      work: 0,
+      wait: 0,
       ratio: 2 / 3,
     });
+    expect(ensembleOverviewStats({ lines: [line("a", ["work", "wait"])] })).toMatchObject({ work: 1, wait: 1 });
     expect(ensembleOwnerLabel("maestro")).toBe("指挥");
     expect(ensembleOwnerLabel("web")).toBe("@web");
   });

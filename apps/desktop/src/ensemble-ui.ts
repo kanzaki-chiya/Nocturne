@@ -544,19 +544,27 @@ export function ensembleLineStats(line: Pick<EnsembleLine, "tasks">): EnsembleLi
   };
 }
 
-/** 概览合计：任务总数、完成数与总进度条占比 */
+/** 概览合计：任务总数、完成数、进行中/等待数与总进度条占比 */
 export function ensembleOverviewStats(overview: Pick<EnsembleOverview, "lines">): {
   total: number;
   done: number;
+  work: number;
+  wait: number;
   ratio: number;
 } {
   let total = 0;
   let done = 0;
+  let work = 0;
+  let wait = 0;
   for (const line of overview.lines) {
     total += line.tasks.length;
-    done += line.tasks.filter((task) => task.status === "done").length;
+    for (const task of line.tasks) {
+      if (task.status === "done") done += 1;
+      else if (task.status === "work") work += 1;
+      else if (task.status === "wait") wait += 1;
+    }
   }
-  return { total, done, ratio: total === 0 ? 0 : done / total };
+  return { total, done, work, wait, ratio: total === 0 ? 0 : done / total };
 }
 
 /**
