@@ -184,3 +184,13 @@
 **测试证据（fix2 后实测）**：Core external-agents-runtime **26/26**（重写 3 项权限主体用例为精确执行者一致性验证 + 新增双 agent 不误伤用例）；connector 持久化最小化哨兵 + 历史兼容用例通过；`worker-lock.test.ts` **5/5**。
 
 **修复了 fix1 报告第 49/96 行的错误结论**：fix1 报告与 `subagent.md` 原称「续派产出通用主体 `subagent external:worker`，两条路径尊重同一具体执行者的禁止/审批规则」——前半句属实但后半句不成立：占位主体使 `deny external:<agent>` 对续派失效，并非真正的同一执行者判定。本轮纠正后文档与行为一致。
+
+### 第五阶段锁原语重写（2026-11-27 lock，事务互斥替代存在性锁）
+
+fix2 第 3 条的 token 守卫只是在存在性锁的固有病态上打补丁，并未消除临界区：`isStaleLock` 只返回 boolean，后读的 `staleToken` 可能已是新持有者；即便前后读到同一 token，read 之后的 `unlink` 也不与换持互斥。旧测试只在 `createExclusive` 前固定 sleep 5ms，不能证明这个临界区。本轮把 worker 跨进程互斥整体重写为成熟的事务原语，不再靠增加读取次数或延时。
+
+**新原语：每 worker 一个独立 SQLite 数据库文件的写事务**（`packages/core/src/external-workers/lock.ts`）。获取锁 = 打开 `<NOCTURNE_HOME>/external-workers/<workerId>.lock.db`，`BEGIN IMMEDIATE` 写入占位行并保持事务不提交；release = `ROLLBACK`。正确性由 SQLite 在文件层强制的「同一时刻至多一个未提交写事务」保证：持有者存活时竞争者 `BEGIN IMMEDIATE` 立即 `database is locked`（busy_timeout=0）→ `worker_busy`；持有进程崩溃（含未提交事务被强杀）时操作系统关闭其文件句柄、SQLite 下次访问自动回滚该未完成事务，锁随之释放——彻底删除 pid 探测、开机时间判定与 token 归属校验这三类失效判定逻辑，它们正是「检查与回收」临界区的来源。采用每 worker 独立文件而非单一 `worker-locks.db`，是因为实测确认 SQLite 写事务是**全库级**写锁、无行级写锁——单库下任一 worker 的未提交写事务会阻塞所有其他 worker，把「不同 worker 可并行」错误串行化；文件独立则不同 worker 的写事务互不干扰。`node:sqlite` 是 Node 内置模块（产品要求 Node >=24.16，`DatabaseSync` 自 23.4 稳定），零新增第三方依赖；SQLite 事务语义在 Windows/macOS/Linux 一致，不依赖任何平台特定的文件锁、socket 或 unlink 技巧。
+
+**验收证据（真跨进程屏障/握手，非固定毫秒延时）**：`packages/core/test/worker-lock.test.ts` 7/7——用 `spawn` 起独立 node 进程持锁、经 stdio 消息屏障（等子进程打印 `HOLDING` 才行进，非 sleep）协调时序：恢复竞争中只有一个进程进入 worker 操作（持有者存活时本进程与独立进程竞争者均 busy/拒绝）；持有进程被 SIGKILL（含未提交事务）后其余进程立即可取锁（崩溃可恢复）；优雅 release 后立即可再获取（非永久锁）；两个不同 worker 各自由独立进程并行持锁成功；同进程两个独立获取互斥、释放后快速连续 5 次无死锁。`packages/acp/test/connector.test.ts` 64 通过 1 跳过——含真跨进程强杀崩溃恢复用例（独立进程持锁→SIGKILL→connector 续派不再 busy 且 `resumed`）。
+
+**如实陈述的限制**：(1) 互斥依赖所有宿主都经同一 connector 路径——绕过 Nocturne 直接对 worker 进程发 `session/load` 不受约束（非强制性，与 ADR-0009 会话锁同类限制）；(2) `.lock.db` 数据库文件本身在 release 后仍保留为空表文件（锁语义全在写事务，不在文件存在性），不参与清理；(3) 本机验证环境为 Windows（Node v24.21.0）；SQLite 写事务的跨进程互斥与崩溃回滚语义由 SQLite 在 POSIX/Windows 一致的文件锁实现保证，macOS/Linux 行为未在本机实机复跑，但同属 SQLite 支持的标准事务路径、无平台特定代码；(4) fix1 引入的「独立 worker 并行」测试存在与锁无关的时序死锁（`Promise.all` 等待挂起的 `loadableRelease`，而放行文件在其之后才写），该用例在 fix2 基线 b68dbe2f 本就超时失败，本轮一并修正其放行时序后通过——此为测试修复，不改变被测行为。
