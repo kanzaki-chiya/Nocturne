@@ -41,6 +41,7 @@ import {
   type ToolKind,
 } from "@agentclientprotocol/sdk";
 import {
+  IMAGE_MAX_BYTES,
   RuntimeCommandError,
   type McpServerConfig,
   type McpValue,
@@ -405,6 +406,45 @@ interface ConvertedPrompt {
  *
  * 失败关闭：任何块无法解码或类型不支持，整体抛错——不会产生部分提交。
  */
+
+/**
+ * 严格 base64 校验（ADR-0127 第四阶段返工）：Node 的 Buffer.from(x,"base64")
+ * 会静默忽略非法字符（"!"、空格、换行等）且不抛错——try/catch 无法完成格式校验。
+ * 这里先按 RFC 4648 严格校验字符集/长度/padding，并在解码前预估字节数提前拒绝超限，
+ * 避免为超限输入分配大缓冲。解码后长度必须与预估一致（不容忍被忽略的字符）。
+ * 导出以供单元测试临界值（非法字符、混合、恰好等于/超过上限）。
+ */
+export function decodeAcpBase64(b64: string, kind: string, maxBytes: number): Uint8Array {
+  if (typeof b64 !== "string" || b64.length === 0) {
+    throw RequestError.invalidParams({ contentType: kind }, `${kind} 内容块的 base64 为空`);
+  }
+  // 字符集仅 A-Za-z0-9+/，padding = 只允许出现在末尾且至多 2 个
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64) || b64.length % 4 !== 0) {
+    throw RequestError.invalidParams(
+      { contentType: kind },
+      `${kind} 内容块的 base64 含非法字符或长度不合法`,
+    );
+  }
+  // 预估解码后字节数（每 4 字符 3 字节，每个 padding 减 1）；提前拒绝超限再分配缓冲
+  const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
+  const estimatedBytes = (b64.length / 4) * 3 - padding;
+  if (estimatedBytes > maxBytes) {
+    throw RequestError.invalidParams(
+      { contentType: kind, bytes: estimatedBytes, maxBytes },
+      `${kind} 内容块超过大小上限（约 ${estimatedBytes} 字节 > ${maxBytes} 字节）`,
+    );
+  }
+  const buf = Buffer.from(b64, "base64");
+  // 严格性复核：解码长度必须与预估一致——Node 忽略非法字符会得到更短结果，视为非法
+  if (buf.byteLength !== estimatedBytes) {
+    throw RequestError.invalidParams(
+      { contentType: kind },
+      `${kind} 内容块的 base64 无法完整解码`,
+    );
+  }
+  return new Uint8Array(buf);
+}
+
 function convertPromptBlocks(blocks: readonly AcpContentBlock[]): ConvertedPrompt {
   if (blocks.length === 0) {
     throw RequestError.invalidParams(undefined, "prompt 内容不能为空");
@@ -412,15 +452,14 @@ function convertPromptBlocks(blocks: readonly AcpContentBlock[]): ConvertedPromp
   const content: { type: "text"; text: string }[] = [];
   const attachments: ConvertedPrompt["attachments"] = [];
   // 当前应把图片插入到其后的文本块索引：取当前已产出文本块的末位。
-  // 尚无文本块时（图片在开头）插入到位置 0 之前——用 0 并依赖投影的 clamp。
-  const currentTextIndex = (): number => Math.max(0, content.length - 1);
+  // 尚无文本块时（图片在开头/连续前置）插入到第 0 块之前——用 -1 表示"最前"，
+  // 与"在第 0 块之后"（afterBlock=0）区分：首图在首段文字之前而非之后。
+  const currentTextIndex = (): number => content.length - 1;
 
   const decodeBase64 = (b64: string, kind: string): Uint8Array => {
-    try {
-      return new Uint8Array(Buffer.from(b64, "base64"));
-    } catch {
-      throw RequestError.invalidParams({ contentType: kind }, `${kind} 内容块的 base64 无法解码`);
-    }
+    // 默认按图片上限（最大单附件）：图片嗅探/Core 校验在提交时再次把关，
+    // 这里在解码前用最大可能值提前拦截超限，避免分配大缓冲。
+    return decodeAcpBase64(b64, kind, IMAGE_MAX_BYTES);
   };
 
   const pushImage = (

@@ -273,7 +273,7 @@ type ImageAttachment = {
   label?: string            // 人读名（如原始文件名）
   source: "paste" | "read" | "mcp"   // 附件来源
   processed?: ProcessedImage[]       // 可选（ADR-0090）：自动缩小或长图切段结果；旧日志缺省，不提升 formatVersion
-  afterBlock?: number         // 可选（ADR-0127 第四阶段）：交错位置提示——该图片应插入所属 user 消息 content 文本块序列第 N 块（0-based）之后；缺省 = 末尾追加。仅用户提交保序场景设置，read/mcp 工具结果图不使用；兼容扩展，旧版本忽略，不提升 formatVersion
+  afterBlock?: number         // 可选（ADR-0127 第四阶段）：交错位置提示——该图片应插入所属 user 消息 content 文本块序列第 N 块（0-based）之后；取 -1 表示插入第 0 块之前（开头），越界（≥ 文本块数）追加到末尾；缺省 = 末尾追加。仅用户提交保序场景设置，read/mcp 工具结果图不使用；兼容扩展，旧版本忽略，不提升 formatVersion
 }
 
 /** ask_user 提问条目（ADR-0032 §1）；字段边界与校验规则

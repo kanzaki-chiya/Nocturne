@@ -18,7 +18,7 @@ export function validateAttachmentInputs(inputs: AttachmentInput[]): string | un
       (input.label !== undefined && typeof input.label !== "string") ||
       (input.source !== undefined && !["paste", "upload", "answer"].includes(input.source)) ||
       (input.afterBlock !== undefined &&
-        (!Number.isInteger(input.afterBlock) || input.afterBlock < 0))
+        (!Number.isInteger(input.afterBlock) || input.afterBlock < -1))
     )
       return "附件参数无效";
     const sniffed = sniffImageMime(input.data);

@@ -31,6 +31,7 @@ import { removeTempDirs } from "../../../scripts/test/process-cleanup.mjs";
 import {
   createAcpAgentServer,
   createAcpStdioStream,
+  decodeAcpBase64,
   type AcpAgentDiagnostic,
 } from "../src/agent.js";
 
@@ -2608,6 +2609,248 @@ describe("图片与文本附件（ADR-0127 第四阶段）", () => {
         ],
       }),
     ).rejects.toMatchObject({ code: -32602 });
+  });
+
+  // 有效 1x1 PNG，两个不同指纹（红/蓝），用于区分 image1/image2 的实际顺序
+  const PNG_RED =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+  const PNG_BLUE =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC";
+
+  const lastUserImages = (
+    h: { provider: { requests: { messages: unknown[] }[] } },
+    marker: string,
+  ): { images: { data?: string; afterBlock?: number }[]; content: { type: string; text?: string }[] } => {
+    const req = h.provider.requests.find((r) =>
+      (r.messages as { role: string; content: { type: string; text?: string }[] }[]).some(
+        (m) => m.role === "user" && m.content.some((b) => b.type === "text" && (b.text ?? "").includes(marker)),
+      ),
+    );
+    const userMsg = (req?.messages as { role: string; images?: unknown; content: unknown }[] | undefined)
+      ?.filter((m) => m.role === "user")
+      .at(-1);
+    return {
+      images: (userMsg?.images ?? []) as { data?: string; afterBlock?: number }[],
+      content: (userMsg?.content ?? []) as { type: string; text?: string }[],
+    };
+  };
+
+  it("前置图片（开头）：afterBlock=-1 表示在第 0 块之前，与首段文字后的图片区分", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [
+        { type: "image", data: PNG_RED, mimeType: "image/png" },
+        { type: "text", text: "LEAD-MARKER" },
+      ],
+    });
+    const { images } = lastUserImages(h, "LEAD-MARKER");
+    expect(images.length).toBe(1);
+    // 开头图片：afterBlock=-1（在第 0 块之前），不是 0（在第 0 块之后）
+    expect(images[0]?.afterBlock).toBe(-1);
+    expect(images[0]?.data).toBe(PNG_RED);
+  });
+
+  it("连续前置两图：同槽（-1）保持提交顺序，image1/image2 指纹不串", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [
+        { type: "image", data: PNG_RED, mimeType: "image/png" },
+        { type: "image", data: PNG_BLUE, mimeType: "image/png" },
+        { type: "text", text: "DOUBLE-LEAD" },
+      ],
+    });
+    const { images } = lastUserImages(h, "DOUBLE-LEAD");
+    expect(images.length).toBe(2);
+    // 两张都在开头槽（-1），顺序保持提交顺序：红在前、蓝在后
+    expect(images[0]?.afterBlock).toBe(-1);
+    expect(images[1]?.afterBlock).toBe(-1);
+    expect(images[0]?.data).toBe(PNG_RED);
+    expect(images[1]?.data).toBe(PNG_BLUE);
+  });
+
+  it("纯图片（无文本）：afterBlock=-1，两张指纹都保留不丢失", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [
+        { type: "image", data: PNG_RED, mimeType: "image/png" },
+        { type: "image", data: PNG_BLUE, mimeType: "image/png" },
+      ],
+    });
+    // 纯图片：最后 user 消息（无文字标记）——取最近一次请求的 user 消息
+    const req = h.provider.requests.at(-1);
+    const userMsg = (req?.messages as { role: string; images?: unknown }[] | undefined)
+      ?.filter((m) => m.role === "user")
+      .at(-1);
+    const images = (userMsg?.images ?? []) as { data?: string; afterBlock?: number }[];
+    // 纯图片两张都必须保留（空 textParts 不丢图），红前蓝后
+    expect(images.length).toBe(2);
+    expect(images[0]?.afterBlock).toBe(-1);
+    expect(images[1]?.afterBlock).toBe(-1);
+    expect(images[0]?.data).toBe(PNG_RED);
+    expect(images[1]?.data).toBe(PNG_BLUE);
+  });
+
+  it("末尾图片：afterBlock 为最末文本块索引（末尾之后）", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [
+        { type: "text", text: "TAIL-A" },
+        { type: "text", text: "TAIL-B" },
+        { type: "image", data: PNG_RED, mimeType: "image/png" },
+      ],
+    });
+    const { images } = lastUserImages(h, "TAIL-A");
+    expect(images.length).toBe(1);
+    // 末尾图片在最末文本块（块1 TAIL-B）之后
+    expect(images[0]?.afterBlock).toBe(1);
+  });
+
+  it("混合交错序列位置：image1/textA/image2 各自位置正确区分", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [
+        { type: "image", data: PNG_RED, mimeType: "image/png" },
+        { type: "text", text: "MIX-A" },
+        { type: "image", data: PNG_BLUE, mimeType: "image/png" },
+      ],
+    });
+    const { images } = lastUserImages(h, "MIX-A");
+    expect(images.length).toBe(2);
+    // 红在开头（-1，MIX-A 之前）；蓝在 MIX-A（块0）之后（0）
+    expect(images[0]?.afterBlock).toBe(-1);
+    expect(images[0]?.data).toBe(PNG_RED);
+    expect(images[1]?.afterBlock).toBe(0);
+    expect(images[1]?.data).toBe(PNG_BLUE);
+  });
+
+  it("严格 base64 校验：含非法字符（!）即便能解出非空字节也整体拒绝，下一条合法输入仍正常", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    // "aGVsbG8!" 含非法字符 "!"：Node 会忽略它仍解出非空字节（5 字节），
+    // try/catch 无法发现——严格校验必须在解码前的字符集阶段拒绝
+    const before = h.provider.requests.length;
+    await expect(
+      h.conn.agent.request(methods.agent.session.prompt, {
+        sessionId,
+        prompt: [
+          { type: "text", text: "bad" },
+          { type: "image", data: "aGVsbG8!", mimeType: "image/png" },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    // 部分失败不提交：没有发出任何主推理请求
+    expect(h.provider.requests.length).toBe(before);
+    // 下一条合法输入仍正常（会话未被坏请求破坏）
+    const res = await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [
+        { type: "text", text: "good" },
+        { type: "image", data: PNG_RED, mimeType: "image/png" },
+      ],
+    });
+    expect(res).toEqual({ stopReason: "end_turn" });
+  });
+
+  it("严格 base64 校验：合法块与坏块混合时整体拒绝（原子提交）", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    const before = h.provider.requests.length;
+    await expect(
+      h.conn.agent.request(methods.agent.session.prompt, {
+        sessionId,
+        prompt: [
+          { type: "image", data: PNG_RED, mimeType: "image/png" },
+          { type: "text", text: "mixed" },
+          // "aGVs bG8" 含空格：Node 忽略空格仍解出非空字节，严格校验拒绝
+          { type: "image", data: "aGVs bG8", mimeType: "image/png" },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    expect(h.provider.requests.length).toBe(before);
+  });
+
+  it("严格 base64 校验：长度非 4 倍数、空 data、纯非法字符（#### 解出 0 字节）均拒绝", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    const before = h.provider.requests.length;
+    // 长度非 4 倍数
+    await expect(
+      h.conn.agent.request(methods.agent.session.prompt, {
+        sessionId,
+        prompt: [{ type: "image", data: "aGVsbG", mimeType: "image/png" }],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    // 纯非法字符：Node 解出 0 字节，严格校验在字符集阶段就拒绝
+    await expect(
+      h.conn.agent.request(methods.agent.session.prompt, {
+        sessionId,
+        prompt: [{ type: "image", data: "####", mimeType: "image/png" }],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    // 空 data
+    await expect(
+      h.conn.agent.request(methods.agent.session.prompt, {
+        sessionId,
+        prompt: [{ type: "image", data: "", mimeType: "image/png" }],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    expect(h.provider.requests.length).toBe(before);
+  });
+
+  it("严格 base64 临界值：恰好等于上限通过、超一字节拒绝（decodeAcpBase64 单元层，解码前拦截）", () => {
+    // 用小的 maxBytes 验证临界精确性（机制与 IMAGE_MAX_BYTES 相同，避免分配大缓冲）。
+    // maxBytes=6：6 字节 ↔ base64 8 字符（无 padding）；7 字节需 12 字符（去 padding 估 9>6）。
+    const valid6 = Buffer.from([1, 2, 3, 4, 5, 6]).toString("base64"); // 恰好 6 字节
+    expect(valid6.length % 4).toBe(0);
+    // 恰好等于上限：通过并解出正确字节
+    const ok = decodeAcpBase64(valid6, "image", 6);
+    expect(ok.byteLength).toBe(6);
+    expect([...ok]).toEqual([1, 2, 3, 4, 5, 6]);
+    // 超一字节（7 字节 → 预估 7 > 6）：解码前拒绝
+    const over7 = Buffer.from([1, 2, 3, 4, 5, 6, 7]).toString("base64");
+    expect(() => decodeAcpBase64(over7, "image", 6)).toThrowError(
+      expect.objectContaining({ code: -32602 }),
+    );
+    // 临界带 padding：4 字节 ↔ "AAAAAA==" 形式预估正确
+    const valid4 = Buffer.from([9, 9, 9, 9]).toString("base64");
+    expect(decodeAcpBase64(valid4, "image", 4).byteLength).toBe(4);
+    expect(() => decodeAcpBase64(valid4, "image", 3)).toThrowError(
+      expect.objectContaining({ code: -32602 }),
+    );
   });
 });
 

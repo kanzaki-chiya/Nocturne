@@ -270,6 +270,7 @@ export interface ImageAttachment {
   /**
    * 交错位置提示（ADR-0127 第四阶段；兼容扩展，旧版本忽略，不提升 formatVersion）：
    * 该图片在所属 user 消息 content 文本块序列中应插入到第 N 个块（0-based）之后。
+   * 取 -1 表示插入到第 0 块之前（开头）；越界位置（≥ 文本块数）追加到末尾。
    * 仅用户提交（paste/upload 来源、ACP 混合内容等保序场景）设置；
    * 缺省 = 无位置信息，投影沿用末尾追加行为。read/mcp 工具结果图不使用。
    */

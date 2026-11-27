@@ -107,17 +107,30 @@ export function toAiMessages(
           const byPosition = new Map<number, ModelImage[]>();
           for (const img of images) {
             if (img.afterBlock === undefined) continue;
-            const pos = Math.min(img.afterBlock, textParts.length - 1);
+            const pos = img.afterBlock;
             const bucket = byPosition.get(pos) ?? [];
             bucket.push(img);
             byPosition.set(pos, bucket);
+          }
+          // 开头桶（-1）：在第 0 个文本块之前输出；纯图片（无文本块）时也照常最前输出
+          const leading = byPosition.get(-1);
+          if (leading !== undefined) {
+            for (const img of leading) content.push(toFilePart(img));
+            byPosition.delete(-1);
           }
           for (const [index, part] of textParts.entries()) {
             content.push(part);
             const inserted = byPosition.get(index);
             if (inserted !== undefined) {
               for (const img of inserted) content.push(toFilePart(img));
+              byPosition.delete(index);
             }
+          }
+          // 越界位置（afterBlock ≥ 文本块数）按位置升序追加到末尾，
+          // 同一位置内保持提交顺序——纯图片/越界场景不丢失任何图片
+          const overflow = [...byPosition.entries()].sort(([a], [b]) => a - b);
+          for (const [, bucket] of overflow) {
+            for (const img of bucket) content.push(toFilePart(img));
           }
           for (const img of trailing) content.push(toFilePart(img));
         }

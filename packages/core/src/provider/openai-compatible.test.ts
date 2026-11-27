@@ -438,6 +438,121 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
     );
     expect(shape).toEqual(["text:text A", "image", "text:text B", "image"]);
   });
+
+  // 两个不同指纹的图片（data 不同），用于在 wire 上区分 image1/image2 的身份与顺序
+  const pngRed = { mimeType: "image/png" as const, data: "UkVE" }; // "RED"
+  const pngBlue = { mimeType: "image/png" as const, data: "QkxVRQ==" }; // "BLUE"
+  const imgFingerprint = (part: Record<string, unknown>): string => {
+    const url = (part["image_url"] as { url?: string } | undefined)?.url ?? "";
+    return url;
+  };
+
+  it("前置图片（afterBlock=-1）：image_url 部件在第 0 个文本块之前，不堆到文字后", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "lead text" }],
+            images: [{ ...pngRed, afterBlock: -1 }],
+          },
+        ],
+      }),
+    );
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    const parts = msgs[1]?.["content"] as Record<string, unknown>[];
+    const shape = parts.map((part) =>
+      part["type"] === "image_url" ? "image" : `text:${String(part["text"])}`,
+    );
+    // 图片在最前，不是文字后
+    expect(shape).toEqual(["image", "text:lead text"]);
+    // 指纹：是红图
+    expect(imgFingerprint(parts[0]!)).toContain("UkVE");
+  });
+
+  it("纯图片（无文本块）：afterBlock=-1 的两张图都输出且不丢失，同槽保持顺序", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "user",
+            content: [],
+            images: [
+              { ...pngRed, afterBlock: -1 },
+              { ...pngBlue, afterBlock: -1 },
+            ],
+          },
+        ],
+      }),
+    );
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    const parts = msgs[1]?.["content"] as Record<string, unknown>[];
+    const images = parts.filter((part) => part["type"] === "image_url");
+    // 空 textParts 时两张图都必须输出（不丢图），红前蓝后
+    expect(images.length).toBe(2);
+    expect(imgFingerprint(images[0]!)).toContain("UkVE");
+    expect(imgFingerprint(images[1]!)).toContain("QkxVRQ");
+  });
+
+  it("末尾越界位置（afterBlock ≥ 文本块数）：图片追加到末尾，不丢失", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "only text" }],
+            images: [{ ...pngRed, afterBlock: 5 }],
+          },
+        ],
+      }),
+    );
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    const parts = msgs[1]?.["content"] as Record<string, unknown>[];
+    const shape = parts.map((part) =>
+      part["type"] === "image_url" ? "image" : `text:${String(part["text"])}`,
+    );
+    // 越界位置追加到末尾（文字之后）
+    expect(shape).toEqual(["text:only text", "image"]);
+  });
+
+  it("混合交错序列指纹核对：image1(红)/textA/image2(蓝) wire 顺序与身份", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "text A" }],
+            images: [
+              { ...pngRed, afterBlock: -1 },
+              { ...pngBlue, afterBlock: 0 },
+            ],
+          },
+        ],
+      }),
+    );
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    const parts = msgs[1]?.["content"] as Record<string, unknown>[];
+    // 逐 part 断言类型、顺序与图片指纹身份：红在 textA 前、蓝在 textA 后
+    expect(parts.length).toBe(3);
+    expect(parts[0]?.["type"]).toBe("image_url");
+    expect(imgFingerprint(parts[0]!)).toContain("UkVE");
+    expect(parts[1]?.["type"]).toBe("text");
+    expect(parts[1]?.["text"]).toBe("text A");
+    expect(parts[2]?.["type"]).toBe("image_url");
+    expect(imgFingerprint(parts[2]!)).toContain("QkxVRQ");
+  });
 });
 
 // ADR-0070：插话紧跟工具结果。Chat Completions 用独立的 role=tool 消息承载结果，

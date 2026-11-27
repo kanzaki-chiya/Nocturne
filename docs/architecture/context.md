@@ -55,7 +55,7 @@ Context Builder 不做 I/O，也不调用 Provider：指令文件由 `config` / 
 - `imageInput` 为 false → 有 `attachment.described` 描述的附件投影为 `[图片 #n 描述（由 <模型> 生成）]\n<描述>`；没有描述或描述失败时保留占位文字 `[image omitted: current model does not support image input]`。
 - 任一段或原图数据缺失 → `[image unavailable: attachment file missing]`，整组丢弃不发半截，引用记入 `missingAttachments`；Builder 不记诊断，由 Agent Loop 逐条记 `context.attachment_missing`。
 - 占位文字的落位：user 消息追加一个 text 块；tool 消息在 `content` 末尾每个占位前加 `\n` 追加。L1 修剪覆盖的 tool 条目保持原占位说明，不附加任何图片占位或图片。
-- **交错位置提示**（ADR-0127 第四阶段，2026-11-27）：`ImageAttachment` 与 `ModelImage` 支持可选 `afterBlock`（兼容扩展，不提升 `formatVersion`，旧版本忽略）。用户提交（ACP 混合内容等保序场景）可声明该图片应插入 user 消息 content 第 N 个文本块（0-based）之后；投影时按此把占位/描述文本穿插到对应块之后，适配器据此把图片部件穿插进有序文本流，而不是一律堆到全部文字之后。无 `afterBlock` 的附件（read/mcp 工具结果图、旧消息）沿用末尾追加行为不变。带位置与无位置附件混合时：带位置的穿插、无位置的追加末尾。
+- **交错位置提示**（ADR-0127 第四阶段，2026-11-27）：`ImageAttachment` 与 `ModelImage` 支持可选 `afterBlock`（兼容扩展，不提升 `formatVersion`，旧版本忽略）。用户提交（ACP 混合内容等保序场景）可声明该图片应插入 user 消息 content 第 N 个文本块（0-based）之后；取 -1 表示插入第 0 块之前（开头，与“在第 0 块之后”区分），越界位置（≥ 文本块数）追加到末尾；投影时按此把占位/描述文本穿插到对应块之后，适配器据此把图片部件穿插进有序文本流，而不是一律堆到全部文字之后。无文本块（纯图片）时带位置的图片仍按位置顺序输出、不丢失。无 `afterBlock` 的附件（read/mcp 工具结果图、旧消息）沿用末尾追加行为不变。带位置与无位置附件混合时：带位置的穿插、无位置的追加末尾。压缩后重注入的边缘路径因开头插入固定说明块使原始索引失真，故剥掉位置提示追加末尾，避免错位。
 - `attachmentData` 缺省（`undefined`）是**估算模式**——`describeContext`（`/context` 报告）走这条路：支持看图的模型按实际将发出的图片张数（含分段）和每张 1600 token 估算，并将上述切段说明块计入 `user` 字符/token 估算（超出 20 张上限被整组丢弃时移除该说明并替换为上限占位），不产生 `images` 也不算缺失。
 - 全部消息组装完（含 `pendingMessages`）做一次上限后处理：从最新往前按整组保留最多 20 张输出图片（同一原图的全部处理结果要么全留要么全舍），更早的从 `images` 移除（`user` 消息同时去掉对应的切段说明块）并按同一落位规则换成 `[image omitted: exceeds the per-request limit of 20 images]`。
 

@@ -617,8 +617,9 @@ function resolveAttachments(
  * user 消息附件占位/说明文本的落位归并（ADR-0127 第四阶段保序）。
  * - afterBlock undefined → 追加到全部内容块之后（旧行为，read/mcp 工具结果与
  *   无位置信息的旧附件一致）；
- * - afterBlock N → 插入到 content[N] 之后；同一位置的文本保持附件提交顺序；
- * - 越界位置 clamp 到末尾。
+ * - afterBlock N（N ≥ 0）→ 插入到 content[N] 之后；
+ * - afterBlock -1 → 插入到第 0 块之前（开头）；同一位置的文本保持附件提交顺序；
+ * - 越界位置 clamp 到末尾；无文本块时所有定位文本仍按位置顺序输出（不丢失）。
  * 图片本身不进 content（中性请求里走 images 通道），这里只归并文本占位/说明。
  */
 function mergeUserBlocks(
@@ -633,18 +634,31 @@ function mergeUserBlocks(
   // 按位置分桶（保持提交顺序）；位置相对原始 content 块索引计算
   const byPosition = new Map<number, string[]>();
   for (const t of positioned) {
-    const pos = Math.min(t.afterBlock ?? 0, content.length - 1);
+    const pos = t.afterBlock ?? 0;
     const bucket = byPosition.get(pos) ?? [];
     bucket.push(t.text);
     byPosition.set(pos, bucket);
   }
   const out: ContentBlock[] = [];
+  // 开头桶（-1）：在第 0 块之前插入；无文本块时也照常在最前输出
+  const leading = byPosition.get(-1);
+  if (leading !== undefined) {
+    for (const text of leading) out.push({ type: "text", text });
+    byPosition.delete(-1);
+  }
   for (const [index, block] of content.entries()) {
     out.push(block);
     const inserted = byPosition.get(index);
     if (inserted !== undefined) {
       for (const text of inserted) out.push({ type: "text", text });
+      byPosition.delete(index);
     }
+  }
+  // 越界位置（afterBlock ≥ content.length，即末尾之后）按位置升序追加到末尾，
+  // 同一位置内保持提交顺序——纯图片/越界场景不丢失任何定位文本
+  const overflow = [...byPosition.entries()].sort(([a], [b]) => a - b);
+  for (const [, bucket] of overflow) {
+    for (const text of bucket) out.push({ type: "text", text });
   }
   for (const t of trailing) out.push({ type: "text", text: t.text });
   return out;
@@ -1544,14 +1558,20 @@ export function buildContext(input: BuildContextInput): BuiltContext {
         { type: "text", text: REINJECTED_TASK_MARK },
         ...original.content,
         ...steers,
-        // 重注入消息在原始 content 前插入了固定说明块，附件的 afterBlock 位置
-        // 相对原始消息已失真；这条压缩后的边缘路径把占位/说明文本追加到末尾。
+        // 重注入消息在原始 content 前插入了固定说明块（且合并了插话），附件的
+        // afterBlock 位置相对原始消息已失真；这条压缩后的边缘路径把占位/说明文本
+        // 追加到末尾，图片 likewise 剥掉位置提示追加末尾——避免按失真索引错位。
         ...atts.texts.map((t) => ({ type: "text" as const, text: t.text })),
       ];
+      const reinjectedImages = atts.images.map((img) => {
+        if (img.afterBlock === undefined) return img;
+        const { afterBlock: _dropped, ...rest } = img;
+        return rest;
+      });
       const msg: ModelMessage = {
         role: "user",
         content: blocks,
-        ...(atts.images.length > 0 ? { images: atts.images } : {}),
+        ...(reinjectedImages.length > 0 ? { images: reinjectedImages } : {}),
       };
       if (atts.imageGroups.length > 0) imageOpts.imageGroups?.set(msg, atts.imageGroups);
       if (atts.virtualGroups.length > 0) imageOpts.virtualGroups?.set(msg, atts.virtualGroups);
