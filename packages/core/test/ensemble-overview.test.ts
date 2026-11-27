@@ -224,7 +224,7 @@ function makeControllerHarness() {
   };
 
   const controller = createEnsembleController(deps);
-  return { controller, durable, memberSpecs };
+  return { controller, durable, memberSpecs, deps };
 }
 
 async function setupEnsemble(
@@ -827,6 +827,102 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
     );
     expect(revisions).toEqual([1, 2, 3]);
     expect(replaySessionView(s2.durableEvents()).ensemble?.overview?.goal).toBe("重启后续写");
+  });
+
+  it("持久写失败：revision/指纹/视图不推进，错误显式可重试；相同请求重试成功且不误去重", async () => {
+    const { controller, durable, deps } = makeControllerHarness();
+    await setupEnsemble(controller);
+    const tool = must(controller.maestroTools().find((t) => t.name === "ensemble_overview"));
+
+    // 基线写入 rev1
+    const first = await tool.execute({ base: 0, goal: "基线目标" }, {} as never);
+    expect(first.status).toBe("ok");
+    expect((first.output as EnsembleOverviewWriteOutput).revision).toBe(1);
+
+    // 劫持 emitDurable 仅对 ensemble.overview_updated 失败一次
+    const originalEmit = deps.emitDurable;
+    let failWrites = true;
+    deps.emitDurable = (type, payload) => {
+      if (type === "ensemble.overview_updated" && failWrites) {
+        return Promise.reject(new Error("simulated disk full"));
+      }
+      return originalEmit(type, payload);
+    };
+
+    const input = { base: 1, tasks: [{ id: "t-x", line: "line-x", title: "x", status: "todo", owner: "impl-1" }], lines: [{ id: "line-x", title: "线", owner: "impl-1" }] };
+    const failed = await tool.execute(input, {} as never);
+    expect(failed.status).toBe("error");
+    expect(failed.modelContent).toContain("nothing was written");
+    expect(failed.modelContent).toContain("safe to retry");
+
+    // 未落盘进展不得被当作成功：事件没有多写、视图与 revision 仍是旧状态
+    expect(durable.filter((ev) => ev.type === "ensemble.overview_updated")).toHaveLength(1);
+    const viewBefore = replaySessionView(durable);
+    expect(viewBefore.ensemble?.overview?.revision).toBe(1);
+    expect(viewBefore.ensemble?.overview?.lines).toHaveLength(0);
+
+    // 相同请求重试：不能被误去重（第一次并未成功落盘），必须真正执行写入
+    failWrites = false;
+    const retry = await tool.execute(input, {} as never);
+    expect(retry.status).toBe("ok");
+    expect((retry.output as EnsembleOverviewWriteOutput).revision).toBe(2);
+    expect((retry.output as EnsembleOverviewWriteOutput).deduplicated).toBe(false);
+    expect(durable.filter((ev) => ev.type === "ensemble.overview_updated")).toHaveLength(2);
+    const viewAfter = replaySessionView(durable);
+    expect(viewAfter.ensemble?.overview?.revision).toBe(2);
+    expect(viewAfter.ensemble?.overview?.lines[0]?.tasks[0]?.id).toBe("t-x");
+
+    // 第三次相同输入才是真正的幂等重试
+    const dedup = await tool.execute(input, {} as never);
+    expect(dedup.status).toBe("ok");
+    expect((dedup.output as EnsembleOverviewWriteOutput).deduplicated).toBe(true);
+    expect(durable.filter((ev) => ev.type === "ensemble.overview_updated")).toHaveLength(2);
+
+    deps.emitDurable = originalEmit;
+  });
+
+  it("同基线并发竞争：串行化后恰有一次接受，另一次以 base 不匹配拒绝或幂等去重，revision 连续", async () => {
+    const { controller, durable } = makeControllerHarness();
+    await setupEnsemble(controller);
+    const tool = must(controller.maestroTools().find((t) => t.name === "ensemble_overview"));
+
+    await tool.execute({ base: 0, goal: "并发基线" }, {} as never);
+
+    // 并发触发两个同 base=1 的不同更新（不 await，直接同 tick 发出）
+    const inputA = { base: 1, goal: "更新A" };
+    const inputB = { base: 1, lines: [{ id: "line-b", title: "B线", owner: "impl-1" }] };
+    const [resA, resB] = await Promise.all([
+      tool.execute(inputA, {} as never),
+      tool.execute(inputB, {} as never),
+    ]);
+
+    const results = [resA, resB];
+    const accepted = results.filter((r) => r.status === "ok");
+    const rejected = results.filter((r) => r.status === "error");
+    // 恰一次成功一次拒绝：串行队列保证后入队者看到 rev 已推进
+    expect(accepted).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.modelContent).toContain("does not match the current revision");
+
+    // revision 连续、视图与事件一致
+    const events = durable.filter((ev) => ev.type === "ensemble.overview_updated");
+    expect(events.map((ev) => (ev.type === "ensemble.overview_updated" ? ev.payload.revision : 0))).toEqual([1, 2]);
+    const view = replaySessionView(durable);
+    expect(view.ensemble?.overview?.revision).toBe(2);
+
+    // 相同输入并发（两个完全相同的更新）：一个写入、一个幂等去重，不产生重复事件
+    const inputC = { base: 2, goal: "相同并发" };
+    const [c1, c2] = await Promise.all([
+      tool.execute(inputC, {} as never),
+      tool.execute(inputC, {} as never),
+    ]);
+    const okCount = [c1, c2].filter((r) => r.status === "ok").length;
+    expect(okCount).toBe(2);
+    const dedupCount = [c1, c2].filter(
+      (r) => r.status === "ok" && (r.output as EnsembleOverviewWriteOutput).deduplicated === true,
+    ).length;
+    expect(dedupCount).toBe(1);
+    expect(durable.filter((ev) => ev.type === "ensemble.overview_updated")).toHaveLength(3);
   });
 
   it("跨线移动保持同一任务 ID 且计数不重复；已移除成员仍可作历史负责人", async () => {

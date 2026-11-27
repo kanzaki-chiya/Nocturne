@@ -443,6 +443,12 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
   let overview: EnsembleOverview | undefined;
   let overviewRevision = 0;
   let overviewFingerprintLast: string | undefined;
+  /**
+   * 校验-写入串行队列（ADR-0131 §3）：base 乐观并发的 CAS 只在关键区内有意义，
+   * 并发两次调用必须排队，后者在排队期间看到前者已推进的 revision；
+   * 内存镜像只在持久写成功后发布，写失败时旧状态可读、相同请求可安全重试。
+   */
+  let overviewWriteQueue: Promise<unknown> = Promise.resolve();
   let armed = false;
   let quietReminderSent = false;
   let deliveringCount = 0;
@@ -1606,8 +1612,9 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
     },
 
     /**
-     * ADR-0131 §3：概览更新。全量校验通过后只追加一条 `ensemble.overview_updated` 事件，
-     * 失败时零写入；同指纹输入按幂等重试处理，base 不匹配的旧更新被拒绝。
+     * ADR-0131 §3：概览更新。校验、base 比较与持久写在同一条串行队列里完成：
+     * 持久写成功后才发布内存镜像（revision/指纹/概览），写失败时旧状态保持可读、
+     * 完全相同的请求可以安全重试；未落盘的内容永远不会被误报为已接受，也不会被误去重。
      */
     async overview(rawInput: unknown): Promise<EnsembleToolActionResult<EnsembleOverviewWriteOutput>> {
       if (!active) {
@@ -1628,68 +1635,87 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
       const update: NormalizedOverviewUpdate = normalized.update;
       const fingerprint = overviewFingerprint(update);
 
-      // 幂等重试：与最后一次成功更新的规范化输入完全相同 → 直接返回成功，不写事件、不推进 revision
-      if (fingerprint === overviewFingerprintLast) {
+      const critical = async (): Promise<EnsembleToolActionResult<EnsembleOverviewWriteOutput>> => {
+        // 幂等重试：与最后一次成功更新的规范化输入完全相同 → 直接返回成功，不写事件、不推进 revision。
+        // 必须在队列内判定：排队期间前一次写入可能刚把该输入落盘。
+        if (fingerprint === overviewFingerprintLast) {
+          return {
+            ok: true,
+            text: `Overview is already up to date at revision ${overviewRevision} (identical update deduplicated).`,
+            output: { revision: overviewRevision, deduplicated: true },
+          };
+        }
+
+        if (update.base !== overviewRevision) {
+          return {
+            ok: false,
+            code: "invalid_input",
+            message: `Overview update rejected: \`base\` (${update.base}) does not match the current revision (${overviewRevision}). Call \`ensemble_read\` to fetch the latest overview and reapply your change on top of it — stale updates never overwrite newer progress.`,
+          };
+        }
+
+        const owners = new Set<string>(["maestro"]);
+        for (const m of members.values()) owners.add(m.name);
+        const lineIds = new Set<string>((overview?.lines ?? []).map((line) => line.id));
+        const taskIds = new Set<string>(
+          (overview?.lines ?? []).flatMap((line) => line.tasks.map((task) => task.id)),
+        );
+        const stateErrors = validateOverviewState(update, {
+          lineIds,
+          taskIds,
+          owners,
+          lastPost: nextPostNumber - 1,
+        });
+        if (stateErrors.length > 0) {
+          return {
+            ok: false,
+            code: "invalid_input",
+            message: `Overview update rejected (nothing was written):\n${stateErrors.map((e) => `- ${e}`).join("\n")}`,
+          };
+        }
+
+        const payload: EnsembleOverviewUpdatedPayload = {
+          revision: overviewRevision + 1,
+          fingerprint,
+          ...(update.goal !== undefined ? { goal: update.goal } : {}),
+          ...(update.checkpoints !== undefined ? { checkpoints: update.checkpoints } : {}),
+          ...(update.lines !== undefined ? { lines: update.lines } : {}),
+          ...(update.tasks !== undefined ? { tasks: update.tasks } : {}),
+          ...(update.removeLines !== undefined ? { removeLines: update.removeLines } : {}),
+          ...(update.removeTasks !== undefined ? { removeTasks: update.removeTasks } : {}),
+        };
+        // 单条持久事件 = 原子写入。先落盘再发布镜像：写失败时 revision/指纹/概览
+        // 保持旧值，相同请求重试不会被误去重（ADR-0131 §3）。
+        // 应用逻辑与视图归约共用同一纯函数，镜像状态不可能分叉。
+        try {
+          await deps.emitDurable("ensemble.overview_updated", payload);
+        } catch (error) {
+          return {
+            ok: false,
+            code: "write_failed",
+            message: `Overview update failed to persist (nothing was written, state is unchanged at revision ${overviewRevision}; it is safe to retry the same update): ${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
+        overview = applyOverviewDelta(overview, payload);
+        overviewRevision = payload.revision;
+        overviewFingerprintLast = fingerprint;
+        const changed =
+          (update.lines?.length ?? 0) +
+          (update.tasks?.length ?? 0) +
+          (update.removeLines?.length ?? 0) +
+          (update.removeTasks?.length ?? 0);
         return {
           ok: true,
-          text: `Overview is already up to date at revision ${overviewRevision} (identical update deduplicated).`,
-          output: { revision: overviewRevision, deduplicated: true },
+          text: `Overview updated to revision ${payload.revision}${changed > 0 ? ` (${changed} line/task change(s))` : ""}${update.goal !== undefined ? ", goal replaced" : ""}${update.checkpoints !== undefined ? ", checkpoints replaced" : ""}.`,
+          output: { revision: payload.revision, deduplicated: false },
         };
-      }
-
-      if (update.base !== overviewRevision) {
-        return {
-          ok: false,
-          code: "invalid_input",
-          message: `Overview update rejected: \`base\` (${update.base}) does not match the current revision (${overviewRevision}). Call \`ensemble_read\` to fetch the latest overview and reapply your change on top of it — stale updates never overwrite newer progress.`,
-        };
-      }
-
-      const owners = new Set<string>(["maestro"]);
-      for (const m of members.values()) owners.add(m.name);
-      const lineIds = new Set<string>((overview?.lines ?? []).map((line) => line.id));
-      const taskIds = new Set<string>(
-        (overview?.lines ?? []).flatMap((line) => line.tasks.map((task) => task.id)),
-      );
-      const stateErrors = validateOverviewState(update, {
-        lineIds,
-        taskIds,
-        owners,
-        lastPost: nextPostNumber - 1,
-      });
-      if (stateErrors.length > 0) {
-        return {
-          ok: false,
-          code: "invalid_input",
-          message: `Overview update rejected (nothing was written):\n${stateErrors.map((e) => `- ${e}`).join("\n")}`,
-        };
-      }
-
-      const payload: EnsembleOverviewUpdatedPayload = {
-        revision: overviewRevision + 1,
-        fingerprint,
-        ...(update.goal !== undefined ? { goal: update.goal } : {}),
-        ...(update.checkpoints !== undefined ? { checkpoints: update.checkpoints } : {}),
-        ...(update.lines !== undefined ? { lines: update.lines } : {}),
-        ...(update.tasks !== undefined ? { tasks: update.tasks } : {}),
-        ...(update.removeLines !== undefined ? { removeLines: update.removeLines } : {}),
-        ...(update.removeTasks !== undefined ? { removeTasks: update.removeTasks } : {}),
       };
-      // 单条持久事件 = 原子写入；应用逻辑与视图归约共用同一纯函数，镜像状态不可能分叉
-      overview = applyOverviewDelta(overview, payload);
-      overviewRevision = payload.revision;
-      overviewFingerprintLast = fingerprint;
-      await deps.emitDurable("ensemble.overview_updated", payload);
-      const changed =
-        (update.lines?.length ?? 0) +
-        (update.tasks?.length ?? 0) +
-        (update.removeLines?.length ?? 0) +
-        (update.removeTasks?.length ?? 0);
-      return {
-        ok: true,
-        text: `Overview updated to revision ${payload.revision}${changed > 0 ? ` (${changed} line/task change(s))` : ""}${update.goal !== undefined ? ", goal replaced" : ""}${update.checkpoints !== undefined ? ", checkpoints replaced" : ""}.`,
-        output: { revision: payload.revision, deduplicated: false },
-      };
+
+      // CAS 关键区串行化：即使同一 Turn 内并发两次调用，后一次也在排队时
+      // 看到前一次已推进的 revision（base 不匹配被拒）或命中幂等去重。
+      const run = overviewWriteQueue.then(critical, critical);
+      overviewWriteQueue = run.catch(() => undefined);
+      return run;
     },
 
     async changeModel(input: {
