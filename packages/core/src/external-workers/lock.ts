@@ -11,8 +11,10 @@
  * 失效判定与 sessions.md 会话锁一致（ADR-0009）：
  *   - startedAt 早于本机最近一次开机；
  *   - 锁的主机名与本机相同且 pid 已不存活。
- * 失效则删除后重试一次；仍撞上（或持有者存活）返回 busy——调用方据此给
- * 出可识别的 worker_busy 错误，绝不等待或静默串行。崩溃恢复由此保证：
+ * 失效锁的回收带所有权保证（返工第 3 条）：检查旧锁与删除不是原子序列时，
+ * 两个并行竞争者可能同时判定同一失效锁可收——先读取旧锁内容取其 token，
+ * 删除前重新读取校验 token 未变才 unlink。迟到的清理不会删掉已被另一竞争者
+ * 换持的新锁（token 不同则放弃删除并重新竞争）。崩溃恢复由此保证：
  * 宿主进程崩溃留下的锁在下次续派时按 pid/开机时间判定失效回收，
  * 不会形成永久锁；token 归属校验防止误删他人新持有的锁。
  */
@@ -67,6 +69,32 @@ async function isStaleLock(fs: FileSystem, platform: Platform, lockPath: string)
 }
 
 /**
+ * 回收失效锁的所有权守卫（返工第 3 条）：读取旧锁 token 后，删除前重新读取
+ * 校验 token 未变才 unlink。token 已变说明另一竞争者已换持新锁——本方的
+ * 迟到清理不得删除它，返回 false 让调用方重新竞争而非误删。
+ */
+async function unlinkStaleLockIfOwner(
+  fs: FileSystem,
+  lockPath: string,
+  expectedToken: unknown,
+): Promise<void> {
+  // 重新读取当前锁内容：只在 token 与失效判定时一致时才删除。
+  // 已变（被换持或已删）则跳过 unlink——不是本方的锁，不碰。
+  let current: LockContent | undefined;
+  try {
+    current = readLockContent(await fs.readTextFile(lockPath));
+  } catch {
+    return;
+  }
+  if (current?.token !== expectedToken) return;
+  try {
+    await fs.unlink(lockPath);
+  } catch {
+    // 锁已消失——回收语义已达
+  }
+}
+
+/**
  * 尝试取得指定 worker 的排他锁。持有者存活时返回 undefined（不等待）；
  * 取得成功返回 WorkerLock，调用方必须在 finally 中 release。
  */
@@ -104,11 +132,16 @@ export async function tryAcquireWorkerLock(
     } catch (error) {
       if (fsErrorCode(error) !== "EEXIST") throw error;
       if (attempt === 0 && (await isStaleLock(fs, platform, lockPath))) {
+        // 失效锁回收带所有权守卫：先取旧锁 token，删除前校验未变才 unlink——
+        // 并行竞争者同遇失效锁时至多一方真正删除成功，另一方 token 不匹配放弃，
+        // 双方随后重新 createExclusive 竞争，原子创建保证至多一方进入 worker 操作。
+        let staleToken: unknown;
         try {
-          await fs.unlink(lockPath);
+          staleToken = readLockContent(await fs.readTextFile(lockPath))?.token;
         } catch {
-          break;
+          staleToken = undefined;
         }
+        await unlinkStaleLockIfOwner(fs, lockPath, staleToken);
         continue;
       }
       break;
