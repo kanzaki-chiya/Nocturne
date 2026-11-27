@@ -170,3 +170,17 @@
 **测试证据（返工后实测）**：Core external-agents-runtime **24/24**（新增 5 项防御性回归：归属不符、provider 摘要变更、历史无摘要记录、执行者禁用、续派主体放行）；connector **62 通过 1 跳过**（新增 3 项跨进程并发：两独立 connector 共享同一 home 同 worker 并发续派一方 worker_busy 且不起进程、pid 不存活失效锁回收不阻塞续派、独立 worker 并发保持并行非 busy）；端到端 **14/14**。
 
 **如实陈述的限制**：跨进程锁是存在性锁（`createExclusive`），互斥依赖所有宿主都经同一 connector 路径——绕过 Nocturne 直接对 worker 进程发 `session/load` 不受约束（与会话锁同属非强制性，ADR-0009 已知限制）；pid 复用在极窄时间窗内可能把失效锁误判为存活（继承 ADR-0009 既有局限）；`providerDigest` 不含 env 值——env 值改变而键不变时摘要不匹配检测不到（但 env 本就按当前配置在每次新起进程重新展开，不构成注入泄露）。
+
+### 第五阶段再返工（2026-11-27 fix2，具体执行者权限/持久化最小化/失效锁争用）
+
+最终复核发现 fix1 仍有三处缺陷，本轮修正。改动集中在 `packages/core/src/tools/builtin/task.ts`、`packages/core/src/tools/executor.ts`、`packages/core/src/external-workers/`（`store.ts` 收窄、`lock.ts` 所有权守卫）、`packages/core/src/index.ts`（`resolveWorkerAgent` 注入）。
+
+**1. 续派权限主体精确化为同一具体执行者（fix1 第 2 条未真正实现）**。fix1 给续派返回固定占位 `external:worker`、给新建返回 `external:<实际名>`——同一权限层得到不同主体，`deny external:<agent>` 规则在重启续派后失效（占位不命中精确名），`external:worker` 占位又可被通配 allow 放行，等于用通配替代了具体执行者。本轮修正：task 的 `permissionSubjects`（纯函数，无 I/O）对续派产出编码 worker id 的占位 `subagent external:worker:<workerId>`（命中 `external:*` 通配，只紧不松），随后执行管线第 4 步（资源解析）经新增的 `resolveSubject` 钩子，只读 worker 归属元数据（`externalWorkerStore.read` 的 `agentName` 字段，**不读外部历史**、不触碰进程/注入/session）把主体精确化为 `subagent external:<agent 名>`——与创建完全相同。executor 的 `resolveSubjects` 相应扩展：非路径、非 app 主体在工具声明 `resolveSubject` 时也经其异步转换（此前只对 `app` kind 调用），解析失败只紧不松保留原主体。worker 不存在/损坏时主体退回保守占位 `external:worker`（仍命中通配，不放宽为"未解析即放行"）。效果与规格一致：同一权限配置、相同执行者下创建与续派决策一致——`deny external:offline` 对两条路径都拒绝（`status:"denied"`，connector 不被调用）；只约束作者的规则不影响其他 agent（`deny external:offline` 下 `external:other` 归属的 worker 续派正常放行）。因主体在权限判定前已精确化，同一次调用的 ask 也只发生一次，无重复审批。
+
+**2. worker 持久化最小化——可能含密的 args/configOptions 原值不再落盘**。fix1 虽引入 `providerDigest`，仍在同一记录写 `providerSnapshot.args: [...config.args]` 与 `configOptions` 原值——这些可能含敏感路径、token 或凭据片段，持久化既不必要（恢复与身份校验只需 command、外部会话 ID 与摘要）也泄露。本轮把 `providerSnapshot` 收窄为仅 `{ command, envKeys }`（env 仍只留键名，值永不落盘），删除 `args`、`configOptions`、`mode` 字段；`providerDigest` 仍覆盖完整启动身份（command/args/envKeys/mode/configOptions 归一化 sha256），变更识别能力不受影响——摘要单向不可逆，是身份核对所需的唯一非敏感信息。合成哨兵验证：把可识别哨兵值注入启动参数与 configOptions，持久记录原文、诊断与错误中均不出现（`connector.test.ts`）。历史记录兼容：shape 校验容忍多余字段，fix1 时期含原值的旧记录可读取不判损坏，`touch` 重写不做格式迁移也不注入新泄漏；digest 缺失的历史记录仍按不可验证拒绝续派。未读取任何真实用户配置或凭据（全部用临时 home 与合成值）。
+
+**3. 失效锁并行回收的所有权守卫**。fix1 的失效锁清理分「检查旧锁」与「稍后 unlink」两步，非原子序列下两个并行竞争者可能同时判定同一失效锁可收——迟到的一方可能把已被对方换持的新锁误删，导致两个进程同时进入 worker 操作。本轮在回收路径加所有权守卫：先读取失效锁 token，`unlink` 前重新读取校验 token 未变才删除（`unlinkStaleLockIfOwner`）；token 已变说明另一竞争者已换持新锁，本方放弃删除并重新 `createExclusive` 竞争——原子创建保证至多一方进入 worker 操作。确定性同步点验证（`worker-lock.test.ts`，注入可控延时的 platform 制造真实交错）：两竞争者遇同一失效锁时至多一个持有有效锁、迟到清理不删新锁、释放与重新获取不留死锁、不同 worker 锁路径不同保持并行。
+
+**测试证据（fix2 后实测）**：Core external-agents-runtime **26/26**（重写 3 项权限主体用例为精确执行者一致性验证 + 新增双 agent 不误伤用例）；connector 持久化最小化哨兵 + 历史兼容用例通过；`worker-lock.test.ts` **5/5**。
+
+**修复了 fix1 报告第 49/96 行的错误结论**：fix1 报告与 `subagent.md` 原称「续派产出通用主体 `subagent external:worker`，两条路径尊重同一具体执行者的禁止/审批规则」——前半句属实但后半句不成立：占位主体使 `deny external:<agent>` 对续派失效，并非真正的同一执行者判定。本轮纠正后文档与行为一致。
