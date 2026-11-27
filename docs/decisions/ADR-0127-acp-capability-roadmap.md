@@ -65,3 +65,21 @@
 - 协议测试：真实 stdio 进程 A/B——A 建会话跑工具轮后 EOF 退出（锁释放），B 同 NOCTURNE_HOME 以 `session/load` 恢复：用户 chunk 恰 1 条、agent text 含合成标记、工具帧全终态、零权限请求、新轮 provider 请求体中标记恰出现 1 次、错误 cwd `-32602`、重复 load `-32600`、无锁泄漏（`apps/cli/test/acp-stdio.test.ts` 9/9）。单测覆盖归属标记、无效/外来/子会话拒绝、并发重复 load、占用冲突、断线与失败清理（`packages/acp/test/agent.test.ts` 29/29）。
 - 真实宿主验收（隔离 Paseo daemon `127.0.0.1:6933` + 测试 capture provider `127.0.0.1:13552`，证据在 `Z:\nocturne-mockups\impl\r1126k\testhost\`）：Paseo agent `75c078f3` 经 nocturne provider 创建，首轮写入含合成决定 `KESTREL-7821` 的 write 工具调用（经审批桥批准），记录 ACP sessionId `202611262113-a3f8c373`；daemon `restart`（worker 102208→74484→94524）后 `agent reload` 重开——同一 sessionId 恢复、persistence 不变、时间线恰一份（连续多次 reload 条目数不重复累积）、恢复后新轮 provider 请求体中 `KESTREL-7821` 恰 1 份且消息数逐轮递增、恢复后新的 write 审批正常出现并被批准、宿主注入 MCP（`mcp__paseo__*` 19 项）在每次新连接的新轮 tools 中齐备。
 - 限制：第一阶段之前创建的旧 ACP 会话没有归属标记，按设计**不可**经 `session/load` 恢复（拒绝为 `resourceNotFound`）——恢复接口不成为打开任意本地会话的入口。Paseo `agent reload` 在 idle 宽限期内会话本就关闭时也能重开（Paseo 0.17.5 idle-keep-alive 设计），锁文件按 ADR-0009 失效判定清理。
+
+### 第三阶段（2026-11-27 验收）
+
+实现要点：
+
+- `ask_user` 产生的 `question.requested` 按宿主能力分流。宿主在 `initialize` 显式声明 `clientCapabilities.elicitation.form` 时走结构化 `elicitation/create` 请求：把 Nocturne `questions` 映射为 form JSON Schema——每题占 `q1..qN` 属性，单选选项题用 `oneOf`（`title`/`description` 保留标签与说明），多选题用 `array`+`anyOf`，自由文本题用 `string`，自由文本边界 `maxLength: 2000`（与 ADR-0032 一致）；请求带 `sessionId` 与 `toolCallId`，用户可据此确认在回答哪个会话的哪个问题。`accept` 的 `content` 按位置映射回 `QuestionAnswer[]`（选项题进 `selected`、自由文本进 `text`）经 `respondQuestion` 回写原会话、原轮次、原请求；**只有用户明确拒绝才**逐题写成 `declined`；`cancel`、`elicitation/create` 请求失败或返回未知 action 一律取消当前 Turn（`turn.completed` 按中断结算），**绝不**写成「用户拒绝回答」。
+- 宿主未声明 `elicitation.form`（Paseo 0.17.5 发送 `clientCapabilities: {}`）时按文本退化路径：把问题与编号选项（含多选/自由文本提示）作为 `agent_message_chunk` 交给宿主展示，然后经 Core 新增的 `RuntimeSession.questionSuspend(requestId)` 把等待中的提问结算为 `handoff_suspended`——ask_user 的工具结果不是「用户拒绝回答」，而是明确指引「宿主已把问题展示给用户并交还控制，当前轮按挂起结束。不要就同一问题再次提问，也不要按假设执行依赖该选择的动作；等用户在下一轮给出答复后继续」。这样当前轮以可见问题收尾、控制正常交还宿主，下一轮用户答复作为普通消息进入、由模型按真实回答继续；`handoff_suspended` 不会中断 Turn、不算错误失败，模型在没有答复前不执行依赖该选择的下游动作。`questionSuspend` 仅用于宿主已完整展示问题但不能结构化回收的场景；用户明确拒绝仍走 `respondQuestion` 的 `declined`，取消/断连走 `interrupt`。
+- Core 侧为 broker 增加最小的挂起语义（`packages/core/src/tools/types.ts`、`tools/question.ts`）：`AskUserReply` 新增 `{ kind: "suspended" }`，`QuestionBroker` 增加 `suspend(requestId)`/`pendingKeys()`；`questionSuspend` 是进程内接口（`RuntimeSession`），不暴露 RPC——只有同进程的 ACP 宿主通道使用。
+- 结构性约束：审批桥只服务于权限请求，与提问通道完全分离；`elicitation` 不映射权限、权限请求不混入提问。文本退化路径在 `session/load` 回放已持久化历史时不重新弹出旧问题——文本问题块本就是当轮的 `agent_message_chunk`（不持久化），load 只回放持久化的用户/助手/工具帧。
+
+版本：Nocturne 0.68.0（开发分支）、ACP SDK `@agentclientprotocol/sdk` 1.7.0（Nocturne 侧）/ 1.9.0（Paseo 侧捆绑）、Paseo daemon 与 `@getpaseo/plugin` 0.17.5。Paseo 0.17.5 的 acp-internal 连接发送 `clientCapabilities: {}`，实测本阶段在 Paseo 走的是文本退化路径；结构化 elicitation 路径由协议测试与真实 stdio 客户端验收，不能写为 Paseo 的能力。
+
+验收结果：
+
+- 协议单测：elicitation schema 映射（单选/多选/自由文本）、`accept` 回写真实答案、`decline` 逐题 `declined`、`cancel`/请求失败/未知 action 取消 Turn、取消后会话仍可接受下一轮、两个并发会话互不串答、`session/load` 不重弹旧问题（`packages/acp/test/agent.test.ts` 480，含 1 跳过）；Core 挂起语义钉住测试（`packages/core/test/ask-user-handoff.test.ts` 3/3）。
+- 真实 stdio 客户端（`apps/cli/test/acp-stdio.test.ts` 13/13）：声明 `elicitation.form` 的客户端接到 `elicitation/create` 并以 `accept` 回应后，provider 第二轮请求携带所选答案（非「用户拒绝回答」）；`decline` 让 provider 看到「用户拒绝回答」、`cancel` 使本轮 `stopReason=cancelled`；未声明 elicitation（Paseo 风格 `{}`）的客户端看到编号选项文本、`handoff_suspended` 收尾、下一轮由用户答复继续。stdout 全程只写合法 JSON-RPC 帧。
+- 真实宿主验收（隔离 Paseo daemon `127.0.0.1:6933` + 测试 capture provider `127.0.0.1:13552`，本分支打包的 nctrn 0.68.0，证据在 `Z:\nocturne-mockups\impl\r1126l\testhost\`）：agent `f69f2621` 首轮触发 ask_user 决策题「发布策略用哪个通道？」，Paseo 时间线如实展示编号选项文本，ask_user 结算为 `handoff_suspended`（不是「用户拒绝回答」）、当前轮正常结束；用户下一轮发「1」后，再发 `RELEASE-CHECK` 触发依赖该选择的下游 write——经真实审批桥批准后 `release-channel.txt` 落盘内容恰为 `通道A-金丝雀`。全程 provider 请求日志中 `declinedMentions=0`（从未把挂起/取消误写为用户拒答）。取消后（`stop` 回 idle）会话仍可接受下一轮并正确回复；daemon `restart`（worker 109136→112520）后 `agent reload` 经 `session/load` 恢复，时间线不重复累积、旧问题不重新弹出（文本问题块仅出现于当轮）。
+- 限制：文本退化路径的用户答复是下一轮普通消息、由模型自由解读（宿主不做结构化映射）；多题/多选在文本路径按编号文本作答，精度依赖模型理解。`elicitation` 的 `url` 模式未使用（Nocturne 提问不涉及跳转外部 URL）。`questionSuspend` 不暴露 RPC，远程客户端不能触发挂起——只有同进程 ACP 宿主使用。
