@@ -46,12 +46,15 @@ const writeProbe = () => {
   if (process.env.NOCTURNE_TEST_PROBE_FILE)
     writeFileSync(
       process.env.NOCTURNE_TEST_PROBE_FILE,
-      JSON.stringify({ calls, cwd, configOptions }),
+      JSON.stringify({ calls, cwd, configOptions, sessionMcp }),
     );
 };
 let capabilities;
 let pending;
 let child;
+// ADR-0127 第五阶段：记录 session/new 与 session/load 收到的注入 MCP，
+// 供"按任务显式限定注入"与"worker 间隔离"测试核对线格式内容。
+const sessionMcp = [];
 if (scenario.includes("Tree")) {
   child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
     stdio: "inherit",
@@ -78,7 +81,8 @@ const connection = new AgentSideConnection(
       return {
         protocolVersion: PROTOCOL_VERSION,
         agentInfo: { name: "fixture", version: "1.2.3" },
-        agentCapabilities: { loadSession: false },
+        // 支持 ADR-0127 第五阶段续派测试：scenario 含 "loadable" 时声明 loadSession 能力。
+        agentCapabilities: { loadSession: scenario.includes("loadable") },
         authMethods: [{ id: "login", name: "CLI login" }],
       };
     },
@@ -91,7 +95,10 @@ const connection = new AgentSideConnection(
           /* 模拟永不响应的会话创建。 */
         });
       if (scenario === "authNew") throw RequestError.authRequired();
-      if (params.mcpServers.length) throw new Error("Unexpected MCP servers");
+      sessionMcp.push({ phase: "new", servers: params.mcpServers });
+      writeProbe();
+      if (params.mcpServers.length && !scenario.toLowerCase().includes("mcp"))
+        throw new Error("Unexpected MCP servers");
       return {
         sessionId: "fixture-session",
         configOptions,
@@ -165,13 +172,20 @@ const connection = new AgentSideConnection(
           });
         return { stopReason: "end_turn" };
       }
-      if (scenario.startsWith("hang") || scenario.startsWith("ignoreCancel")) {
+      // scenario 命名规则：startsWith("hang"/"ignoreCancel") 或 includes("Hang")
+      // 都进入挂起等 cancel 路径——后者服务于 loadableHang 等复合场景。
+      if (
+        scenario.startsWith("hang") ||
+        scenario.startsWith("ignoreCancel") ||
+        scenario.includes("Hang")
+      ) {
         pending = Promise.withResolvers();
         if (process.env.NOCTURNE_TEST_READY_FILE)
           writeFileSync(process.env.NOCTURNE_TEST_READY_FILE, "prompt");
         return pending.promise;
       }
-      if (scenario === "release") {
+      // scenario 含 "Release"（如 loadableRelease 复合场景）也走 release 路径。
+      if (scenario === "release" || scenario.includes("Release")) {
         if (process.env.NOCTURNE_TEST_READY_FILE)
           writeFileSync(process.env.NOCTURNE_TEST_READY_FILE, "prompt");
         await new Promise((resolve) => {
@@ -256,6 +270,7 @@ const connection = new AgentSideConnection(
         capabilities,
         permissions,
         clientMethods,
+        sessionMcp,
         env: process.env.NOCTURNE_TEST_VALUE,
       });
       const mid = Math.floor(result.length / 2);
@@ -280,6 +295,19 @@ const connection = new AgentSideConnection(
       if (process.env.NOCTURNE_TEST_CANCEL_FILE)
         writeFileSync(process.env.NOCTURNE_TEST_CANCEL_FILE, "cancel");
       if (!scenario.startsWith("ignoreCancel")) pending?.resolve({ stopReason: "cancelled" });
+    },
+    loadSession(params) {
+      calls.push(`load:${params.sessionId}`);
+      cwd = params.cwd;
+      sessionMcp.push({ phase: "load", servers: params.mcpServers });
+      writeProbe();
+      // 续派恢复失败的反向场景：sessionId 含 "expired" 时拒绝
+      if (params.sessionId.includes("expired") || scenario === "loadFail") {
+        throw RequestError.invalidParams(`session expired or unknown: ${params.sessionId}`);
+      }
+      // 用同一 sessionId 接受恢复——外部 agent 自己负责持久化语义；
+      // 夹具只验证客户端发了 load、随后 prompt 在同一 sessionId 上发生。
+      return { configOptions };
     },
     authenticate() {
       throw new Error("Client must not authenticate");

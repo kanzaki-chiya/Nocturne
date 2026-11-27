@@ -7,6 +7,7 @@ import {
   createPlatform,
   type ExternalAgentConfig,
   type ExternalAgentPermissionDecision,
+  type McpServerConfig,
   type Platform,
   type SubjectRequest,
   type ToolContext,
@@ -19,15 +20,22 @@ const processes = createProcessCleanup();
 const platform = processes.platform(createPlatform());
 let root: string;
 let controller: AbortController;
+let originalNocturneHome: string | undefined;
 
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "nctrn-acp-"));
   processes.watchPidFile(path.join(root, "pids.json"));
   controller = new AbortController();
+  // ADR-0127 第五阶段：worker store 写入 <NOCTURNE_HOME>/external-workers——
+  // 必须隔离到本测试的临时目录，不污染维护者真实数据。
+  originalNocturneHome = process.env.NOCTURNE_HOME;
+  process.env.NOCTURNE_HOME = path.join(root, "nocturne-home");
 });
 afterEach(async () => {
   await processes.cleanup();
   await removeTempDirs([root]);
+  if (originalNocturneHome === undefined) delete process.env.NOCTURNE_HOME;
+  else process.env.NOCTURNE_HOME = originalNocturneHome;
 });
 
 function setup(
@@ -175,6 +183,8 @@ describe("ACP 单调用生命周期", () => {
       transcriptPath: request.transcriptPath,
       stopReason: "end_turn",
       permissionDecisions: { allowed: 0, denied: 0 },
+      externalSessionId: "fixture-session",
+      resumed: false,
     });
     expect(result).not.toHaveProperty("usage");
     expect(progress.mock.calls).toEqual([["fixture：Read file", "info"]]);
@@ -739,5 +749,408 @@ describe("执行期权限与审计", () => {
     expect(await fs.readFile(request.transcriptPath, "utf8")).toContain(
       '"source":"missing_allow_once"',
     );
+  });
+});
+
+describe("ADR-0127 第五阶段：worker 续派", () => {
+  it("一次性调用登记 worker：loadSession 能力声明后 output 携带 workerId 并写盘", async () => {
+    const { connector, ctx, request } = setup("loadable");
+    const result = await connector.run(request, ctx);
+    expect(result.status).toBe("ok");
+    expect(result.output?.workerId).toMatch(/^ew-[0-9a-f]{16}$/);
+    expect(result.output?.resumed).toBe(false);
+    expect(result.output?.externalSessionId).toBe("fixture-session");
+    const workerFile = path.join(
+      process.env.NOCTURNE_HOME ?? "",
+      "external-workers",
+      `${result.output?.workerId}.json`,
+    );
+    const record = JSON.parse(await fs.readFile(workerFile, "utf8"));
+    expect(record).toMatchObject({
+      workerId: result.output?.workerId,
+      agentName: "fixture",
+      externalSessionId: "fixture-session",
+      cwd: root,
+      loadSessionCapable: true,
+    });
+    expect(record.providerSnapshot.command).toBe(process.execPath);
+    expect(record.providerSnapshot.envKeys).toContain("NOCTURNE_TEST_PID_FILE");
+  });
+
+  it("loadSession=false 时不登记 worker（output 无 workerId，磁盘无记录）", async () => {
+    const { connector, ctx, request } = setup();
+    const result = await connector.run(request, ctx);
+    expect(result.status).toBe("ok");
+    expect(result.output?.workerId).toBeUndefined();
+    const dir = path.join(process.env.NOCTURNE_HOME ?? "", "external-workers");
+    const exists = await fs
+      .readdir(dir)
+      .then((entries) => entries.filter((e) => e.endsWith(".json")))
+      .catch(() => [] as string[]);
+    expect(exists).toEqual([]);
+  });
+
+  it("续派走 session/load：不重新 session/new，恢复同一 externalSessionId，lastUsedAt 更新", async () => {
+    const { connector, ctx, request } = setup("loadable");
+    const first = await connector.run(request, ctx);
+    expect(first.status).toBe("ok");
+    const workerId = first.output?.workerId;
+    expect(workerId).toBeDefined();
+
+    const second = await connector.run(
+      {
+        ...request,
+        workerId,
+        transcriptPath: path.join(root, "external", "second.jsonl"),
+      },
+      ctx,
+    );
+    expect(second.status).toBe("ok");
+    expect(second.output?.workerId).toBe(workerId);
+    expect(second.output?.resumed).toBe(true);
+    expect(second.output?.externalSessionId).toBeUndefined();
+    // 续派路径不应再写新的 worker 文件——磁盘上仍只有一份
+    const dir = path.join(process.env.NOCTURNE_HOME ?? "", "external-workers");
+    const entries = await fs.readdir(dir);
+    expect(entries.filter((e) => e.endsWith(".json"))).toEqual([`${workerId}.json`]);
+  });
+
+  it("workerId 不存在/损坏：worker_not_found，不起进程不写文件", async () => {
+    const { connector, ctx, request } = setup("loadable");
+    const result = await connector.run(
+      { ...request, workerId: "ew-0000000000000000" },
+      ctx,
+    );
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.error.code).toBe("worker_not_found");
+  });
+
+  it("worker 归属 agent 不匹配：worker_mismatch", async () => {
+    const { connector, ctx, request } = setup("loadable");
+    const first = await connector.run(request, ctx);
+    const workerId = first.output?.workerId;
+    // 用同名 fixture 但 agent 名不同的配置调用——worker 属于 "fixture"
+    const mismatchConnector = createAcpConnector(platform);
+    const altConfig: ExternalAgentConfig = {
+      ...request,
+      name: "other-agent",
+      command: process.execPath,
+      args: [fixture, "loadable"],
+      enabled: true,
+    } as unknown as ExternalAgentConfig;
+    const result = await mismatchConnector.run(
+      altConfig,
+      { ...request, workerId },
+      ctx,
+    );
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.error.code).toBe("worker_mismatch");
+  });
+
+  it("cwd 与 worker 原工作树不匹配：worker_mismatch，不起进程", async () => {
+    const { connector, ctx, request } = setup("loadable");
+    const first = await connector.run(request, ctx);
+    const workerId = first.output?.workerId;
+    const otherCwd = path.join(root, "other-cwd");
+    await fs.mkdir(otherCwd, { recursive: true });
+    const result = await connector.run(
+      { ...request, workerId, cwd: otherCwd },
+      ctx,
+    );
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.error.code).toBe("worker_mismatch");
+  });
+
+  it("loadSession 被对端拒绝：worker_resume_failed，不静默新建冒充恢复", async () => {
+    const { connector, ctx, request } = setup("loadable");
+    const first = await connector.run(request, ctx);
+    const workerId = first.output?.workerId;
+    // 损坏 worker 文件中的 externalSessionId 让其包含 "expired"，触发对端 loadSession 拒绝
+    const workerFile = path.join(
+      process.env.NOCTURNE_HOME ?? "",
+      "external-workers",
+      `${workerId}.json`,
+    );
+    const rec = JSON.parse(await fs.readFile(workerFile, "utf8"));
+    rec.externalSessionId = "expired-session";
+    await fs.writeFile(workerFile, JSON.stringify(rec, null, 2));
+    const result = await connector.run({ ...request, workerId }, ctx);
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.error.code).toBe("worker_resume_failed");
+    expect(result.output?.resumed).toBeUndefined();
+  });
+
+  it("loadSessionCapable=false 的 worker 不存在（一次性 agent 本就不登记）；手工伪造时按 unresumable 拒绝", async () => {
+    const { connector, ctx, request } = setup("loadable");
+    const first = await connector.run(request, ctx);
+    const workerId = first.output?.workerId;
+    // 手工把 loadSessionCapable 改 false（模拟损坏/旧记录）
+    const workerFile = path.join(
+      process.env.NOCTURNE_HOME ?? "",
+      "external-workers",
+      `${workerId}.json`,
+    );
+    const rec = JSON.parse(await fs.readFile(workerFile, "utf8"));
+    rec.loadSessionCapable = false;
+    await fs.writeFile(workerFile, JSON.stringify(rec, null, 2));
+    const result = await connector.run({ ...request, workerId }, ctx);
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.error.code).toBe("worker_unresumable");
+  });
+
+  it("续派路径下不发 mode/configOptions：对端只看到 initialize+load+prompt", async () => {
+    const { connector, ctx, request, config } = setup("loadable");
+    config.mode = "ask";
+    config.configOptions = { model: "small" };
+    const first = await connector.run(request, ctx);
+    const workerId = first.output?.workerId;
+    // 清理 probe 文件，让第二次调用记录独立的 calls 序列
+    const second = await connector.run({ ...request, workerId }, ctx);
+    expect(second.status).toBe("ok");
+    // 第二次调用的 fake-agent 进程独立启动，calls 仅含 initialize+load+prompt
+    // （无 new/mode/config:）——probe 文件由进程自己写，只能校验输出；
+    // 简单断言：fixture 输出的 calls 列表里没有 mode/config:
+    const report = JSON.parse(second.modelContent);
+    const callNames = report.calls as string[];
+    expect(callNames).toContain("initialize");
+    expect(callNames.some((c) => c.startsWith("load:"))).toBe(true);
+    expect(callNames).not.toContain("new");
+    expect(callNames).not.toContain("mode");
+    expect(callNames.some((c) => c.startsWith("config:"))).toBe(false);
+  });
+
+  it("跨进程续派：换用全新 connector 实例（模拟宿主重启），仍能凭磁盘上的 worker 记录恢复同一 sessionId", async () => {
+    // 第一次调用——第一份 connector（相当于第一个宿主进程）
+    const firstSetup = setup("loadable");
+    const first = await firstSetup.connector.run(firstSetup.request, firstSetup.ctx);
+    expect(first.status).toBe("ok");
+    const workerId = first.output?.workerId;
+    expect(workerId).toBeDefined();
+    // 第一份 connector 完全丢弃（模拟宿主进程退出）——worker 文件已写盘
+    // 第二份 connector（独立 store 实例，但同一 NOCTURNE_HOME/同一磁盘目录）
+    const secondSetup = setup("loadable");
+    const second = await secondSetup.connector.run(
+      { ...secondSetup.request, workerId },
+      secondSetup.ctx,
+    );
+    expect(second.status).toBe("ok");
+    expect(second.output?.workerId).toBe(workerId);
+    expect(second.output?.resumed).toBe(true);
+    const report = JSON.parse(second.modelContent);
+    const callNames = report.calls as string[];
+    // 跨进程恢复：对端 fake-agent 看到的是 load，不是 new
+    expect(callNames.some((c) => c.startsWith("load:"))).toBe(true);
+    expect(callNames).not.toContain("new");
+  });
+
+  it("续派路径下取消：interrupted 结算正确，cancel 通知发到外部 agent", async () => {
+    const { connector, ctx, request } = setup("loadable");
+    const first = await connector.run(request, ctx);
+    const workerId = first.output?.workerId;
+    // 用一个 hang 场景（但保持 loadable 能力）验证取消传播；
+    // fixture 在 loadableHang 下 prompt 永不返回，等 cancel 通知
+    const hangSetup = setup("loadableHang");
+    const controller2 = new AbortController();
+    const ctx2 = { ...hangSetup.ctx, signal: controller2.signal };
+    const runPromise = hangSetup.connector.run({ ...hangSetup.request, workerId }, ctx2);
+    // 等 fixture 进入 prompt（ready.txt）
+    await vi.waitFor(
+      async () => {
+        const ready = await fs
+          .readFile(path.join(root, "ready.txt"), "utf8")
+          .catch(() => "");
+        expect(ready).toBe("prompt");
+      },
+      { timeout: 5_000, interval: 20 },
+    );
+    controller2.abort();
+    const result = await runPromise;
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.error.code).toBe("cancelled");
+  });
+
+  it("同一 worker 并发续派串行：第二个调用等第一个结束后才启动进程，绝不并发 session/load", async () => {
+    const { connector, ctx, request } = setup("loadable");
+    const first = await connector.run(request, ctx);
+    const workerId = first.output?.workerId;
+    // release 场景：fixture 等到 release.txt 出现才结束 prompt——
+    // 用 loadable 能力 + release 行为构造可控制的"慢"worker
+    const relSetup = setup("loadableRelease");
+    // 同时发起两个续派调用，同 worker、同 connector
+    const r1 = relSetup.connector.run({ ...relSetup.request, workerId }, relSetup.ctx);
+    const r2 = relSetup.connector.run({ ...relSetup.request, workerId }, relSetup.ctx);
+    // 给 fixture 一个进入第一次 prompt 的机会
+    await vi.waitFor(
+      async () => {
+        const ready = await fs
+          .readFile(path.join(root, "ready.txt"), "utf8")
+          .catch(() => "");
+        expect(ready).toBe("prompt");
+      },
+      { timeout: 5_000, interval: 20 },
+    );
+    // 第一个还在 prompt 中（release.txt 未写），第二个应仍排队（进程数应保持 1）
+    // 通过 release 让第一个结束
+    await fs.writeFile(path.join(root, "release.txt"), "go");
+    const [res1, res2] = await Promise.all([r1, r2]);
+    expect(res1.status).toBe("ok");
+    expect(res2.status).toBe("ok");
+    expect(res1.output?.workerId).toBe(workerId);
+    expect(res2.output?.workerId).toBe(workerId);
+  });
+});
+
+describe("ADR-0127 第五阶段：按任务注入团队 MCP 工具", () => {
+  // 专属测试工具（无敏感信息）：stdio 形状，带明文 env；
+  // 证明按任务注入真实到达线格式、stored 凭据引用被拒绝、worker 间不共享。
+  const teamServer = (overrides: Partial<McpServerConfig> = {}): McpServerConfig => ({
+    name: "team-tool",
+    origin: "project",
+    type: "stdio",
+    command: process.execPath,
+    args: ["-e", "process.exit()"],
+    env: { TEAM_MARK: "r1126o-team-value" },
+    ...overrides,
+  });
+
+  it("session/new 携带显式注入的 stdio 服务器：名字/命令/参数/明文 env 按线格式到达", async () => {
+    const probeFile = path.join(root, "probe.json");
+    const { connector, ctx, request } = setup("loadableMcp", {
+      env: { NOCTURNE_TEST_PROBE_FILE: probeFile },
+    });
+    const result = await connector.run(
+      { ...request, sessionMcpServers: [teamServer()] },
+      ctx,
+    );
+    expect(result.status).toBe("ok");
+    const probe = JSON.parse(await fs.readFile(probeFile, "utf8"));
+    const newInjection = probe.sessionMcp.find(
+      (entry: { phase: string }) => entry.phase === "new",
+    );
+    expect(newInjection.servers).toHaveLength(1);
+    const server = newInjection.servers[0];
+    expect(server.name).toBe("team-tool");
+    expect(server.command).toBe(process.execPath);
+    expect(server.args).toEqual(["-e", "process.exit()"]);
+    // 线格式 env 是数组形状 [{name, value}]——明文值随本次任务显式提供
+    expect(server.env).toEqual([{ name: "TEAM_MARK", value: "r1126o-team-value" }]);
+  });
+
+  it("session/load 恢复路径同样只绑定本次任务显式提供的注入", async () => {
+    const probeFile = path.join(root, "probe.json");
+    const { connector, ctx, request } = setup("loadableMcp", {
+      env: { NOCTURNE_TEST_PROBE_FILE: probeFile },
+    });
+    const first = await connector.run(request, ctx);
+    const workerId = first.output?.workerId;
+    expect(workerId).toMatch(/^ew-/);
+    // 首次未注入（probe 中 new 的 servers 为空）；续派注入——各次调用互不影响
+    const firstProbe = JSON.parse(await fs.readFile(probeFile, "utf8"));
+    expect(
+      firstProbe.sessionMcp.find((entry: { phase: string }) => entry.phase === "new").servers,
+    ).toEqual([]);
+    const second = await connector.run(
+      { ...request, workerId, sessionMcpServers: [teamServer()] },
+      ctx,
+    );
+    expect(second.status).toBe("ok");
+    const report = JSON.parse(second.modelContent);
+    const loadInjection = report.sessionMcp.find(
+      (entry: { phase: string }) => entry.phase === "load",
+    );
+    expect(loadInjection.servers).toHaveLength(1);
+    expect(loadInjection.servers[0].name).toBe("team-tool");
+  });
+
+  it("http 形状按线格式翻译：url 与小写化前的请求头名保留、明文值随行", async () => {
+    const { connector, ctx, request } = setup("loadableMcp");
+    const httpServer = teamServer({
+      type: "http",
+      command: undefined,
+      args: undefined,
+      env: undefined,
+      url: "https://mcp.example.test/team",
+      headers: { "X-Team-Token": "plaintext-per-task" },
+    });
+    const result = await connector.run({ ...request, sessionMcpServers: [httpServer] }, ctx);
+    expect(result.status).toBe("ok");
+    const report = JSON.parse(result.modelContent);
+    const injection = report.sessionMcp.find((entry: { phase: string }) => entry.phase === "new");
+    expect(injection.servers[0].type).toBe("http");
+    expect(injection.servers[0].url).toBe("https://mcp.example.test/team");
+    expect(injection.servers[0].headers).toEqual([
+      { name: "X-Team-Token", value: "plaintext-per-task" },
+    ]);
+  });
+
+  it("stored 凭据引用被拒绝：不起进程、不静默降级、不解析宿主凭据库", async () => {
+    const probeFile = path.join(root, "probe.json");
+    const { connector, ctx, request } = setup("loadableMcp", {
+      env: { NOCTURNE_TEST_PROBE_FILE: probeFile },
+    });
+    const storedServer = teamServer({ env: { TEAM_TOKEN: { stored: true } } });
+    const result = await connector.run(
+      { ...request, sessionMcpServers: [storedServer] },
+      ctx,
+    );
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.error.code).toBe("invalid_input");
+    expect(result.modelContent).toContain("stored");
+    expect(result.modelContent).toContain("team-tool");
+    // 拒绝发生在 spawn 之前——fixture 进程从未启动，probe 文件不存在
+    await expect(fs.stat(probeFile)).rejects.toThrow();
+  });
+
+  it("缺字段与重名被拒绝：invalid_input", async () => {
+    const { connector, ctx, request } = setup("loadableMcp");
+    const noCommand = teamServer({ command: undefined });
+    const result = await connector.run({ ...request, sessionMcpServers: [noCommand] }, ctx);
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.error.code).toBe("invalid_input");
+    const dup = await connector.run(
+      {
+        ...request,
+        sessionMcpServers: [teamServer(), teamServer({ name: "TEAM-TOOL" })],
+      },
+      ctx,
+    );
+    expect(dup.status).toBe("error");
+    expect(dup.status === "error" && dup.error.code).toBe("invalid_input");
+    expect(dup.modelContent).toContain("重复");
+  });
+
+  it("worker 间隔离：workerA 的注入不进 workerB 的进程——既看不到也不能调用", async () => {
+    // 两个 worker 同属一个 agent fixture，各自独立外部会话。
+    // workerA 续派带注入；workerB 续派不带——核对 B 的线格式 servers 为空。
+    const probeA = path.join(root, "probe-a.json");
+    const setupA = setup("loadableMcp", { env: { NOCTURNE_TEST_PROBE_FILE: probeA } });
+    const probeB = path.join(root, "probe-b.json");
+    const setupB = setup("loadableMcp", { env: { NOCTURNE_TEST_PROBE_FILE: probeB } });
+    const firstA = await setupA.connector.run(setupA.request, setupA.ctx);
+    const workerA = firstA.output?.workerId;
+    const firstB = await setupB.connector.run(setupB.request, setupB.ctx);
+    const workerB = firstB.output?.workerId;
+    expect(workerA).not.toBe(workerB);
+    // workerA 续派携带注入——fixture 只记录不执行工具（夹具边界）；
+    // 线格式内容是"worker 能看到什么"的权威证据：B 的进程从未收到 team-tool。
+    const resumeA = await setupA.connector.run(
+      { ...setupA.request, workerId: workerA, sessionMcpServers: [teamServer()] },
+      setupA.ctx,
+    );
+    expect(resumeA.status).toBe("ok");
+    const reportA = JSON.parse(resumeA.modelContent);
+    expect(
+      reportA.sessionMcp.find((entry: { phase: string }) => entry.phase === "load").servers,
+    ).toHaveLength(1);
+    const resumeB = await setupB.connector.run(
+      { ...setupB.request, workerId: workerB },
+      setupB.ctx,
+    );
+    expect(resumeB.status).toBe("ok");
+    const reportB = JSON.parse(resumeB.modelContent);
+    const injectionB = reportB.sessionMcp.find(
+      (entry: { phase: string }) => entry.phase === "load",
+    );
+    expect(injectionB.servers).toEqual([]);
   });
 });

@@ -5,6 +5,7 @@ import {
   RequestError,
   type ClientConnection,
   type AnyMessage,
+  type McpServer as AcpMcpServer,
   CLIENT_METHODS,
   AGENT_METHODS,
 } from "@agentclientprotocol/sdk";
@@ -16,10 +17,14 @@ import type {
   ExternalAgentOutput,
   ExternalAgentPermissionDecision,
   ExternalAgentRequest,
+  ExternalWorkerRecord,
+  ExternalWorkerStore,
+  McpServerConfig,
   PipeProcess,
   Platform,
   ToolContext,
 } from "@nocturne/core";
+import { createExternalWorkerStore, createWorkerId } from "@nocturne/core";
 import { stripVTControlCharacters } from "node:util";
 import { probeAgent } from "./probe.js";
 import { permissionOutcome, permissionSubjects } from "./permissions.js";
@@ -50,13 +55,115 @@ function singleLine(text: string): string {
     .trim();
 }
 
+/**
+ * ADR-0127 第五阶段：把宿主按任务显式限定的团队 MCP 工具翻译为 ACP 线格式。
+ *
+ * 凭据边界：`{ stored: true }` 引用的是宿主凭据库，外部进程无权访问；
+ * 若原样丢弃会静默降级（工具以缺失凭据启动失败），若解析宿主凭据库则
+ * 违反"凭据不跨 worker 泄露"。因此遇到 stored 直接拒绝整个注入并说明，
+ * 由调用方显式提供本次任务需要的明文值（它本就序列化到线格式上）。
+ */
+function translateSessionMcpServers(
+  servers: readonly McpServerConfig[] | undefined,
+): AcpMcpServer[] {
+  if (servers === undefined || servers.length === 0) return [];
+  const result: AcpMcpServer[] = [];
+  const seenNames = new Set<string>();
+  for (const server of servers) {
+    const name = server.name.trim();
+    if (name.length === 0)
+      throw new AcpFailure("invalid_input", "注入 MCP 服务器名称不能为空");
+    const lowerName = name.toLowerCase();
+    if (seenNames.has(lowerName))
+      throw new AcpFailure("invalid_input", `注入 MCP 服务器名称重复：${name}`);
+    seenNames.add(lowerName);
+    const type = server.type ?? (server.command !== undefined ? "stdio" : "http");
+    if (type === "http") {
+      if (server.url === undefined)
+        throw new AcpFailure("invalid_input", `注入 MCP 服务器 ${name} 缺少 url`);
+      const headers: { name: string; value: string }[] = [];
+      for (const [headerName, value] of Object.entries(server.headers ?? {})) {
+        if (typeof value !== "string")
+          throw new AcpFailure(
+            "invalid_input",
+            `注入 MCP 服务器 ${name} 的请求头 ${headerName} 是宿主凭据引用（stored）；` +
+              `凭据不跨进程泄露——如需注入请由调用方显式提供本次任务的明文值`,
+          );
+        headers.push({ name: headerName, value });
+      }
+      result.push({ type: "http", name, url: server.url, headers });
+      continue;
+    }
+    if (type === "stdio") {
+      if (server.command === undefined || server.command.trim().length === 0)
+        throw new AcpFailure("invalid_input", `注入 MCP 服务器 ${name} 缺少 command`);
+      const env: { name: string; value: string }[] = [];
+      for (const [varName, value] of Object.entries(server.env ?? {})) {
+        if (typeof value !== "string")
+          throw new AcpFailure(
+            "invalid_input",
+            `注入 MCP 服务器 ${name} 的环境变量 ${varName} 是宿主凭据引用（stored）；` +
+              `凭据不跨进程泄露——如需注入请由调用方显式提供本次任务的明文值`,
+          );
+        env.push({ name: varName, value });
+      }
+      result.push({
+        name,
+        command: server.command,
+        args: [...(server.args ?? [])],
+        env,
+      });
+      continue;
+    }
+    throw new AcpFailure(
+      "invalid_input",
+      `注入 MCP 服务器 ${name} 的传输类型不受支持（仅 stdio 与 http）`,
+    );
+  }
+  return result;
+}
+
 export function createAcpConnector(
   platform: Platform,
   diagnostics?: Diagnostics,
 ): ExternalAgentConnector {
+  // ADR-0127 第五阶段：worker 持久化 store 由 connector 自己管理——
+  // 目录派生自 platform.nocturneHome()，调用方不需要关心装配。
+  // 同一 NOCTURNE_HOME 下不同 Runtime/进程看到同一份 worker 登记。
+  const store = createExternalWorkerStore({
+    fs: platform.fs,
+    paths: platform.paths,
+    dir: platform.paths.join(platform.nocturneHome(), "external-workers"),
+    onCorrupt: (workerId, reason) => {
+      diagnostics?.record("external_worker.store_corrupt", { workerId, reason });
+    },
+  });
+  // ADR-0127 第五阶段：同一 worker 的并发续派在本进程内串行。
+  // 不同 Runtime/会话共享同一 connector 实例（CLI 装配单例），
+  // 这里的 worker 级 Promise 链防止两个 task(worker=…) 同时 session/load
+  // 同一外部会话导致外部 agent 状态错乱（重复轮次、上下文错序）。
+  const workerChains = new Map<string, Promise<unknown>>();
   return {
     async run(config, request, ctx) {
-      return runAgent(platform, config, request, ctx, diagnostics);
+      // 续派或新建可续派 worker 的调用按 workerId 串行；
+      // 一次性调用（无 workerId 且不支持 loadSession）不入链——它本就是独立进程独立会话。
+      const chainKey = request.workerId;
+      if (chainKey === undefined) {
+        return runAgent(platform, config, request, ctx, diagnostics, store);
+      }
+      const previous = workerChains.get(chainKey) ?? Promise.resolve();
+      const current = previous.then(
+        () => runAgent(platform, config, request, ctx, diagnostics, store),
+        () => runAgent(platform, config, request, ctx, diagnostics, store),
+      );
+      workerChains.set(
+        chainKey,
+        current.then(
+          () => undefined,
+          () => undefined,
+        ),
+      );
+      return current;
     },
     async probe(config, input) {
       return probeAgent(platform, config, input);
@@ -70,6 +177,7 @@ async function runAgent(
   request: ExternalAgentRequest,
   ctx: ToolContext,
   diagnostics: Diagnostics | undefined,
+  workerStore?: ExternalWorkerStore,
 ): Promise<ExternalAgentOutcome> {
   const output: ExternalAgentOutput = {
     agent: config.name,
@@ -77,6 +185,61 @@ async function runAgent(
     stopReason: "error",
     permissionDecisions: { allowed: 0, denied: 0 },
   };
+  // ADR-0127 第五阶段：续派路径预处理。
+  // - 无 store 时 workerId 不被支持（旧一次性语义）；
+  // - 续派时按 worker 记录的 cwd 覆盖本次执行 cwd——任务的工作树属于 worker，
+  //   调用方传入的 cwd 不再适用（不匹配由 Core 上层在调用前已经判定）。
+  let existingWorker: ExternalWorkerRecord | undefined;
+  if (request.workerId !== undefined) {
+    if (workerStore === undefined) {
+      const message = `外部 worker 续派未启用（无 worker store）`;
+      output.stopReason = "worker_unavailable";
+      return {
+        status: "error",
+        modelContent: message,
+        error: { code: "worker_unavailable", message },
+        output,
+      };
+    }
+    existingWorker = await workerStore.read(request.workerId);
+    if (existingWorker === undefined) {
+      const message = `外部 worker ${request.workerId} 不存在或记录已损坏`;
+      output.stopReason = "worker_not_found";
+      output.resumeFailure = message;
+      return {
+        status: "error",
+        modelContent: message,
+        error: { code: "worker_not_found", message },
+        output,
+      };
+    }
+    if (existingWorker.agentName.toLowerCase() !== config.name.toLowerCase()) {
+      const message =
+        `外部 worker ${request.workerId} 属于 agent ${existingWorker.agentName}，` +
+        `与本次调用 agent ${config.name} 不匹配`;
+      output.stopReason = "worker_mismatch";
+      output.resumeFailure = message;
+      return {
+        status: "error",
+        modelContent: message,
+        error: { code: "worker_mismatch", message },
+        output,
+      };
+    }
+    if (!existingWorker.loadSessionCapable) {
+      const message =
+        `外部 worker ${request.workerId} 所属的 agent ${existingWorker.agentName} ` +
+        `不支持会话恢复（loadSession=false），无法续派`;
+      output.stopReason = "worker_unresumable";
+      output.resumeFailure = message;
+      return {
+        status: "error",
+        modelContent: message,
+        error: { code: "worker_unresumable", message },
+        output,
+      };
+    }
+  }
   let proc: PipeProcess | undefined;
   let connection: ClientConnection | undefined;
   let sessionId: string | undefined;
@@ -134,6 +297,41 @@ async function runAgent(
   };
   const wait = <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, failed]);
   try {
+    // ADR-0127 第五阶段：续派时工作树必须与 worker 原 cwd 一致——
+    // 不匹配在 spawn 进程前拒绝，不浪费一次进程启动。
+    if (existingWorker !== undefined && !platform.paths.equals(existingWorker.cwd, request.cwd)) {
+      const message =
+        `外部 worker ${existingWorker.workerId} 的原工作树是 ${existingWorker.cwd}，` +
+        `与本次调用 cwd ${request.cwd} 不匹配`;
+      output.stopReason = "worker_mismatch";
+      output.resumeFailure = message;
+      return {
+        status: "error",
+        modelContent: message,
+        error: { code: "worker_mismatch", message },
+        output,
+      };
+    }
+    // ADR-0127 第五阶段：按任务显式限定的注入 MCP 翻译同样提前——
+    // 配置非法（stored 凭据引用、缺字段、重名）在 spawn 进程前拒绝。
+    // 每次调用（新建或恢复）都只绑定当前请求明确提供的工具：
+    // 恢复路径不会沿用 worker 首次创建时的注入——那些属于当时那次调用，
+    // 不在本次任务范围内，避免工具/凭据跨任务残留。
+    let sessionMcpServers: AcpMcpServer[];
+    try {
+      sessionMcpServers = translateSessionMcpServers(request.sessionMcpServers);
+    } catch (error) {
+      if (error instanceof AcpFailure) {
+        output.stopReason = "invalid_input";
+        return {
+          status: "error",
+          modelContent: error.message,
+          error: { code: error.code, message: error.message },
+          output,
+        };
+      }
+      throw error;
+    }
     try {
       await platform.fs.mkdir(platform.paths.dirname(request.transcriptPath), { mode: 0o700 });
       await platform.fs.writeFile(request.transcriptPath, "", { mode: 0o600 });
@@ -164,7 +362,9 @@ async function runAgent(
             ]),
           );
     proc = platform.process.spawnPipe(config.command, config.args, {
-      cwd: request.cwd,
+      // ADR-0127 第五阶段：续派时进程 cwd 用 worker 原工作树——
+      // 外部 agent 进程的工作目录与会话工作树一致，避免换目录后路径错位。
+      cwd: existingWorker?.cwd ?? request.cwd,
       envMode: "minimal",
       env,
     });
@@ -321,34 +521,72 @@ async function runAgent(
       }),
     );
     if (initialized.agentInfo?.version) output.agentVersion = initialized.agentInfo.version;
-    sessionId = (
-      await wait(
-        connection.agent.request(AGENT_METHODS.session_new, { cwd: request.cwd, mcpServers: [] }),
-      )
-    ).sessionId;
-    if (config.mode !== undefined)
-      await wait(
-        connection.agent.request(AGENT_METHODS.session_set_mode, {
-          sessionId,
-          modeId: config.mode,
-        }),
-      );
-    for (const [configId, value] of Object.entries(config.configOptions ?? {})) {
+    const loadSessionCapable = initialized.agentCapabilities?.loadSession === true;
+    // ADR-0127 第五阶段：续派走 session/load；首次走 session/new 并视能力登记 worker。
+    if (existingWorker !== undefined) {
       try {
         await wait(
-          connection.agent.request(AGENT_METHODS.session_set_config_option, {
-            sessionId,
-            configId,
-            value,
+          connection.agent.request(AGENT_METHODS.session_load, {
+            sessionId: existingWorker.externalSessionId,
+            cwd: existingWorker.cwd,
+            mcpServers: sessionMcpServers,
           }),
         );
-      } catch (error) {
-        if (error instanceof RequestError && error.code !== -32000)
-          throw new AcpFailure(
-            "external_agent_config_rejected",
-            `外部 agent ${config.name} 拒绝配置项 ${configId}：${error.message}`,
+        sessionId = existingWorker.externalSessionId;
+        output.resumed = true;
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const message =
+          `外部 worker ${existingWorker.workerId} 恢复失败：${detail}。` +
+          `不自动新建会话冒充恢复。`;
+        output.stopReason = "worker_resume_failed";
+        output.resumeFailure = message;
+        return {
+          status: "error",
+          modelContent: message,
+          error: { code: "worker_resume_failed", message },
+          output,
+        };
+      }
+    } else {
+      sessionId = (
+        await wait(
+          connection.agent.request(AGENT_METHODS.session_new, {
+            cwd: request.cwd,
+            mcpServers: sessionMcpServers,
+          }),
+        )
+      ).sessionId;
+      output.externalSessionId = sessionId;
+      output.resumed = false;
+    }
+    // ADR-0127 第五阶段：mode/configOptions 仅在新建会话时下发；
+    // 恢复路径会话状态由外部 agent 自己持久化，重发会重置已建立的会话配置。
+    if (existingWorker === undefined) {
+      if (config.mode !== undefined)
+        await wait(
+          connection.agent.request(AGENT_METHODS.session_set_mode, {
+            sessionId,
+            modeId: config.mode,
+          }),
+        );
+      for (const [configId, value] of Object.entries(config.configOptions ?? {})) {
+        try {
+          await wait(
+            connection.agent.request(AGENT_METHODS.session_set_config_option, {
+              sessionId,
+              configId,
+              value,
+            }),
           );
-        throw error;
+        } catch (error) {
+          if (error instanceof RequestError && error.code !== -32000)
+            throw new AcpFailure(
+              "external_agent_config_rejected",
+              `外部 agent ${config.name} 拒绝配置项 ${configId}：${error.message}`,
+            );
+          throw error;
+        }
       }
     }
     const response = await wait(
@@ -360,6 +598,54 @@ async function runAgent(
     output.stopReason = response.stopReason;
     await wait(transcript);
     stopped = true;
+    // ADR-0127 第五阶段：登记/续用 worker。
+    // 一次性调用且 agent 支持 loadSession 时登记新 worker；
+    // 续派成功时仅更新 lastUsedAt——记录其余字段不可变。
+    if (workerStore !== undefined) {
+      if (existingWorker !== undefined) {
+        output.workerId = existingWorker.workerId;
+        await workerStore.touch(existingWorker.workerId, new Date().toISOString()).catch(() => {
+          diagnostics?.record("external_agent.worker_touch_failed", {
+            agent: config.name,
+            workerId: existingWorker.workerId,
+          });
+        });
+      } else if (loadSessionCapable && sessionId !== undefined) {
+        const workerId = createWorkerId();
+        const now = new Date().toISOString();
+        const record: ExternalWorkerRecord = {
+          formatVersion: 1,
+          workerId,
+          agentName: config.name,
+          externalSessionId: sessionId,
+          cwd: request.cwd,
+          providerSnapshot: {
+            command: config.command,
+            args: [...config.args],
+            envKeys: Object.keys(config.env ?? {}),
+            ...(config.mode !== undefined ? { mode: config.mode } : {}),
+            ...(config.configOptions !== undefined
+              ? { configOptions: { ...config.configOptions } }
+              : {}),
+          },
+          loadSessionCapable: true,
+          agentReportedName: initialized.agentInfo?.name,
+          agentVersion: initialized.agentInfo?.version,
+          createdAt: now,
+          lastUsedAt: now,
+        };
+        try {
+          await workerStore.write(record);
+          output.workerId = workerId;
+        } catch (err) {
+          diagnostics?.record("external_agent.worker_write_failed", {
+            agent: config.name,
+            workerId,
+            detail: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
     return { status: "ok", modelContent: text, output };
   } catch (error) {
     const code =
