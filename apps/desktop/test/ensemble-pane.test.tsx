@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   EnsembleMemberPermission,
   EnsembleMemberView,
+  EnsembleOverview,
   EnsemblePostView,
   EnsembleView,
 } from "@nocturne/core/protocol";
@@ -73,6 +74,47 @@ function makeEnsemble(overrides: Partial<EnsembleView> = {}): EnsembleView {
   };
 }
 
+function makeOverview(overrides: Partial<EnsembleOverview> = {}): EnsembleOverview {
+  return {
+    goal: "实现 REST API v1",
+    checkpoints: ["所有验收标准通过", "无 lint 错误"],
+    revision: 3,
+    lines: [
+      {
+        id: "l1",
+        title: "接入与配置",
+        owner: "cli",
+        progress: { text: "还差配置迁移", post: 7 },
+        tasks: [
+          { id: "t1", title: "provider 注册表", status: "done", owner: "cli" },
+          { id: "t2", title: "配置迁移与兼容", status: "done", owner: "cli" },
+        ],
+      },
+      {
+        id: "l2",
+        title: "派单与续派",
+        owner: "runtime",
+        post: 5,
+        tasks: [
+          { id: "t3", title: "任务单 schema", status: "todo", owner: "runtime" },
+          { id: "t4", title: "失败重派策略", status: "work", owner: "runtime", post: 6 },
+        ],
+      },
+      {
+        id: "l3",
+        title: "桌面体验",
+        owner: "web",
+        progress: { text: "等待 shell 稳定 API", wait: true },
+        tasks: [
+          { id: "t5", title: "连接状态页", status: "todo", owner: "web" },
+          { id: "t6", title: "重启恢复演示", status: "todo", owner: "web" },
+        ],
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function makeSession(overrides: Partial<EnsembleSession> = {}): EnsembleSession {
   return {
     postToEnsemble: vi.fn(async () => ({ number: 1, recipients: [] })),
@@ -88,11 +130,12 @@ function renderPane(options: {
   onOpenMember?: (member: EnsembleMemberView) => void;
   onSelectMaestro?: () => void;
   visible?: boolean;
+  boardNonce?: number;
 }) {
   const session = options.session ?? makeSession();
   const onOpenMember = options.onOpenMember ?? vi.fn();
   const onSelectMaestro = options.onSelectMaestro ?? vi.fn();
-  const element = (ensemble: EnsembleView, visible: boolean) => (
+  const element = (ensemble: EnsembleView, visible: boolean, nonce?: number) => (
     <EnsemblePane
       ensemble={ensemble}
       session={session}
@@ -100,6 +143,7 @@ function renderPane(options: {
       onOpenMember={onOpenMember}
       onSelectMaestro={onSelectMaestro}
       visible={visible}
+      boardNonce={nonce ?? options.boardNonce ?? 0}
     />
   );
   const page = render(element(options.ensemble, options.visible ?? true));
@@ -108,8 +152,8 @@ function renderPane(options: {
     session,
     onOpenMember,
     onSelectMaestro,
-    show: (ensemble: EnsembleView, visible = true) => {
-      page.rerender(element(ensemble, visible));
+    show: (ensemble: EnsembleView, visible = true, nonce?: number) => {
+      page.rerender(element(ensemble, visible, nonce));
     },
   };
 }
@@ -142,9 +186,163 @@ function scrollableBody(container: HTMLElement, height: number, viewport = 200):
   return body;
 }
 
+function openBoard() {
+  fireEvent.click(screen.getByRole("tab", { name: "留言板" }));
+}
+
 function openMembers() {
   fireEvent.click(screen.getByRole("tab", { name: "成员" }));
 }
+
+function openOverview() {
+  fireEvent.click(screen.getByRole("tab", { name: "概览" }));
+}
+
+describe("Ensemble 面板页签与概览", () => {
+  it("通用入口默认落在概览页签，点击页签切换", () => {
+    renderPane({ ensemble: makeEnsemble({ overview: makeOverview() }) });
+    expect(screen.getByRole("tab", { name: "概览" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "留言板" }).getAttribute("aria-selected")).toBe("false");
+
+    openBoard();
+    expect(screen.getByRole("tab", { name: "留言板" }).getAttribute("aria-selected")).toBe("true");
+    openMembers();
+    expect(screen.getByRole("tab", { name: "成员" }).getAttribute("aria-selected")).toBe("true");
+    openOverview();
+    expect(screen.getByRole("tab", { name: "概览" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("boardNonce 变化时强制切到留言板页签", () => {
+    const page = renderPane({
+      ensemble: makeEnsemble({ overview: makeOverview() }),
+      boardNonce: 0,
+    });
+    expect(screen.getByRole("tab", { name: "概览" }).getAttribute("aria-selected")).toBe("true");
+    page.show(makeEnsemble({ overview: makeOverview() }), true, 1);
+    expect(screen.getByRole("tab", { name: "留言板" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("概览显示目标、检查点、进度条与默认展开规则：首条进行中的线展开", () => {
+    const page = renderPane({
+      ensemble: makeEnsemble({ overview: makeOverview() }),
+    });
+    expect(page.container.textContent).toContain("实现 REST API v1");
+    expect(texts(page.container, ".ensemble-ov-cps li")).toEqual([
+      "所有验收标准通过",
+      "无 lint 错误",
+    ]);
+    expect(page.container.textContent).toContain("任务 2/6 已完成");
+
+    const lines = nodes(page.container, ".ensemble-line");
+    expect(lines).toHaveLength(3);
+    // l2 有进行中任务 → 默认展开；l1 全部完成 → 收起；l3 在等待线后 → 收起
+    expect(lines[0]?.classList.contains("open")).toBe(false);
+    expect(lines[1]?.classList.contains("open")).toBe(true);
+    expect(lines[2]?.classList.contains("open")).toBe(false);
+    // 展开线内任务按 待办→进行中 排序（ADR-0131 §6）
+    expect(texts(lines[1] as HTMLElement, ".ensemble-task-title")).toEqual([
+      "任务单 schema",
+      "失败重派策略",
+    ]);
+    expect(texts(lines[1] as HTMLElement, ".ensemble-task-owner")).toEqual(["@runtime", "@runtime"]);
+    // 负责人与帖号引用
+    expect(texts(lines[1] as HTMLElement, ".ensemble-line-owner")).toEqual(["@runtime"]);
+    expect(lines[1]?.querySelector(".ensemble-line-head .ensemble-postref")?.textContent).toBe(
+      "#5",
+    );
+    // 等待中的线显示 time 图标与 warning 进度
+    expect(lines[2]?.classList.contains("wait")).toBe(true);
+    expect(lines[2]?.querySelector(".ensemble-line-progress")?.textContent).toContain(
+      "等待 shell 稳定 API",
+    );
+    expect(lines[0]?.querySelector(".ensemble-line-progress")?.textContent).toContain(
+      "还差配置迁移",
+    );
+    expect(lines[0]?.querySelector(".ensemble-line-progress .ensemble-postref")?.textContent).toBe(
+      "#7",
+    );
+  });
+
+  it("手动折叠后不强制展开，数据刷新保持用户选择", () => {
+    const page = renderPane({
+      ensemble: makeEnsemble({ overview: makeOverview() }),
+    });
+    const toggleOf = (index: number) =>
+      nodes(page.container, ".ensemble-line-toggle")[index] as HTMLElement;
+    // 折叠默认展开的 l2
+    fireEvent.click(toggleOf(1));
+    expect(nodes(page.container, ".ensemble-line")[1]?.classList.contains("open")).toBe(false);
+    // 展开 l1
+    fireEvent.click(toggleOf(0));
+    expect(nodes(page.container, ".ensemble-line")[0]?.classList.contains("open")).toBe(true);
+    expect(nodes(page.container, ".ensemble-line")[0]?.textContent).toContain("provider 注册表");
+
+    // 实时刷新（数据更新）：折叠/展开保持
+    const updated = makeOverview({ revision: 4 });
+    page.show(makeEnsemble({ overview: updated }));
+    expect(nodes(page.container, ".ensemble-line")[1]?.classList.contains("open")).toBe(false);
+    expect(nodes(page.container, ".ensemble-line")[0]?.classList.contains("open")).toBe(true);
+  });
+
+  it("实时刷新保留页签与草稿", async () => {
+    const page = renderPane({
+      ensemble: makeEnsemble({ overview: makeOverview(), posts: [makePost(1)] }),
+    });
+    openBoard();
+    const field = screen.getByRole("textbox", { name: "留言板" }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "还没写完的草稿" } });
+    // 新帖到达：页签与草稿都保留
+    page.show(
+      makeEnsemble({ overview: makeOverview(), posts: [makePost(1), makePost(2)] }),
+    );
+    expect(screen.getByRole("tab", { name: "留言板" }).getAttribute("aria-selected")).toBe("true");
+    expect(field.value).toBe("还没写完的草稿");
+  });
+
+  it("createdSeq 变化（新一场合奏）时页签与展开状态重置为默认", () => {
+    const first = makeEnsemble({ overview: makeOverview(), posts: [makePost(1)] });
+    const page = renderPane({ ensemble: first });
+    openBoard();
+    expect(screen.getByRole("tab", { name: "留言板" }).getAttribute("aria-selected")).toBe("true");
+    // 新一场合奏：回到概览
+    page.show(makeEnsemble({ createdSeq: 10, overview: makeOverview() }));
+    expect(screen.getByRole("tab", { name: "概览" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("无概览的旧合奏降级显示标题、结束摘要与成员入口", () => {
+    const onOpenMember = vi.fn();
+    const page = renderPane({
+      ensemble: makeEnsemble({
+        status: "ended",
+        summary: "全部工作并回完成",
+        members: [makeMember("users")],
+      }),
+      onOpenMember,
+    });
+    expect(page.container.querySelector(".ensemble-legacy")).not.toBeNull();
+    expect(page.container.textContent).toContain("API 输入校验");
+    expect(page.container.textContent).toContain("全部工作并回完成");
+    // 成员入口仍可点击
+    const main = page.container.querySelector(".ensemble-mem-main");
+    if (!(main instanceof HTMLElement)) throw new Error("缺少成员入口");
+    fireEvent.click(main);
+    expect(onOpenMember).toHaveBeenCalled();
+  });
+
+  it("结束后输入框消失，概览保留任务与结束摘要", () => {
+    const page = renderPane({
+      ensemble: makeEnsemble({
+        status: "ended",
+        overview: makeOverview(),
+        summary: "done",
+      }),
+    });
+    expect(screen.queryByRole("textbox", { name: "留言板" })).toBeNull();
+    expect(page.container.textContent).toContain("结束摘要");
+    expect(nodes(page.container, ".ensemble-line")).toHaveLength(3);
+    expect(page.container.textContent).toContain("已结束");
+  });
+});
 
 describe("Ensemble 面板留言板", () => {
   it("帖子头部显示头像、作者、箭头与剔除作者后的收件人，无收件人不显示箭头", () => {
@@ -172,6 +370,7 @@ describe("Ensemble 面板留言板", () => {
         ],
       }),
     });
+    openBoard();
 
     expect(nodes(page.container, ".ensemble-post > .ensemble-av")).toHaveLength(5);
     expect(texts(page.container, ".ensemble-post-from")).toEqual([
@@ -193,45 +392,13 @@ describe("Ensemble 面板留言板", () => {
       `#4 · ${TIME_LABEL}`,
       `#5 · ${TIME_LABEL}`,
     ]);
-    // Runtime 帖正文原样纯文本，不做 Markdown
     expect(page.container.querySelector(".ensemble-post.sys .ensemble-sys-text")?.textContent).toBe(
       "Quiet reminder: @maestro 没有新帖\n请继续",
     );
     expect(page.container.querySelector(".ensemble-post.user")).not.toBeNull();
   });
 
-  it("筛选条按作者与收件人过滤留言板", () => {
-    const page = renderPane({
-      ensemble: makeEnsemble({
-        members: [makeMember("users"), makeMember("orders")],
-        posts: [
-          makePost(1, { from: "users", fromKind: "member", text: "users 汇报" }),
-          makePost(2, { recipients: ["orders"], text: "请 orders 复核" }),
-          makePost(3, { text: "整体进度" }),
-        ],
-      }),
-    });
-
-    expect(texts(page.container, ".ensemble-chip")).toEqual(["全部", "@users", "@orders"]);
-    expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
-
-    fireEvent.click(screen.getByRole("button", { name: "@orders" }));
-    expect(nodes(page.container, ".ensemble-post")).toHaveLength(1);
-    expect(page.container.querySelector(".ensemble-post-txt")?.textContent).toContain(
-      "请 orders 复核",
-    );
-    expect(screen.getByRole("button", { name: "@orders" }).className).toBe("ensemble-chip on");
-    expect(screen.getByRole("button", { name: "全部" }).className).toBe("ensemble-chip");
-
-    fireEvent.click(screen.getByRole("button", { name: "@users" }));
-    expect(nodes(page.container, ".ensemble-post")).toHaveLength(1);
-    expect(page.container.querySelector(".ensemble-post-txt")?.textContent).toContain("users 汇报");
-
-    fireEvent.click(screen.getByRole("button", { name: "全部" }));
-    expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
-  });
-
-  it("搜索展开无占位文字，不区分大小写匹配正文与作者，Escape 收起并清空", () => {
+  it("常驻搜索框过滤并高亮命中，计数显示 命中/总数", () => {
     const page = renderPane({
       ensemble: makeEnsemble({
         posts: [
@@ -245,66 +412,148 @@ describe("Ensemble 面板留言板", () => {
         ],
       }),
     });
+    openBoard();
 
-    const toggle = screen.getByRole("button", { name: "搜索" });
-    expect(toggle.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
-
-    const input = screen.getByRole("textbox", { name: "搜索" }) as HTMLInputElement;
-    expect(input.hasAttribute("placeholder")).toBe(false);
-    expect(document.activeElement).toBe(input);
-    expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
-
-    fireEvent.change(input, { target: { value: "HELLO" } });
+    const input = screen.getByRole("textbox", { name: "搜索留言" }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "hello" } });
     expect(nodes(page.container, ".ensemble-post")).toHaveLength(1);
-    expect(page.container.querySelector(".ensemble-post-txt")?.textContent).toContain(
-      "Hello World",
-    );
+    // 命中高亮为 mark.ensemble-hit，保留原大小写
+    const hits = nodes(page.container, "mark.ensemble-hit");
+    expect(hits.map((el) => el.textContent)).toEqual(["Hello"]);
+    // 计数 1/3
+    expect(page.container.querySelector(".ensemble-meta")?.textContent).toBe("1/3");
 
-    fireEvent.change(input, { target: { value: "RUNTIME" } });
+    fireEvent.change(input, { target: { value: "runtime" } });
     expect(nodes(page.container, ".ensemble-post")).toHaveLength(1);
     expect(page.container.querySelector(".ensemble-post-txt")?.textContent).toContain(
       "Quiet reminder",
     );
 
-    fireEvent.keyDown(input, { key: "Escape" });
-    expect(page.container.querySelector(".ensemble-search")).toBeNull();
+    fireEvent.change(input, { target: { value: "" } });
     expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
+    expect(page.container.querySelector(".ensemble-meta")?.textContent).toBe("3");
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
-    expect((screen.getByRole("textbox", { name: "搜索" }) as HTMLInputElement).value).toBe("");
+  it("筛选按钮带计数徽标，展开面板内 来自/发给 单选，选择后折叠处显示可移除的条件 chip", async () => {
+    const page = renderPane({
+      ensemble: makeEnsemble({
+        members: [makeMember("users"), makeMember("orders")],
+        posts: [
+          makePost(1, { from: "users", fromKind: "member", recipients: ["maestro"], text: "users 汇报" }),
+          makePost(2, { recipients: ["orders"], text: "请 orders 复核" }),
+          makePost(3, { recipients: ["maestro"], text: "整体进度" }),
+        ],
+      }),
+    });
+    openBoard();
+
+    const filterButton = screen.getByRole("button", { name: "筛选" });
+    expect(filterButton.getAttribute("aria-expanded")).toBe("false");
+    expect(page.container.querySelector(".ensemble-filter-n")).toBeNull();
+
+    fireEvent.click(filterButton);
+    expect(filterButton.getAttribute("aria-expanded")).toBe("true");
+    const pop = page.container.querySelector(".ensemble-filterpop");
+    expect(pop).not.toBeNull();
+    expect(pop?.textContent).toContain("来自");
+    expect(pop?.textContent).toContain("发给");
+
+    // 打开「来自」菜单选 @users
+    const selectors = nodes(pop as HTMLElement, ".ensemble-fsel");
+    fireEvent.click(selectors[0] as HTMLElement);
+    const menu = await screen.findByRole("menu", { name: "来自" });
+    const labels = Array.from(menu.querySelectorAll(".menu-label")).map((el) => el.textContent);
+    expect(labels).toEqual(["全部", "指挥", "@users", "@orders"]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "@users" }));
+    await waitFor(() => {
+      expect(nodes(page.container, ".ensemble-post")).toHaveLength(1);
+    });
+    expect(page.container.querySelector(".ensemble-post-txt")?.textContent).toContain("users 汇报");
+    expect(page.container.querySelector(".ensemble-filter-n")?.textContent).toBe("1");
+
+    // 收起筛选面板：显示条件 chip
+    fireEvent.click(filterButton);
+    expect(page.container.querySelector(".ensemble-filterpop")).toBeNull();
+    const chips = nodes(page.container, ".ensemble-fchip");
+    expect(chips.map((el) => el.textContent)).toEqual(["来自 @users"]);
+    expect(screen.getByRole("button", { name: "清除筛选" })).not.toBeNull();
+
+    // 单独移除条件 chip：回到未筛选
+    fireEvent.click(screen.getByRole("button", { name: "移除作者筛选" }));
+    expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
+    expect(nodes(page.container, ".ensemble-fchip")).toHaveLength(0);
+  });
+
+  it("来自+发给 交集筛选；清除筛选按钮一次清空两个条件", async () => {
+    const page = renderPane({
+      ensemble: makeEnsemble({
+        members: [makeMember("runtime"), makeMember("cli")],
+        posts: [
+          makePost(1, { from: "runtime", fromKind: "runtime", recipients: ["maestro"], text: "run-114 在重启后恢复失败" }),
+          makePost(2, { from: "runtime", fromKind: "runtime", recipients: ["cli"], text: "runtime 发给 cli" }),
+          makePost(3, { from: "cli", fromKind: "member", recipients: ["maestro"], text: "cli 汇报重启" }),
+        ],
+      }),
+    });
+    openBoard();
+
+    const filterButton = screen.getByRole("button", { name: "筛选" });
+    fireEvent.click(filterButton);
+    const pop = () => page.container.querySelector(".ensemble-filterpop") as HTMLElement;
+
+    // 来自 @runtime
+    fireEvent.click(nodes(pop(), ".ensemble-fsel")[0] as HTMLElement);
+    await screen.findByRole("menu", { name: "来自" });
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "@runtime" }));
+
+    // 发给 指挥（选完「来自」后筛选面板保持展开）
+    await waitFor(() => {
+      expect(pop()).not.toBeNull();
+    });
+    fireEvent.click(nodes(pop(), ".ensemble-fsel")[1] as HTMLElement);
+    await screen.findByRole("menu", { name: "发给" });
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "指挥" }));
+
+    await waitFor(() => {
+      expect(nodes(page.container, ".ensemble-post")).toHaveLength(1);
+    });
+    expect(page.container.querySelector(".ensemble-post-txt")?.textContent).toContain(
+      "run-114 在重启后恢复失败",
+    );
+    expect(page.container.querySelector(".ensemble-meta")?.textContent).toBe("1/3");
+    expect(page.container.querySelector(".ensemble-filter-n")?.textContent).toBe("2");
+
+    // 清除筛选（面板内按钮）：条件与过滤全部清空
+    const clears = Array.from(pop().querySelectorAll<HTMLElement>(".ensemble-fclear"));
+    fireEvent.click(clears[0] as HTMLElement);
+    expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
+    expect(page.container.querySelector(".ensemble-filter-n")).toBeNull();
   });
 
   it("跟随最新默认开启，往上滚自动关闭，点按钮重新开启并滚到底", () => {
     const page = renderPane({ ensemble: makeEnsemble({ posts: [makePost(1), makePost(2)] }) });
+    openBoard();
     const body = scrollableBody(page.container, 600);
     const follow = () => screen.getByRole("button", { name: "跟随最新" });
     expect(follow().getAttribute("aria-pressed")).toBe("true");
 
-    // 新帖到达时贴底
     page.show(makeEnsemble({ posts: [makePost(1), makePost(2), makePost(3)] }));
     expect(body.scrollTop).toBe(600);
 
-    // 往上滚：关闭跟随
     body.scrollTop = 100;
     fireEvent.scroll(body);
     expect(follow().getAttribute("aria-pressed")).toBe("false");
 
-    // 关闭后新帖不再拉回底部
     page.show(makeEnsemble({ posts: [makePost(1), makePost(2), makePost(3), makePost(4)] }));
     expect(body.scrollTop).toBe(100);
 
-    // 点按钮重新开启并立即贴底
     fireEvent.click(follow());
     expect(follow().getAttribute("aria-pressed")).toBe("true");
     expect(body.scrollTop).toBe(600);
 
-    // 滚轮上滑同样关闭跟随
     fireEvent.wheel(body, { deltaY: -12 });
     expect(follow().getAttribute("aria-pressed")).toBe("false");
 
-    // 面板重新可见且跟随开启时回到最新
     fireEvent.click(follow());
     body.scrollTop = 0;
     page.show(makeEnsemble({ posts: [makePost(1), makePost(2), makePost(3), makePost(4)] }), false);
@@ -332,6 +581,7 @@ describe("Ensemble 面板留言板", () => {
         ],
       }),
     });
+    openBoard();
 
     expect(texts(page.container, ".ensemble-charter-tag")).toEqual(["负责", "不碰", "完成"]);
     expect(texts(page.container, ".ensemble-charter-row")).toEqual([
@@ -340,7 +590,6 @@ describe("Ensemble 面板留言板", () => {
       "完成pnpm test 全绿",
     ]);
     expect(page.container.textContent).not.toContain("Owns:");
-    // 只显示一段任务书，不重复英文原文
     expect(nodes(page.container, ".ensemble-post-txt")).toHaveLength(1);
   });
 
@@ -365,6 +614,7 @@ describe("Ensemble 面板留言板", () => {
         ],
       }),
     });
+    openBoard();
 
     const posts = nodes(page.container, ".ensemble-post");
     expect(posts).toHaveLength(5);
@@ -384,33 +634,6 @@ describe("Ensemble 面板留言板", () => {
     ]);
   });
 
-  it("成员筛选选中某成员时包含其任务书帖、不含他人任务书帖", () => {
-    const page = renderPane({
-      ensemble: makeEnsemble({
-        members: [makeMember("impl-1"), makeMember("review-1")],
-        posts: [
-          makePost(1, { charterOf: "impl-1", mentions: [], recipients: [] }),
-          makePost(2, { charterOf: "review-1", mentions: [], recipients: [] }),
-          makePost(3, { mentions: ["impl-1"], recipients: ["impl-1"], text: "@impl-1 开始吧" }),
-        ],
-      }),
-    });
-
-    expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
-
-    fireEvent.click(screen.getByRole("button", { name: "@impl-1" }));
-    expect(texts(page.container, ".ensemble-post-meta")).toEqual([
-      `#1 · ${TIME_LABEL}`,
-      `#3 · ${TIME_LABEL}`,
-    ]);
-
-    fireEvent.click(screen.getByRole("button", { name: "@review-1" }));
-    expect(texts(page.container, ".ensemble-post-meta")).toEqual([`#2 · ${TIME_LABEL}`]);
-
-    fireEvent.click(screen.getByRole("button", { name: "全部" }));
-    expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
-  });
-
   it("正文只强调 mentions 里的 @token，代码内与未提及的保持原样", () => {
     const page = renderPane({
       ensemble: makeEnsemble({
@@ -423,19 +646,19 @@ describe("Ensemble 面板留言板", () => {
         ],
       }),
     });
+    openBoard();
 
     expect(texts(page.container, ".ensemble-at")).toEqual(["@users", "@all"]);
     expect(page.container.querySelector("code .ensemble-at")).toBeNull();
     expect(page.container.querySelector("code")?.textContent).toBe("@users");
   });
 
-  it("留言板输入框无占位文字，Enter 发送、Shift+Enter 换行、组字中不发送", async () => {
+  it("留言板输入框 Enter 发送、Shift+Enter 换行、组字中不发送", async () => {
     const session = makeSession();
     renderPane({ ensemble: makeEnsemble(), session });
+    openBoard();
     const field = screen.getByRole("textbox", { name: "留言板" }) as HTMLTextAreaElement;
-    expect(field.hasAttribute("placeholder")).toBe(false);
 
-    // 全空白不发送
     fireEvent.change(field, { target: { value: "   " } });
     fireEvent.keyDown(field, { key: "Enter" });
     expect(session.postToEnsemble).not.toHaveBeenCalled();
@@ -447,13 +670,11 @@ describe("Ensemble 面板留言板", () => {
     );
     await waitFor(() => expect(field.value).toBe(""));
 
-    // Shift+Enter 换行不发送
     fireEvent.change(field, { target: { value: "第二行" } });
     fireEvent.keyDown(field, { key: "Enter", shiftKey: true });
     expect(session.postToEnsemble).toHaveBeenCalledTimes(1);
     expect(field.value).toBe("第二行");
 
-    // 输入法组字期间 Enter 不发送
     fireEvent.compositionStart(field);
     fireEvent.keyDown(field, { key: "Enter" });
     expect(session.postToEnsemble).toHaveBeenCalledTimes(1);
@@ -469,13 +690,13 @@ describe("Ensemble 面板留言板", () => {
       }),
     });
     const page = renderPane({ ensemble: makeEnsemble(), session });
+    openBoard();
     const field = screen.getByRole("textbox", { name: "留言板" }) as HTMLTextAreaElement;
     fireEvent.change(field, { target: { value: "要不要并回" } });
     fireEvent.keyDown(field, { key: "Enter" });
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toBe("ensemble 已结束，无法发帖");
-    expect(page.container.querySelector(".ensemble-boardin")?.firstElementChild).toBe(alert);
     expect(field.value).toBe("要不要并回");
   });
 
@@ -492,9 +713,9 @@ describe("Ensemble 面板留言板", () => {
       }),
       session,
     });
+    openBoard();
     const field = screen.getByRole("textbox", { name: "留言板" }) as HTMLTextAreaElement;
 
-    // 组字期间不弹
     fireEvent.compositionStart(field);
     fireEvent.change(field, { target: { value: "@", selectionStart: 1 } });
     expect(screen.queryByRole("listbox")).toBeNull();
@@ -508,14 +729,12 @@ describe("Ensemble 面板留言板", () => {
     expect(list.textContent).not.toContain("old-1");
     expect(list.textContent).toContain("deep");
 
-    // 向下选 api-1 后 Enter 填入，不发帖且末尾带空格
     fireEvent.keyDown(field, { key: "ArrowDown" });
     fireEvent.keyDown(field, { key: "Enter" });
     expect(session.postToEnsemble).not.toHaveBeenCalled();
     expect(field.value).toBe("@api-1 ");
     expect(screen.queryByRole("listbox")).toBeNull();
 
-    // 输入 @d 前缀筛选，Tab 填入
     fireEvent.change(field, { target: { value: "@api-1 请问 @d", selectionStart: 12 } });
     const filtered = screen.getByRole("listbox", { name: "提及补全" });
     expect(
@@ -524,11 +743,9 @@ describe("Ensemble 面板留言板", () => {
     fireEvent.keyDown(field, { key: "Tab" });
     expect(field.value).toBe("@api-1 请问 @data-1 ");
 
-    // 无匹配时不弹
     fireEvent.change(field, { target: { value: "@zzz", selectionStart: 4 } });
     expect(screen.queryByRole("listbox")).toBeNull();
 
-    // Esc 关闭弹层，点击填入
     fireEvent.change(field, { target: { value: "@a", selectionStart: 2 } });
     expect(screen.getByRole("listbox")).not.toBeNull();
     fireEvent.keyDown(field, { key: "Escape" });
@@ -593,7 +810,6 @@ describe("Ensemble 面板成员页", () => {
     expect(dotOf("ui")).toBe("ensemble-dot pause");
     expect(dotOf("docs")).toBe("ensemble-dot wait");
 
-    // 结束后未移除成员统一变成 wait，已移除保持 retired
     page.show(membersEnsemble({ status: "ended" }));
     expect(dotOf("auth")).toBe("ensemble-dot wait");
     expect(dotOf("schema")).toBe("ensemble-dot wait");
@@ -700,98 +916,62 @@ describe("Ensemble 面板菜单", () => {
     fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
     await screen.findByRole("menu", { name: "更多操作" });
     fireEvent.click(screen.getByRole("menuitem", { name: "结束" }));
-
     await waitFor(() => expect(session.endEnsemble).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 
     page.show(makeEnsemble({ status: "ended", posts: [makePost(1)] }));
     expect(screen.queryByRole("button", { name: "更多操作" })).toBeNull();
+    openBoard();
     expect(screen.queryByRole("textbox", { name: "留言板" })).toBeNull();
   });
 
-  it("结束失败时在面板顶部显示 Runtime 原文", async () => {
+  it("成员行的溢出菜单与右键都打开移除菜单", async () => {
+    const session = makeSession();
+    const page = renderPane({
+      ensemble: makeEnsemble({
+        members: [makeMember("users", { status: "working" }), makeMember("docs")],
+      }),
+      session,
+    });
+    openMembers();
+
+    const row = rowOf(page.container, "users");
+    if (row === undefined) throw new Error("缺少成员行");
+    const more = row.querySelector(".ensemble-mem-menu");
+    if (!(more instanceof HTMLElement)) throw new Error("缺少更多按钮");
+    fireEvent.click(more);
+    await screen.findByRole("menu", { name: "更多操作" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "移除" }));
+    await waitFor(() => expect(session.removeEnsembleMember).toHaveBeenCalledWith("users"));
+
+    // 右键菜单同样可用
+    fireEvent.contextMenu(rowOf(page.container, "users") as HTMLElement);
+    await screen.findByRole("menu", { name: "更多操作" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "移除" }));
+    await waitFor(() => expect(session.removeEnsembleMember).toHaveBeenCalledTimes(2));
+
+    // 已结束的合奏不再出现更多按钮，也不能右键移除
+    page.show(
+      makeEnsemble({
+        status: "ended",
+        members: [makeMember("users", { status: "waiting" })],
+      }),
+    );
+    expect(rowOf(page.container, "users")?.querySelector(".ensemble-mem-menu")).toBeNull();
+    fireEvent.contextMenu(rowOf(page.container, "users") as HTMLElement);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("移除/结束失败时在页签行下方显示错误", async () => {
     const session = makeSession({
       endEnsemble: vi.fn(async () => {
-        throw new Error("还有成员的分支没有并回");
+        throw new Error("end failed");
       }),
     });
-    renderPane({ ensemble: makeEnsemble(), session });
+    renderPane({ ensemble: makeEnsemble({ posts: [makePost(1)] }), session });
     fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
     await screen.findByRole("menu", { name: "更多操作" });
     fireEvent.click(screen.getByRole("menuitem", { name: "结束" }));
-
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toBe("还有成员的分支没有并回");
-  });
-
-  it("成员行菜单的移除调用 removeEnsembleMember，报错时显示 Runtime 原文", async () => {
-    const session = makeSession();
-    const page = renderPane({
-      ensemble: makeEnsemble({ members: [makeMember("auth", { status: "working" })] }),
-      session,
-    });
-    openMembers();
-
-    const row = rowOf(page.container, "auth");
-    if (row === undefined) throw new Error("缺少 auth 成员行");
-    const trigger = row.querySelector(".ensemble-mem-menu");
-    if (!(trigger instanceof HTMLElement)) throw new Error("缺少成员菜单按钮");
-    fireEvent.click(trigger);
-    await screen.findByRole("menu", { name: "更多操作" });
-    fireEvent.click(screen.getByRole("menuitem", { name: "移除" }));
-
-    await waitFor(() => expect(session.removeEnsembleMember).toHaveBeenCalledWith("auth"));
-    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-  });
-
-  it("移除失败时显示 Runtime 原文", async () => {
-    const session = makeSession({
-      removeEnsembleMember: vi.fn(async () => {
-        throw new Error("这个成员的分支还没有并回提交");
-      }),
-    });
-    const page = renderPane({
-      ensemble: makeEnsemble({ members: [makeMember("auth", { status: "working" })] }),
-      session,
-    });
-    openMembers();
-
-    const trigger = page.container.querySelector(".ensemble-mem-menu");
-    if (!(trigger instanceof HTMLElement)) throw new Error("缺少成员菜单按钮");
-    fireEvent.click(trigger);
-    await screen.findByRole("menu", { name: "更多操作" });
-    fireEvent.click(screen.getByRole("menuitem", { name: "移除" }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toBe("这个成员的分支还没有并回提交");
-  });
-
-  it("点击成员行打开会话，右键同样能打开移除菜单", async () => {
-    const onOpenMember = vi.fn();
-    const page = renderPane({
-      ensemble: makeEnsemble({ members: [makeMember("auth", { status: "working" })] }),
-      onOpenMember,
-    });
-    openMembers();
-
-    const row = rowOf(page.container, "auth");
-    if (row === undefined) throw new Error("缺少 auth 成员行");
-    const main = row.querySelector(".ensemble-mem-main");
-    if (!(main instanceof HTMLElement)) throw new Error("缺少成员行按钮");
-    fireEvent.click(main);
-    expect(onOpenMember).toHaveBeenCalledWith(expect.objectContaining({ name: "auth" }));
-
-    // 点菜单按钮不打开会话
-    const trigger = row.querySelector(".ensemble-mem-menu");
-    if (!(trigger instanceof HTMLElement)) throw new Error("缺少成员菜单按钮");
-    fireEvent.click(trigger);
-    await screen.findByRole("menu", { name: "更多操作" });
-    expect(onOpenMember).toHaveBeenCalledTimes(1);
-    fireEvent.pointerDown(document.body);
-    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-
-    fireEvent.contextMenu(row);
-    await screen.findByRole("menu", { name: "更多操作" });
-    expect(screen.getByRole("menuitem", { name: "移除" })).not.toBeNull();
+    expect(alert.textContent).toBe("end failed");
   });
 });

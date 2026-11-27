@@ -1,503 +1,1058 @@
-/* Ensemble 面板主体（ADR-0089）：桌面右侧面板与手机全屏页共用；颜色只用主题变量 */
+/* ── Ensemble 面板（ADR-0089、ADR-0131）────────────────────── */
+/* 桌面右侧面板与手机全屏共用：移动端差异集中在文件末尾 */
 
 .ensemble-pane {
   display: flex;
-  flex: 1;
   flex-direction: column;
-  min-width: 0;
+  height: 100%;
   min-height: 0;
-  color: var(--a-text);
-  font-size: var(--fs-2);
+  min-width: 0;
 }
 
-/* ── 子栏：留言板/成员分段 + 搜索、跟随、溢出 ── */
+/* ── 页签行 ─────────────────────────────────────────────── */
 .ensemble-subbar {
-  flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-1-5) var(--space-3);
   border-bottom: 1px solid var(--a-border);
+  flex: none;
 }
+
 .ensemble-seg {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-0-5);
-  padding: var(--space-0-5);
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--radius-2);
-  background: var(--a-input);
+  flex: 1;
+  display: flex;
+  gap: 2px;
+  min-width: 0;
 }
+
 .ensemble-seg button {
-  min-height: calc(var(--ctl-h-md) - 2 * var(--space-0-5) - 2px);
-  padding: var(--space-0-5) var(--space-2);
-  border: 0;
-  border-radius: var(--radius-1);
+  flex: 1;
+  padding: var(--space-1) 0;
+  border: none;
+  border-radius: var(--radius-2);
   background: transparent;
-  color: var(--a-muted);
-  font-size: var(--fs-2);
-  white-space: nowrap;
+  color: var(--a-text-2);
+  font-size: var(--font-size-sm);
   cursor: pointer;
 }
+
 .ensemble-seg button:hover {
   color: var(--a-text);
 }
-.ensemble-seg button.on,
-.ensemble-seg button[aria-selected="true"] {
-  background: var(--a-sel-strong);
+
+.ensemble-seg button.on {
+  background: var(--a-hover);
   color: var(--a-text);
-  font-weight: var(--fw-medium);
+  font-weight: 600;
 }
+
 .ensemble-tools {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  flex: none;
 }
+
 .ensemble-ib {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--ctl-h-md);
-  height: var(--ctl-h-md);
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-1);
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-2);
   background: transparent;
-  color: var(--a-muted);
+  color: var(--a-text-3);
   cursor: pointer;
+  position: relative;
 }
+
 .ensemble-ib:hover {
-  background: var(--a-raised);
   color: var(--a-text);
+  background: var(--a-hover);
 }
+
 .ensemble-ib.on {
-  border-color: var(--a-accent-border);
-  background: var(--a-accent-subtle);
   color: var(--a-accent);
 }
-.ensemble-pane > .ensemble-error {
-  flex: none;
-  padding: var(--space-1) var(--space-3);
-  border-bottom: 1px solid var(--a-border);
-  font-size: var(--fs-1);
-}
 
-/* ── 搜索栏（不写 placeholder，聚焦即提示） ── */
-.ensemble-search {
-  flex: none;
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--a-border);
-}
-.ensemble-search input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-1);
-  background: var(--a-input);
-  color: var(--a-text);
-  font: inherit;
-}
-.ensemble-search input:focus {
-  border-color: var(--a-accent-border);
-}
-
-/* ── 筛选条：全部 + 每名成员 ── */
-.ensemble-filters {
-  flex: none;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--a-border);
-}
-.ensemble-chip {
-  min-height: calc(var(--chip-h) + var(--space-1));
-  padding: 0 var(--space-2);
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--a-muted);
-  font-size: var(--fs-1);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.ensemble-chip:hover {
-  color: var(--a-text);
-}
-.ensemble-chip.on {
-  border-color: var(--a-accent-border);
-  background: var(--a-sel);
-  color: var(--a-text);
-}
-
-/* ── 留言板帖子 ── */
-.ensemble-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-  padding: var(--space-3);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.ensemble-av {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: var(--space-6);
-  height: var(--space-6);
-  border-radius: var(--radius-1);
-  background: var(--a-raised);
-  color: var(--a-secondary);
-}
-.ensemble-av.sm {
-  width: var(--space-5);
-  height: var(--space-5);
-}
-.ensemble-av.tinted {
-  /* stylelint-disable-next-line function-disallowed-list -- 成员头像底色用 14% 淡化 */
-  background: color-mix(in srgb, var(--ensemble-av-color) 14%, transparent);
-  color: var(--ensemble-av-color);
-}
-.ensemble-av.warn {
-  outline: 1.5px solid var(--a-warning);
-}
-.ensemble-post {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  gap: var(--space-2);
-}
-.ensemble-post-col {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-.ensemble-post-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-.ensemble-post-head-main {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-1);
-  min-width: 0;
-}
-.ensemble-post-from {
-  min-width: 0;
-  color: var(--a-text);
-  font-size: var(--fs-2);
-  font-weight: var(--fw-semibold);
-  overflow-wrap: anywhere;
-}
-.ensemble-post-to {
-  color: var(--a-muted);
-  font-size: var(--fs-1);
-  font-weight: var(--fw-regular);
-  overflow-wrap: anywhere;
-}
-.ensemble-post-meta {
-  flex: none;
-  margin-left: auto;
-  color: var(--a-faint);
-  font: var(--fs-1)/1 var(--mono);
-  font-variant-numeric: tabular-nums;
-}
-.ensemble-post-txt {
-  color: var(--a-text);
-  overflow-wrap: anywhere;
-}
-.ensemble-post-txt .conversation-markdown > :first-child {
-  margin-top: 0;
-}
-.ensemble-post-txt .conversation-markdown > :last-child {
-  margin-bottom: 0;
-}
-.ensemble-sys-text {
-  color: var(--a-muted);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.ensemble-charter-row {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  color: var(--a-secondary);
-}
-.ensemble-charter-tag {
-  flex: none;
-  color: var(--a-muted);
-  font-size: var(--fs-1);
-}
-
-/* ── 底部留言板输入与 @ 补全 ── */
-.ensemble-boardin {
-  position: relative;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border-top: 1px solid var(--a-border);
-}
-.ensemble-ac {
+.ensemble-filter-n {
   position: absolute;
-  z-index: 40;
-  bottom: calc(100% + var(--space-1));
-  left: var(--space-3);
-  right: var(--space-3);
-  max-height: 224px;
-  overflow-y: auto;
-  padding: var(--space-1);
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-3);
-  background: var(--a-panel);
-  box-shadow: var(--shadow-popover);
-}
-.ensemble-ac-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-2);
-  cursor: pointer;
-}
-.ensemble-ac-row.is-active,
-.ensemble-ac-row:hover {
-  background: var(--a-sel);
-}
-.ensemble-ac-name {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--a-text);
-  font-size: var(--fs-2);
-  font-weight: var(--fw-medium);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ensemble-ac-meta {
-  margin-left: auto;
-  color: var(--a-faint);
-  font-family: var(--mono);
-  font-size: var(--fs-1);
-  white-space: nowrap;
-}
-.ensemble-boardin textarea {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: var(--composer-min-h);
-  max-height: 132px;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--a-border);
-  border-radius: var(--radius-2);
-  background: var(--a-input);
-  color: var(--a-text);
-  font: inherit;
-  line-height: var(--lh-base);
-  resize: none;
-  overflow-y: auto;
-}
-.ensemble-boardin textarea:focus {
-  border-color: var(--a-accent-border);
+  top: 1px;
+  right: -1px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  border-radius: 6px;
+  background: var(--a-accent);
+  color: var(--a-on-accent);
+  font-size: 9px;
+  line-height: 12px;
+  text-align: center;
+  pointer-events: none;
 }
 
-/* ── 成员页 ── */
+.ensemble-error {
+  flex: none;
+  margin: var(--space-1) var(--space-3) 0;
+}
+
+/* ── 滚动体 ─────────────────────────────────────────────── */
+.ensemble-body,
 .ensemble-mems {
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-2) var(--space-3) var(--space-2);
   display: flex;
   flex-direction: column;
-  padding: var(--space-2) var(--space-3) var(--space-3);
-  overflow-y: auto;
+  gap: var(--space-3);
 }
+
+.ensemble-body-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.ensemble-body-wrap .ensemble-body {
+  min-height: 0;
+}
+
+.ensemble-body::-webkit-scrollbar,
+.ensemble-mems::-webkit-scrollbar,
+.ensemble-filterpop::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ensemble-body::-webkit-scrollbar-thumb,
+.ensemble-mems::-webkit-scrollbar-thumb,
+.ensemble-filterpop::-webkit-scrollbar-thumb {
+  background: var(--a-border);
+  border-radius: 3px;
+}
+
+/* ── 成员行 ─────────────────────────────────────────────── */
 .ensemble-mem {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  border-radius: var(--radius-2);
 }
-.ensemble-mem:hover {
-  background: var(--a-raised);
-}
-.ensemble-mem.coord {
-  border-bottom: 1px dashed var(--a-border-strong);
-  border-radius: 0;
-}
-.ensemble-mem.retired {
-  opacity: var(--disabled-opacity);
-}
+
 .ensemble-mem-main {
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: flex-start;
   gap: var(--space-2);
-  padding: var(--space-2);
-  border: 0;
-  border-radius: var(--radius-2);
+  align-items: flex-start;
+  border: none;
   background: transparent;
-  color: inherit;
-  font: inherit;
+  padding: 0;
   text-align: left;
   cursor: pointer;
 }
+
+.ensemble-mem-coord {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--a-border);
+}
+
 .ensemble-mem-col {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-0-5);
+  gap: 2px;
 }
+
 .ensemble-mem-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+
+.ensemble-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.ensemble-dot.work {
+  background: var(--a-success);
+}
+
+.ensemble-dot.ask {
+  background: var(--a-warn);
+}
+
+.ensemble-dot.pause {
+  background: var(--a-border-strong);
+}
+
+.ensemble-dot.wait {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--a-border-strong);
+}
+
+.ensemble-dot.retired {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--a-text-3);
+}
+
+.ensemble-mem-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  color: var(--a-text);
+  font-weight: 600;
+}
+
+.ensemble-mem-name i {
+  font-style: normal;
+  color: var(--a-text-3);
+  font-weight: 400;
+  margin-left: var(--space-1);
+}
+
+.ensemble-mem-no {
+  flex: none;
+  color: var(--a-text-3);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.ensemble-mem-last {
+  color: var(--a-text-2);
+  font-size: var(--font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ensemble-mem.retired .ensemble-mem-name,
+.ensemble-mem.retired .ensemble-mem-last {
+  color: var(--a-text-3);
+}
+
+.ensemble-grp {
+  color: var(--a-text-3);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--ls-wider);
+  margin-top: var(--space-1);
+}
+
+.ensemble-retired-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.ensemble-mem-menu {
+  opacity: 0;
+  align-self: center;
+  flex: none;
+}
+
+.ensemble-mem:hover .ensemble-mem-menu,
+.ensemble-mem-menu[aria-expanded="true"] {
+  opacity: 1;
+}
+
+/* ── 留言板帖子 ─────────────────────────────────────────── */
+.ensemble-post {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ensemble-av {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--a-hover);
+  color: var(--a-text-2);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.ensemble-av.sm {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+}
+
+.ensemble-av .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.ensemble-av.sm .ui-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.ensemble-av.k-member {
+  color: var(--_c);
+  background: color-mix(in srgb, var(--_c) 14%, transparent);
+}
+
+.ensemble-av.k-maestro {
+  color: var(--a-accent);
+  background: color-mix(in srgb, var(--a-accent) 12%, transparent);
+}
+
+.ensemble-av.k-user {
+  color: var(--a-info);
+  background: color-mix(in srgb, var(--a-info) 12%, transparent);
+}
+
+.ensemble-av.k-runtime {
+  color: var(--a-text-3);
+}
+
+.ensemble-post-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.ensemble-post-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ensemble-post-head-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ensemble-post-from {
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+}
+
+.ensemble-post-to {
+  color: var(--a-text-2);
+  font-size: var(--font-size-xs);
+}
+
+.ensemble-post-meta {
+  flex: none;
+  color: var(--a-text-3);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.ensemble-post-txt {
+  font-size: var(--font-size-sm);
+  color: var(--a-text);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.ensemble-post-txt .md > :first-child {
+  margin-top: 0;
+}
+
+.ensemble-post-txt .md > :last-child {
+  margin-bottom: 0;
+}
+
+/* 留言板搜索命中高亮（ADR-0131 §7） */
+.ensemble-hit {
+  background: color-mix(in srgb, var(--a-warn) 30%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.ensemble-at {
+  color: var(--a-accent);
+  font-weight: 600;
+}
+
+.ensemble-post.user .ensemble-post-txt {
+  background: var(--a-input);
+  border-radius: var(--radius-2);
+  padding: var(--space-1) var(--space-2);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.ensemble-sys-text {
+  color: var(--a-text-3);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ensemble-charter-row {
+  display: flex;
+  gap: var(--space-1-5);
+  align-items: baseline;
+  margin-top: 2px;
+}
+
+.ensemble-charter-tag {
+  flex: none;
+  color: var(--a-text-3);
+  font-size: var(--font-size-xs);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-1);
+  padding: 0 var(--space-1);
+}
+
+.ensemble-nomatch {
+  color: var(--a-text-3);
+  font-size: var(--font-size-sm);
+  text-align: center;
+  margin: var(--space-4) 0;
+}
+
+/* ── 留言板工具行（搜索 + 筛选按钮）────────────────────── */
+.ensemble-boardbar {
+  flex: none;
+  padding: var(--space-1-5) var(--space-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+
+.ensemble-boardbar-row {
+  display: flex;
+  gap: var(--space-1-5);
+  align-items: center;
+}
+
+.ensemble-q {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  background: var(--a-input);
+  color: var(--a-text);
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  min-height: 0;
+}
+
+.ensemble-q:focus-visible {
+  border-color: var(--a-accent);
+  outline: none;
+}
+
+/* ── 筛选面板与条件 chip（ADR-0131 §7）──────────────────── */
+.ensemble-filterpop {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  left: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  padding: var(--space-2);
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-2);
+  background: var(--a-popover);
+  box-shadow: var(--shadow-pop);
+  max-height: 60%;
+  overflow-y: auto;
+}
+
+.ensemble-fselrow {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
 }
-.ensemble-mem-name {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--a-text);
-  font-size: var(--fs-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+
+.ensemble-fselrow.end {
+  justify-content: flex-end;
 }
-.ensemble-mem-name i {
-  margin-left: var(--space-2);
-  color: var(--a-muted);
-  font-family: var(--mono);
-  font-size: var(--fs-1);
-  font-style: normal;
-}
-.ensemble-mem-no {
-  margin-left: auto;
-  color: var(--a-faint);
-  font: var(--fs-1)/1 var(--mono);
-  font-variant-numeric: tabular-nums;
-}
-.ensemble-mem-last {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--a-muted);
-  font-size: var(--fs-1);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ensemble-mem-menu {
+
+.ensemble-flab {
   flex: none;
-  opacity: 0;
+  width: 2.5em;
+  color: var(--a-text-2);
+  font-size: var(--font-size-sm);
 }
-.ensemble-mem:hover .ensemble-mem-menu,
-.ensemble-mem:focus-within .ensemble-mem-menu {
-  opacity: 1;
-}
-.ensemble-grp {
+
+.ensemble-fsel {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  padding: var(--space-2) var(--space-2) var(--space-1);
-  color: var(--a-faint);
-  font-size: var(--fs-1);
+  gap: var(--space-1);
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  background: var(--a-input);
+  color: var(--a-text);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
 }
-.ensemble-retired-toggle {
+
+.ensemble-fsel:hover {
+  border-color: var(--a-border-strong);
+}
+
+.ensemble-fsel-v {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.ensemble-fchips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  padding-bottom: var(--space-1-5);
+  border-bottom: 1px solid var(--a-border);
+}
+
+.ensemble-fchip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--a-muted);
-  font-size: var(--fs-1);
-  cursor: pointer;
+  height: 22px;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-2);
+  background: var(--a-input);
+  color: var(--a-text);
+  font-size: var(--font-size-xs);
+  max-width: 100%;
 }
-.ensemble-retired-toggle:hover {
+
+.ensemble-fchip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--a-text-3);
+  cursor: pointer;
+  padding: 0;
+}
+
+.ensemble-fchip button:hover {
+  color: var(--a-text);
+  background: var(--a-hover);
+}
+
+.ensemble-fclear {
+  border: none;
+  background: transparent;
+  color: var(--a-accent);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  padding: 0 var(--space-1);
+}
+
+.ensemble-fclear:hover {
+  text-decoration: underline;
+}
+
+/* ── 留言板计数与输入区 ─────────────────────────────────── */
+.ensemble-meta {
+  flex: none;
+  padding: 0 var(--space-3) var(--space-0-5);
+  color: var(--a-text-3);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ensemble-boardin {
+  flex: none;
+  position: relative;
+  border-top: 1px solid var(--a-border);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.ensemble-boardin textarea {
+  width: 100%;
+  resize: none;
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-2);
+  background: var(--a-input);
+  color: var(--a-text);
+  padding: var(--space-1-5) var(--space-2);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  line-height: var(--lh-normal);
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.ensemble-boardin textarea:focus-visible {
+  border-color: var(--a-accent);
+  outline: none;
+}
+
+/* ── @ 提及补全 ─────────────────────────────────────────── */
+.ensemble-ac {
+  position: absolute;
+  left: var(--space-3);
+  right: var(--space-3);
+  bottom: calc(100% - var(--space-1));
+  z-index: 6;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-2);
+  background: var(--a-popover);
+  box-shadow: var(--shadow-pop);
+  padding: var(--space-1);
+}
+
+.ensemble-ac-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1-5);
+  border-radius: var(--radius-1);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.ensemble-ac-row.is-active {
+  background: var(--a-hover);
+}
+
+.ensemble-ac-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.ensemble-ac-meta {
+  flex: none;
+  color: var(--a-text-3);
+  font-size: var(--font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+
+/* ── 概览（ADR-0131 §6）─────────────────────────────────── */
+.overview-body {
+  gap: var(--space-2-5);
+}
+
+.ensemble-ov-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ensemble-ov-h {
+  margin: 0;
+  color: var(--a-text-3);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: var(--ls-wider);
+}
+
+.ensemble-ov-goal {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--a-text);
+  word-break: break-word;
+}
+
+.ensemble-ov-cps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ensemble-ov-cps li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1-5);
+  font-size: var(--font-size-sm);
+  color: var(--a-text-2);
+}
+
+.ensemble-cp-box {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--a-border-strong);
+  border-radius: 2px;
+  transform: translateY(0.5px);
+}
+
+.ensemble-ov-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ensemble-ov-progress-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--a-text);
+  font-weight: 600;
+}
+
+.ensemble-ov-ended {
+  color: var(--a-text-3);
+  font-weight: 400;
+  font-size: var(--font-size-xs);
+}
+
+.ensemble-ov-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--a-hover);
+  overflow: hidden;
+}
+
+.ensemble-ov-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--a-accent);
+  transition: width 0.25s ease;
+}
+
+/* 工作线 */
+.ensemble-line {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1-5) var(--space-2);
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  background: var(--a-bg);
+}
+
+.ensemble-line.wait {
+  border-color: color-mix(in srgb, var(--a-warn) 45%, transparent);
+}
+
+.ensemble-line-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+
+.ensemble-line-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--a-text-3);
+  cursor: pointer;
+  padding: 0;
+}
+
+.ensemble-line-toggle:hover {
+  color: var(--a-text);
+  background: var(--a-hover);
+}
+
+.ensemble-line-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
   color: var(--a-text);
 }
-@media (prefers-reduced-motion: no-preference) {
-  :root:not([data-reduce-motion]) .ensemble-retired-toggle .fold-arrow {
-    transition: transform var(--dur) var(--ease-out);
-  }
-}
-.ensemble-retired-toggle .fold-arrow.down {
-  transform: rotate(90deg);
-}
 
-/* ── 状态圆点：运行/等确认带光圈，其余纯色 ── */
-.ensemble-dot {
+.ensemble-line-count {
   flex: none;
-  width: var(--dot);
-  height: var(--dot);
-  border-radius: 50%;
-  background: var(--a-border-strong);
-}
-.ensemble-dot.work {
-  background: var(--a-accent);
-  /* stylelint-disable-next-line function-disallowed-list -- 运行中成员用 22% --a-accent 光圈 */
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-accent) 22%, transparent);
-}
-.ensemble-dot.ask {
-  background: var(--a-warning);
-  /* stylelint-disable-next-line function-disallowed-list -- 等待确认的成员用 25% --a-warning 光圈 */
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-warning) 25%, transparent);
-}
-.ensemble-dot.pause {
-  background: var(--a-warning);
-}
-.ensemble-dot.wait {
-  background: var(--a-border-strong);
-}
-.ensemble-dot.retired {
-  background: var(--a-faint);
+  color: var(--a-text-3);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
 }
 
-/* ── 手机全屏页：触控尺寸更大，成员菜单不靠悬停 ── */
-.phone .ensemble-subbar {
-  padding: var(--space-2) var(--space-3);
+.ensemble-line-owner {
+  flex: none;
+  color: var(--a-text-2);
+  font-size: var(--font-size-xs);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.phone .ensemble-ib {
-  width: var(--ctl-h-touch);
-  height: var(--ctl-h-touch);
+
+.ensemble-postref {
+  flex: none;
+  color: var(--a-accent);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.ensemble-line-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--a-hover);
+  overflow: hidden;
+}
+
+.ensemble-line-bar i {
+  display: block;
+  height: 100%;
+  background: var(--a-accent);
+  border-radius: 2px;
+  transition: width 0.25s ease;
+}
+
+.ensemble-line-progress {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1-5);
+  font-size: var(--font-size-xs);
+  color: var(--a-text-2);
+  min-width: 0;
+}
+
+.ensemble-line-progress .ui-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  transform: translateY(1.5px);
+}
+
+.ensemble-line-progress.wait {
+  color: var(--a-warn);
+}
+
+.ensemble-line-progress-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 任务行：勾选框三态 + 状态文字顺序（待办→进行中→等待→完成，ADR-0131 §6） */
+.ensemble-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-0-5);
+}
+
+.ensemble-task {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  min-height: 20px;
+}
+
+.ensemble-task-check {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--a-on-accent);
+}
+
+.ensemble-task-check .ui-icon {
+  width: 10px;
+  height: 10px;
+}
+
+.ensemble-task.done .ensemble-task-check {
+  background: var(--a-accent);
+  border-color: var(--a-accent);
+}
+
+.ensemble-task.work .ensemble-task-check {
+  border-color: var(--a-accent);
+}
+
+.ensemble-task.wait .ensemble-task-check {
+  border-color: var(--a-warn);
+  color: var(--a-warn);
+}
+
+.ensemble-task-spin {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--a-accent);
+}
+
+.ensemble-task-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--a-text);
+}
+
+.ensemble-task.done .ensemble-task-title {
+  color: var(--a-text-3);
+  text-decoration: line-through;
+}
+
+.ensemble-task.wait .ensemble-task-title {
+  color: var(--a-warn);
+}
+
+.ensemble-task-owner {
+  flex: none;
+  color: var(--a-text-2);
+  font-size: var(--font-size-xs);
+  max-width: 34%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 旧合奏降级（ADR-0131 §5）───────────────────────────── */
+.ensemble-legacy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ensemble-legacy-title {
+  margin: 0;
+  font-size: var(--font-size-base);
+  color: var(--a-text);
+}
+
+.ensemble-legacy-summary,
+.ensemble-legacy-note {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--a-text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ensemble-legacy-unmerged {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ensemble-legacy-branch {
+  font-size: var(--font-size-xs);
+  color: var(--a-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.ensemble-mems.embedded {
   padding: 0;
+  overflow: visible;
 }
-.phone .ensemble-seg button {
-  min-height: var(--ctl-h-touch);
-  padding: var(--space-1) var(--space-3);
-  font-size: var(--fs-3);
+
+/* ── 手机端差异 ─────────────────────────────────────────── */
+.phone .ensemble-subbar {
+  padding: var(--space-1-5) var(--space-4);
 }
-.phone .ensemble-chip {
-  min-height: var(--ctl-h-touch);
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-2);
+
+.phone .ensemble-boardbar {
+  padding: var(--space-1-5) var(--space-4) 0;
 }
-.phone .ensemble-body {
-  gap: var(--space-4);
+
+.phone .ensemble-body,
+.phone .ensemble-mems {
+  padding: var(--space-2) var(--space-4) var(--space-2);
 }
-.phone .ensemble-post > .ensemble-av {
-  width: var(--space-5);
-  height: var(--space-5);
+
+.phone .ensemble-meta {
+  padding: 0 var(--space-4) var(--space-0-5);
 }
-.phone .ensemble-post-txt {
-  font-size: var(--fs-3);
+
+.phone .ensemble-boardin {
+  padding: var(--space-2) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
 }
-.phone .ensemble-mem-main {
-  padding: var(--space-2) var(--space-3);
-}
-.phone .ensemble-mem-menu {
-  opacity: 1;
-}
+
 .phone .ensemble-boardin textarea {
-  font-size: var(--fs-4);
+  font-size: 16px; /* 防 iOS 聚焦自动放大 */
 }
+
+.phone .ensemble-filterpop {
+  left: var(--space-4);
+  right: var(--space-4);
+  max-height: 70%;
+}
+
+.phone .ensemble-ac {
+  left: var(--space-4);
+  right: var(--space-4);
+}
+
 .phone .ensemble-ac-row {
-  min-height: var(--ctl-h-touch);
+  padding: var(--space-2) var(--space-2);
+}
+
+.phone .ensemble-mem-menu {
+  opacity: 1; /* 触屏没有 hover，更多按钮常显 */
+}
+
+.phone .ensemble-line-title,
+.phone .ensemble-task-title,
+.phone .ensemble-line-progress-text {
+  white-space: normal;
+}
+
+.phone .ensemble-ib {
+  width: 30px;
+  height: 30px;
 }

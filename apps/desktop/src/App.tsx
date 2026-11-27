@@ -1719,7 +1719,8 @@ export function App({ host }: { host: DesktopHost }) {
         return true;
       }
       if (action.action === "ensemble-board") {
-        panelRef.current?.openEnsemble();
+        // ADR-0131 §6：/ensemble board 始终直达留言板页签
+        panelRef.current?.openEnsemble({ board: true });
         return true;
       }
       await active.session.endEnsemble();
@@ -2973,8 +2974,8 @@ export function App({ host }: { host: DesktopHost }) {
                       item.id === active.view.suite?.suiteId ||
                       item.coordinatorSessionId === active.session.id,
                   )}
-                  onOpenEnsemble={() => {
-                    sidePanel.openEnsemble();
+                  onOpenEnsemble={(options) => {
+                    sidePanel.openEnsemble(options);
                   }}
                   onOpenEnsembleMember={(member) => {
                     sidePanel.openEnsembleMember(member);
@@ -3358,7 +3359,7 @@ interface SessionPaneProps {
   scheduleSource?: ConversationProps["scheduleSource"];
   searchTarget?: { sessionId: string; seq?: number | undefined; nonce: number } | undefined;
   suiteRecord?: SuiteRecord | undefined;
-  onOpenEnsemble?: (() => void) | undefined;
+  onOpenEnsemble?: ((options?: { board?: boolean | undefined }) => void) | undefined;
   onOpenEnsembleMember?: ((member: { name: string; childSessionId: string }) => void) | undefined;
   onOpenSuiteThread?:
     ((thread: { threadId: string; childSessionId: string; title: string }) => void) | undefined;

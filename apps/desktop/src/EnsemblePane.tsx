@@ -1,6 +1,6 @@
 /**
- * Ensemble 面板主体（ADR-0089）：留言板与成员页。桌面右侧面板与手机全屏页共用这一份结构，
- * 尺寸差异只由外层 `.phone` 的少量 CSS 覆盖提供。
+ * Ensemble 面板主体（ADR-0089、ADR-0131）：概览、留言板与成员页。
+ * 桌面右侧面板与手机全屏页共用这一份结构，尺寸差异只由外层 `.phone` 的少量 CSS 覆盖提供。
  *
  * 数据来自 `SessionView.ensemble`（协议层已归约），写操作全部走 RpcSession：
  * 发帖 `postToEnsemble`、移除成员 `removeEnsembleMember`、结束 `endEnsemble`。
@@ -13,16 +13,28 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   type WheelEvent as ReactWheelEvent,
 } from "react";
-import type { EnsembleMemberView, EnsemblePostView, EnsembleView } from "@nocturne/core/protocol";
+import type {
+  EnsembleLine,
+  EnsembleMemberView,
+  EnsemblePostView,
+  EnsembleTask,
+  EnsembleView,
+} from "@nocturne/core/protocol";
 import type { RpcSession } from "@nocturne/rpc/client";
 
 import { Markdown, type FileLinkHooks } from "./Conversation";
-import { Menu, MenuItem } from "./Menu";
+import { ChoiceMenu, Menu, MenuItem } from "./Menu";
 import { EnsembleAvatar } from "./EnsembleAvatar";
 import {
-  filterEnsemblePosts,
+  ENSEMBLE_TASK_STATUS_ORDER,
+  ensembleDefaultOpenLines,
+  ensembleLineStats,
+  ensembleOverviewStats,
+  ensembleOwnerLabel,
+  filterEnsembleBoardPosts,
   formatEnsembleTime,
   groupEnsembleMembers,
   shortModelName,
@@ -64,17 +76,59 @@ export interface EnsemblePaneProps {
   onSelectMaestro?: (() => void) | undefined;
   /** 面板当前是否可见（可见或切换回留言板且跟随开启时滚到底） */
   visible?: boolean | undefined;
+  /** `/ensemble board` 直达信号：值变化时强制切到留言板页签（ADR-0131 §6） */
+  boardNonce?: number | undefined;
 }
 
-type EnsembleTab = "board" | "members";
+type EnsembleTab = "overview" | "board" | "members";
 
 /** 当前展开的溢出菜单：子栏「结束」或某一行成员的「移除」 */
 type OpenMenu =
   | { kind: "bar"; anchor: HTMLElement }
-  | { kind: "member"; anchor: HTMLElement; member: EnsembleMemberView };
+  | { kind: "member"; anchor: HTMLElement; member: EnsembleMemberView }
+  | { kind: "filter"; which: "from" | "to"; anchor: HTMLElement };
 
 function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
+}
+
+/** 按场隔离的界面状态（ADR-0131 §6）：createdSeq 变化时整体重置为默认 */
+interface EnsemblePaneState {
+  tab: EnsembleTab;
+  query: string;
+  filterFrom: string | undefined;
+  filterTo: string | undefined;
+  filterOpen: boolean;
+  follow: boolean;
+  retiredOpen: boolean;
+  draft: string;
+  /** 用户显式操作过展开状态的工作线；其余跟随默认展开规则 */
+  lineToggles: Record<string, boolean>;
+}
+
+function initialPaneState(): EnsemblePaneState {
+  return {
+    tab: "overview",
+    query: "",
+    filterFrom: undefined,
+    filterTo: undefined,
+    filterOpen: false,
+    follow: true,
+    retiredOpen: false,
+    draft: "",
+    lineToggles: {},
+  };
+}
+
+/** 工作线展开状态：用户手动折叠后不强制展开，未碰过的线跟随默认规则 */
+function isLineOpen(
+  line: EnsembleLine,
+  defaultOpen: ReadonlySet<string>,
+  toggles: Record<string, boolean>,
+): boolean {
+  const toggle = toggles[line.id];
+  if (toggle !== undefined) return toggle;
+  return defaultOpen.has(line.id);
 }
 
 export function EnsemblePane({
@@ -85,14 +139,44 @@ export function EnsemblePane({
   onOpenMember,
   onSelectMaestro,
   visible,
+  boardNonce,
 }: EnsemblePaneProps) {
-  const [tab, setTab] = useState<EnsembleTab>("board");
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [selectedMember, setSelectedMember] = useState("");
-  const [follow, setFollow] = useState(true);
-  const [retiredOpen, setRetiredOpen] = useState(false);
-  const [draft, setDraft] = useState("");
+  // ── 按场（createdSeq）隔离的全部界面状态：新一场合奏回到「概览」与默认展开 ──
+  // useState 的初值只取首次挂载；场 key 变化时用 React 官方认可的「渲染期 key 派生重置」
+  // （存上一次 key，不一致就同步 setState 触发丢弃式重渲染）
+  const [store, setStore] = useState<{ key: number; state: EnsemblePaneState }>(() => ({
+    key: ensemble.createdSeq,
+    state: initialPaneState(),
+  }));
+  if (store.key !== ensemble.createdSeq) {
+    setStore({ key: ensemble.createdSeq, state: initialPaneState() });
+  }
+  const pane = store.key === ensemble.createdSeq ? store.state : initialPaneState();
+  const patch = (part: Partial<EnsemblePaneState>) => {
+    setStore((current) => ({
+      key: ensemble.createdSeq,
+      state: {
+        // 场刚切换时 current 还是上一场的状态：以默认态为底再叠本次修改，避免旧状态残留
+        ...(current.key === ensemble.createdSeq ? current.state : initialPaneState()),
+        ...part,
+      },
+    }));
+  };
+  const {
+    tab,
+    query,
+    filterFrom,
+    filterTo,
+    filterOpen,
+    follow,
+    retiredOpen,
+    draft,
+    lineToggles,
+  } = pane;
+  const setTab = (next: EnsembleTab) => {
+    patch({ tab: next });
+  };
+
   const [caret, setCaret] = useState(0);
   const [composingState, setComposingState] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -103,12 +187,24 @@ export function EnsemblePane({
 
   const body = useRef<HTMLDivElement>(null);
   const previousScrollTop = useRef(0);
-  const searchField = useRef<HTMLInputElement>(null);
   const boardField = useRef<HTMLTextAreaElement>(null);
   const pendingCaret = useRef<number | null>(null);
   const composing = useRef(false);
   const sending = useRef(false);
   const mentionListId = useId();
+
+  // /ensemble board 直达：nonce 变化时强制切到留言板（ADR-0131 §6）
+  const seenNonce = useRef(boardNonce ?? 0);
+  useEffect(() => {
+    const current = boardNonce ?? 0;
+    if (current !== seenNonce.current) {
+      seenNonce.current = current;
+      setStore((previous) => ({
+        key: previous.key,
+        state: { ...previous.state, tab: "board" },
+      }));
+    }
+  }, [boardNonce]);
 
   const shown = visible !== false;
   const postCount = ensemble.posts.length;
@@ -149,12 +245,7 @@ export function EnsemblePane({
     if (element === null) return;
     element.scrollTop = element.scrollHeight;
     previousScrollTop.current = element.scrollTop;
-  }, [follow, tab, shown, postCount, selectedMember, query, searchOpen]);
-
-  // 展开搜索时直接聚焦输入框（不写 placeholder，聚焦即提示）
-  useLayoutEffect(() => {
-    if (searchOpen) searchField.current?.focus();
-  }, [searchOpen]);
+  }, [follow, tab, shown, postCount, query, filterFrom, filterTo]);
 
   // 留言板输入框随内容增高，超过约六行改为内滚
   useLayoutEffect(() => {
@@ -163,6 +254,10 @@ export function EnsemblePane({
     field.style.height = "auto";
     field.style.height = `${Math.min(field.scrollHeight, BOARD_INPUT_MAX_HEIGHT)}px`;
   }, [draft]);
+
+  const setDraft = (next: string) => {
+    patch({ draft: next });
+  };
 
   const send = () => {
     if (draft.trim() === "" || sending.current) return;
@@ -212,12 +307,13 @@ export function EnsemblePane({
     const element = body.current;
     if (element === null) return;
     const distance = element.scrollHeight - element.clientHeight - element.scrollTop;
-    if (element.scrollTop < previousScrollTop.current && distance > FOLLOW_SLACK) setFollow(false);
+    if (element.scrollTop < previousScrollTop.current && distance > FOLLOW_SLACK)
+      patch({ follow: false });
     previousScrollTop.current = element.scrollTop;
   };
 
   const onBodyWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
-    if (event.deltaY < 0) setFollow(false);
+    if (event.deltaY < 0) patch({ follow: false });
   };
 
   const onBoardKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -256,14 +352,52 @@ export function EnsemblePane({
     send();
   };
 
-  const posts = filterEnsemblePosts(ensemble.posts, {
-    member: selectedMember,
-    query,
-    members: ensemble.members,
-  });
+  // ── 留言板筛选（ADR-0131 §7）：关键词、作者、收件人取交集 ──
+  const highlight = query.trim() !== "" ? query.trim() : undefined;
+  const posts = filterEnsembleBoardPosts(
+    ensemble.posts,
+    {
+      ...(filterFrom !== undefined ? { from: filterFrom } : {}),
+      ...(filterTo !== undefined ? { to: filterTo } : {}),
+      ...(query.trim() !== "" ? { query } : {}),
+    },
+    ensemble.members,
+  );
+  const filtered = posts.length !== ensemble.posts.length;
+  const filterCount = (filterFrom !== undefined ? 1 : 0) + (filterTo !== undefined ? 1 : 0);
+
   const groups = groupEnsembleMembers(ensemble.members);
   const maestroModel = shortModelName(ensemble.maestro.model);
   const maestroSummary = ensembleActivitySummary(ensemble.maestro.activity);
+
+  // ── 概览（ADR-0131 §6）：初始展开规则与用户手动折叠状态分离 ──
+  const overview = ensemble.overview;
+  const defaultOpenLines = new Set(overview !== undefined ? ensembleDefaultOpenLines(overview) : []);
+  const stats = overview !== undefined ? ensembleOverviewStats(overview) : undefined;
+  const ended = ensemble.status === "ended";
+
+  const filterIdentities = (which: "from" | "to") => {
+    const value = which === "from" ? filterFrom : filterTo;
+    return {
+      value,
+      heading: which === "from" ? "来自" : "发给",
+      groups: [
+        {
+          options: [
+            { value: "", label: "全部" },
+            { value: "maestro", label: "指挥" },
+            ...ensemble.members.map((member) => ({
+              value: member.name,
+              label: `@${member.name}`,
+            })),
+          ],
+        },
+      ],
+      onSelect: (next: string) => {
+        patch(which === "from" ? { filterFrom: next === "" ? undefined : next } : { filterTo: next === "" ? undefined : next });
+      },
+    };
+  };
 
   const memberRow = (member: EnsembleMemberView) => {
     const summary = ensembleActivitySummary(member.activity);
@@ -388,6 +522,7 @@ export function EnsemblePane({
                 text={item.text}
                 openUrl={openUrl}
                 mentions={item.mentions}
+                highlight={highlight}
                 session={
                   typeof session.resolveFiles === "function" ? (session as RpcSession) : undefined
                 }
@@ -400,10 +535,184 @@ export function EnsemblePane({
     );
   };
 
+  const taskRow = (line: EnsembleLine, task: EnsembleTask) => {
+    const stateClass =
+      task.status === "done" ? "done" : task.status === "work" ? "work" : task.status === "wait" ? "wait" : "todo";
+    return (
+      <div key={task.id} className={`ensemble-task ${stateClass}`}>
+        <span className="ensemble-task-check" aria-hidden="true">
+          {task.status === "done" ? (
+            <Icon name="check" size={ICON_SM} />
+          ) : task.status === "work" ? (
+            <span className="ensemble-task-spin" />
+          ) : task.status === "wait" ? (
+            <Icon name="time" size={ICON_SM} />
+          ) : null}
+        </span>
+        <span className="ensemble-task-title">{task.title}</span>
+        <span className="ensemble-task-owner">{ensembleOwnerLabel(task.owner)}</span>
+        {task.post !== undefined && <span className="ensemble-postref">#{task.post}</span>}
+      </div>
+    );
+  };
+
+  const sortTasks = (tasks: readonly EnsembleTask[]): EnsembleTask[] =>
+    [...tasks].sort(
+      (a, b) =>
+        ENSEMBLE_TASK_STATUS_ORDER.indexOf(a.status) - ENSEMBLE_TASK_STATUS_ORDER.indexOf(b.status),
+    );
+
+  const lineBlock = (line: EnsembleLine) => {
+    const lineStats = ensembleLineStats(line);
+    const open = isLineOpen(line, defaultOpenLines, lineToggles);
+    const waiting = line.progress?.wait === true;
+    return (
+      <section key={line.id} className={`ensemble-line${open ? " open" : ""}${waiting ? " wait" : ""}`}>
+        <div className="ensemble-line-head">
+          <button
+            type="button"
+            className="ensemble-line-toggle"
+            aria-expanded={open}
+            onClick={() => {
+              patch({ lineToggles: { ...lineToggles, [line.id]: !open } });
+            }}
+          >
+            <Icon
+              name="right_small"
+              size={ICON_SM}
+              className={`fold-arrow${open ? " down" : ""}`}
+            />
+          </button>
+          <span className="ensemble-line-title">{line.title}</span>
+          {lineStats.total > 0 && (
+            <span className="ensemble-line-count">
+              {lineStats.done}/{lineStats.total}
+            </span>
+          )}
+          <span className="ensemble-line-owner">{ensembleOwnerLabel(line.owner)}</span>
+          {line.post !== undefined && <span className="ensemble-postref">#{line.post}</span>}
+        </div>
+        {lineStats.total > 0 && (
+          <div className="ensemble-line-bar" aria-hidden="true">
+            <i style={{ width: `${Math.round(lineStats.ratio * 100)}%` }} />
+          </div>
+        )}
+        {line.progress !== undefined && (
+          <div className={`ensemble-line-progress${waiting ? " wait" : ""}`}>
+            {waiting && <Icon name="time" size={ICON_SM} />}
+            <span className="ensemble-line-progress-text">{line.progress.text}</span>
+            {line.progress.post !== undefined && (
+              <span className="ensemble-postref">#{line.progress.post}</span>
+            )}
+          </div>
+        )}
+        {open && line.tasks.length > 0 && (
+          <div className="ensemble-tasks">{sortTasks(line.tasks).map((task) => taskRow(line, task))}</div>
+        )}
+      </section>
+    );
+  };
+
+  const overviewBody: ReactNode =
+    overview === undefined ? (
+      // ADR-0131 §5：没有概览数据的旧合奏降级显示标题/结束摘要/成员入口
+      <div className="ensemble-legacy">
+        <h3 className="ensemble-legacy-title">{ensemble.title}</h3>
+        {ended && ensemble.summary !== undefined && (
+          <p className="ensemble-legacy-summary">{ensemble.summary}</p>
+        )}
+        {ended && !ensemble.summary && <p className="ensemble-legacy-note">合奏已结束。</p>}
+        {ended && ensemble.unmerged !== undefined && ensemble.unmerged.length > 0 && (
+          <div className="ensemble-legacy-unmerged">
+            <div className="ensemble-grp">未并回的工作树</div>
+            {ensemble.unmerged.map((item) => (
+              <div key={item.childSessionId} className="ensemble-legacy-branch">
+                @{item.name}（{item.branch}）
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="ensemble-grp">成员</div>
+        <div className="ensemble-mems embedded">
+          {ensemble.members
+            .filter((member) => member.status !== "removed")
+            .map((member) => memberRow(member))}
+        </div>
+      </div>
+    ) : (
+      <div className="ensemble-overview">
+        {overview.goal !== undefined && (
+          <section className="ensemble-ov-block">
+            <h4 className="ensemble-ov-h">目标</h4>
+            <p className="ensemble-ov-goal">{overview.goal}</p>
+          </section>
+        )}
+        {overview.checkpoints.length > 0 && (
+          <section className="ensemble-ov-block">
+            <h4 className="ensemble-ov-h">检查点</h4>
+            <ul className="ensemble-ov-cps">
+              {overview.checkpoints.map((checkpoint) => (
+                <li key={checkpoint}>
+                  <span className="ensemble-cp-box" aria-hidden="true" />
+                  <span>{checkpoint}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {stats !== undefined && stats.total > 0 && (
+          <div className="ensemble-ov-progress">
+            <div className="ensemble-ov-progress-head">
+              <span>{`任务 ${stats.done}/${stats.total} 已完成`}</span>
+              {ended && <span className="ensemble-ov-ended">已结束</span>}
+            </div>
+            <div className="ensemble-ov-bar" aria-hidden="true">
+              <i style={{ width: `${Math.round(stats.ratio * 100)}%` }} />
+            </div>
+          </div>
+        )}
+        {ended && stats?.total === 0 && (
+          <div className="ensemble-ov-progress">
+            <div className="ensemble-ov-progress-head">
+              <span className="ensemble-ov-ended">已结束</span>
+            </div>
+          </div>
+        )}
+        {overview.lines.map(lineBlock)}
+        {ended && ensemble.summary !== undefined && (
+          <section className="ensemble-ov-block">
+            <h4 className="ensemble-ov-h">结束摘要</h4>
+            <p className="ensemble-ov-goal">{ensemble.summary}</p>
+          </section>
+        )}
+        {ended && ensemble.unmerged !== undefined && ensemble.unmerged.length > 0 && (
+          <section className="ensemble-ov-block">
+            <h4 className="ensemble-ov-h">未并回的工作树</h4>
+            {ensemble.unmerged.map((item) => (
+              <div key={item.childSessionId} className="ensemble-legacy-branch">
+                @{item.name}（{item.branch}）
+              </div>
+            ))}
+          </section>
+        )}
+      </div>
+    );
+
   return (
     <div className="ensemble-pane">
       <div className="ensemble-subbar">
         <div className="ensemble-seg" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "overview"}
+            className={tab === "overview" ? "on" : undefined}
+            onClick={() => {
+              setTab("overview");
+            }}
+          >
+            概览
+          </button>
           <button
             type="button"
             role="tab"
@@ -429,44 +738,26 @@ export function EnsemblePane({
         </div>
         <div className="ensemble-tools">
           {tab === "board" && (
-            <>
-              <button
-                type="button"
-                className={searchOpen ? "ensemble-ib on" : "ensemble-ib"}
-                aria-label="搜索"
-                aria-pressed={searchOpen}
-                onClick={() => {
-                  if (searchOpen) {
-                    setQuery("");
-                    setSearchOpen(false);
-                    return;
-                  }
-                  setSearchOpen(true);
-                }}
-              >
-                <Icon name="search" size={ICON_MD} />
-              </button>
-              <button
-                type="button"
-                className={follow ? "ensemble-ib on" : "ensemble-ib"}
-                aria-label="跟随最新"
-                aria-pressed={follow}
-                onClick={() => {
-                  if (follow) {
-                    setFollow(false);
-                    return;
-                  }
-                  setFollow(true);
-                  const element = body.current;
-                  if (element !== null) {
-                    element.scrollTop = element.scrollHeight;
-                    previousScrollTop.current = element.scrollTop;
-                  }
-                }}
-              >
-                <Icon name="down_small" size={ICON_MD} />
-              </button>
-            </>
+            <button
+              type="button"
+              className={follow ? "ensemble-ib on" : "ensemble-ib"}
+              aria-label="跟随最新"
+              aria-pressed={follow}
+              onClick={() => {
+                if (follow) {
+                  patch({ follow: false });
+                  return;
+                }
+                patch({ follow: true });
+                const element = body.current;
+                if (element !== null) {
+                  element.scrollTop = element.scrollHeight;
+                  previousScrollTop.current = element.scrollTop;
+                }
+              }}
+            >
+              <Icon name="down_small" size={ICON_MD} />
+            </button>
           )}
           {active && (
             <button
@@ -489,53 +780,144 @@ export function EnsemblePane({
           {actionError}
         </p>
       )}
-      {tab === "board" ? (
+      {tab === "overview" && <div className="ensemble-body overview-body">{overviewBody}</div>}
+      {tab === "board" && (
         <>
-          {searchOpen && (
-            <div className="ensemble-search">
+          <div className="ensemble-boardbar">
+            <div className="ensemble-boardbar-row">
               <input
-                ref={searchField}
                 type="text"
-                aria-label="搜索"
+                className="ensemble-q"
+                aria-label="搜索留言"
+                placeholder="搜索留言"
                 value={query}
                 onChange={(event) => {
-                  setQuery(event.target.value);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape") return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setQuery("");
-                  setSearchOpen(false);
+                  patch({ query: event.target.value });
                 }}
               />
-            </div>
-          )}
-          <div className="ensemble-filters">
-            <button
-              type="button"
-              className={selectedMember === "" ? "ensemble-chip on" : "ensemble-chip"}
-              onClick={() => {
-                setSelectedMember("");
-              }}
-            >
-              全部
-            </button>
-            {ensemble.members.map((member) => (
               <button
-                key={member.name}
                 type="button"
-                className={selectedMember === member.name ? "ensemble-chip on" : "ensemble-chip"}
+                className={filterOpen || filterCount > 0 ? "ensemble-ib on" : "ensemble-ib"}
+                aria-label="筛选"
+                aria-expanded={filterOpen}
+                aria-pressed={filterOpen}
                 onClick={() => {
-                  setSelectedMember(member.name);
+                  patch({ filterOpen: !filterOpen });
                 }}
               >
-                {`@${member.name}`}
+                <Icon name="settings_6" size={ICON_MD} />
+                {filterCount > 0 && <span className="ensemble-filter-n">{filterCount}</span>}
               </button>
-            ))}
+            </div>
+            {!filterOpen && (filterFrom !== undefined || filterTo !== undefined) && (
+              <div className="ensemble-fchips">
+                {filterFrom !== undefined && (
+                  <span className="ensemble-fchip">
+                    {`来自 ${filterFrom === "maestro" ? "指挥" : `@${filterFrom}`}`}
+                    <button
+                      type="button"
+                      aria-label="移除作者筛选"
+                      onClick={() => {
+                        patch({ filterFrom: undefined });
+                      }}
+                    >
+                      <Icon name="close" size={ICON_SM} />
+                    </button>
+                  </span>
+                )}
+                {filterTo !== undefined && (
+                  <span className="ensemble-fchip">
+                    {`发给 ${filterTo === "maestro" ? "指挥" : `@${filterTo}`}`}
+                    <button
+                      type="button"
+                      aria-label="移除收件人筛选"
+                      onClick={() => {
+                        patch({ filterTo: undefined });
+                      }}
+                    >
+                      <Icon name="close" size={ICON_SM} />
+                    </button>
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="ensemble-fclear"
+                  onClick={() => {
+                    patch({ filterFrom: undefined, filterTo: undefined });
+                  }}
+                >
+                  清除筛选
+                </button>
+              </div>
+            )}
           </div>
-          <div className="ensemble-body" ref={body} onScroll={onBodyScroll} onWheel={onBodyWheel}>
-            {posts.map(post)}
+          <div className="ensemble-body-wrap">
+            {filterOpen && (
+              <div className="ensemble-filterpop">
+                <div className="ensemble-fselrow">
+                  <span className="ensemble-flab">来自</span>
+                  <button
+                    type="button"
+                    className="ensemble-fsel"
+                    aria-haspopup="menu"
+                    aria-expanded={menu !== null && menu.kind === "filter" && menu.which === "from"}
+                    onClick={(event) => {
+                      setMenu({ kind: "filter", which: "from", anchor: event.currentTarget });
+                    }}
+                  >
+                    <span className="ensemble-fsel-v">
+                      {filterFrom === undefined
+                        ? "全部"
+                        : filterFrom === "maestro"
+                          ? "指挥"
+                          : `@${filterFrom}`}
+                    </span>
+                    <Icon name="down_small" size={ICON_SM} />
+                  </button>
+                </div>
+                <div className="ensemble-fselrow">
+                  <span className="ensemble-flab">发给</span>
+                  <button
+                    type="button"
+                    className="ensemble-fsel"
+                    aria-haspopup="menu"
+                    aria-expanded={menu !== null && menu.kind === "filter" && menu.which === "to"}
+                    onClick={(event) => {
+                      setMenu({ kind: "filter", which: "to", anchor: event.currentTarget });
+                    }}
+                  >
+                    <span className="ensemble-fsel-v">
+                      {filterTo === undefined
+                        ? "全部"
+                        : filterTo === "maestro"
+                          ? "指挥"
+                          : `@${filterTo}`}
+                    </span>
+                    <Icon name="down_small" size={ICON_SM} />
+                  </button>
+                </div>
+                <div className="ensemble-fselrow end">
+                  <button
+                    type="button"
+                    className="ensemble-fclear"
+                    onClick={() => {
+                      patch({ filterFrom: undefined, filterTo: undefined });
+                    }}
+                  >
+                    清除筛选
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className="ensemble-body" ref={body} onScroll={onBodyScroll} onWheel={onBodyWheel}>
+              {posts.map(post)}
+              {posts.length === 0 && ensemble.posts.length > 0 && (
+                <p className="ensemble-nomatch">没有符合筛选的帖子</p>
+              )}
+            </div>
+          </div>
+          <div className="ensemble-meta">
+            {filtered ? `${posts.length}/${ensemble.posts.length}` : `${ensemble.posts.length}`}
           </div>
           {active && (
             <div className="ensemble-boardin">
@@ -607,7 +989,8 @@ export function EnsemblePane({
             </div>
           )}
         </>
-      ) : (
+      )}
+      {tab === "members" && (
         <div className="ensemble-mems">
           <div className="ensemble-mem coord">
             <button
@@ -666,7 +1049,7 @@ export function EnsemblePane({
                   className="ensemble-retired-toggle"
                   aria-expanded={retiredOpen}
                   onClick={() => {
-                    setRetiredOpen((value) => !value);
+                    patch({ retiredOpen: !retiredOpen });
                   }}
                 >
                   <Icon
@@ -711,6 +1094,16 @@ export function EnsemblePane({
             }}
           />
         </Menu>
+      )}
+      {menu !== null && menu.kind === "filter" && (
+        <ChoiceMenu
+          anchor={menu.anchor}
+          label={menu.which === "from" ? "来自" : "发给"}
+          control={filterIdentities(menu.which)}
+          onClose={() => {
+            setMenu(null);
+          }}
+        />
       )}
     </div>
   );

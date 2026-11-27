@@ -8,8 +8,11 @@ import type {
   ModelRef,
   EnsembleActivity,
   EnsembleAuthorKind,
+  EnsembleLine,
   EnsembleMemberView,
+  EnsembleOverview,
   EnsemblePostView,
+  EnsembleTaskStatus,
   EnsembleView,
   ViewEntry,
 } from "@nocturne/core/protocol";
@@ -472,50 +475,6 @@ export function ensembleMentionCandidates(
   return out;
 }
 
-/** 留言板按成员筛选（`from`、`recipients` 或 `charterOf`）与正文/作者不区分大小写子串搜索 */
-export function filterEnsemblePosts<
-  T extends Pick<EnsemblePostView, "from" | "fromKind" | "text" | "recipients" | "charterOf">,
->(
-  posts: readonly T[],
-  options: {
-    member?: string | undefined;
-    query?: string | undefined;
-    members?: readonly Pick<EnsembleMemberView, "name" | "charter">[] | undefined;
-  } = {},
-): T[] {
-  const selected = options.member?.trim() ?? "";
-  const needle = options.query?.trim().toLowerCase() ?? "";
-  const charters =
-    options.members !== undefined
-      ? new Map(options.members.map((m) => [m.name, m.charter]))
-      : undefined;
-  return posts.filter((post) => {
-    if (selected !== "") {
-      const isAuthor = post.fromKind === "member" && post.from === selected;
-      if (!isAuthor && !post.recipients.includes(selected) && post.charterOf !== selected) {
-        return false;
-      }
-    }
-    if (needle !== "") {
-      const authorLabel = ensembleAuthorLabel(post.from, post.fromKind).toLowerCase();
-      const fromRaw = post.from.toLowerCase();
-      const charter = post.charterOf !== undefined ? charters?.get(post.charterOf) : undefined;
-      const bodyText =
-        charter !== undefined
-          ? `${charter.owns}\n${charter.handsOff}\n${charter.doneWhen}`.toLowerCase()
-          : post.text.toLowerCase();
-      if (
-        !authorLabel.includes(needle) &&
-        !fromRaw.includes(needle) &&
-        !bodyText.includes(needle)
-      ) {
-        return false;
-      }
-    }
-    return true;
-  });
-}
-
 /** 成员页分组：工作中（working）、已暂停（paused）、等待（waiting）、已移除（removed） */
 export function groupEnsembleMembers<T extends Pick<EnsembleMemberView, "status">>(
   members: readonly T[],
@@ -555,6 +514,161 @@ export function formatEnsembleTime(iso: string): string {
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
   return `${hours}:${minutes}`;
+}
+
+// ── 合奏概览（ADR-0131）────────────────────────────────────
+
+/** 概览负责人显示：maestro → 指挥，成员 → @name */
+export function ensembleOwnerLabel(owner: string): string {
+  return owner === "maestro" ? "指挥" : `@${owner}`;
+}
+
+export interface EnsembleLineStats {
+  total: number;
+  done: number;
+  /** 完成占比（无任务时为 0） */
+  ratio: number;
+  hasWork: boolean;
+  allDone: boolean;
+}
+
+export function ensembleLineStats(line: Pick<EnsembleLine, "tasks">): EnsembleLineStats {
+  const total = line.tasks.length;
+  const done = line.tasks.filter((task) => task.status === "done").length;
+  return {
+    total,
+    done,
+    ratio: total === 0 ? 0 : done / total,
+    hasWork: line.tasks.some((task) => task.status === "work"),
+    allDone: total > 0 && done === total,
+  };
+}
+
+/** 概览合计：任务总数、完成数与总进度条占比 */
+export function ensembleOverviewStats(overview: Pick<EnsembleOverview, "lines">): {
+  total: number;
+  done: number;
+  ratio: number;
+} {
+  let total = 0;
+  let done = 0;
+  for (const line of overview.lines) {
+    total += line.tasks.length;
+    done += line.tasks.filter((task) => task.status === "done").length;
+  }
+  return { total, done, ratio: total === 0 ? 0 : done / total };
+}
+
+/**
+ * 概览工作线的初始展开集合（ADR-0131 §6 草案细节）：
+ * 首条有进行中任务的工作线；没有则首条未完成的工作线；全部完成时初始收起（空集合）。
+ */
+export function ensembleDefaultOpenLines(overview: Pick<EnsembleOverview, "lines">): string[] {
+  const stats = overview.lines.map((line) => ({ line, stats: ensembleLineStats(line) }));
+  const working = stats.find((item) => item.stats.hasWork);
+  if (working !== undefined) return [working.line.id];
+  const unfinished = stats.find((item) => !item.stats.allDone);
+  if (unfinished !== undefined) return [unfinished.line.id];
+  return [];
+}
+
+/** 留言板「发给」筛选：命中发帖当时的历史投递记录（含显式任务书归属），不用回算后的 mentions（ADR-0131 §7） */
+export function ensemblePostDeliveredTo(post: EnsemblePostView, identity: string): boolean {
+  if (post.charterOf === identity) return true;
+  return post.recipients.includes(identity);
+}
+
+/** 留言板「来自」筛选 */
+export function ensemblePostFromMatches(post: EnsemblePostView, identity: string): boolean {
+  return post.from === identity;
+}
+
+export interface EnsembleBoardFilter {
+  /** 作者身份："maestro" 或成员名；undefined 不限 */
+  from?: string | undefined;
+  /** 收件人身份："maestro" 或成员名；undefined 不限 */
+  to?: string | undefined;
+  /** 关键词（不区分大小写子串；命中正文、作者或任务书） */
+  query?: string | undefined;
+}
+
+/**
+ * 留言板筛选：关键词、作者、收件人三项取交集（ADR-0131 §7）。
+ * 关键词命中正文、作者显示名/原名或任务书三段（与原成员筛选行的搜索口径一致）。
+ */
+export function filterEnsembleBoardPosts(
+  posts: readonly EnsemblePostView[],
+  filter: EnsembleBoardFilter,
+  members?: readonly Pick<EnsembleMemberView, "name" | "charter">[],
+): EnsemblePostView[] {
+  const needle = filter.query?.trim().toLowerCase() ?? "";
+  const charters =
+    members !== undefined ? new Map(members.map((m) => [m.name, m.charter])) : undefined;
+  return posts.filter((post) => {
+    if (filter.from !== undefined && !ensemblePostFromMatches(post, filter.from)) return false;
+    if (filter.to !== undefined && !ensemblePostDeliveredTo(post, filter.to)) return false;
+    if (needle !== "") {
+      const authorLabel = ensembleAuthorLabel(post.from, post.fromKind).toLowerCase();
+      const fromRaw = post.from.toLowerCase();
+      const charter = post.charterOf !== undefined ? charters?.get(post.charterOf) : undefined;
+      const bodyText =
+        charter !== undefined
+          ? `${charter.owns}\n${charter.handsOff}\n${charter.doneWhen}`.toLowerCase()
+          : post.text.toLowerCase();
+      if (
+        !authorLabel.includes(needle) &&
+        !fromRaw.includes(needle) &&
+        !bodyText.includes(needle)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+/** 任务状态显示顺序与文案（ADR-0131 §6）：待办→进行中→等待→完成 */
+export const ENSEMBLE_TASK_STATUS_ORDER: readonly EnsembleTaskStatus[] = [
+  "todo",
+  "work",
+  "wait",
+  "done",
+];
+
+export function ensembleTaskStatusLabel(status: EnsembleTaskStatus): string {
+  switch (status) {
+    case "todo":
+      return "待办";
+    case "work":
+      return "进行中";
+    case "wait":
+      return "等待";
+    case "done":
+      return "完成";
+  }
+}
+
+/**
+ * 在纯文本里切出大小写不敏感的命中片段（供 `<mark>` 高亮）。
+ * 空串/空白查询原样返回单段文本；大小写保留原文。
+ */
+export function splitHighlight(text: string, query: string): { hit: boolean; value: string }[] {
+  const needle = query.trim().toLowerCase();
+  if (needle === "" || text === "") return text === "" ? [] : [{ hit: false, value: text }];
+  const lower = text.toLowerCase();
+  const out: { hit: boolean; value: string }[] = [];
+  let index = 0;
+  let plainStart = 0;
+  while (index <= lower.length - needle.length) {
+    const at = lower.indexOf(needle, index);
+    if (at < 0) break;
+    if (at > plainStart) out.push({ hit: false, value: text.slice(plainStart, at) });
+    out.push({ hit: true, value: text.slice(at, at + needle.length) });
+    index = at + needle.length;
+    plainStart = index;
+  }
+  if (plainStart < text.length) out.push({ hit: false, value: text.slice(plainStart) });
+  return out.length > 0 ? out : [{ hit: false, value: text }];
 }
 
 function isTokenBoundaryChar(ch: string | undefined): boolean {

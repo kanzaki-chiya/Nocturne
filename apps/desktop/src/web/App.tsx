@@ -272,6 +272,8 @@ export function PhoneApp({
   const viewerControl = useRef<ImageViewerControl | null>(null);
   const pageRef = useRef(page);
   pageRef.current = page;
+  /** 最近一次 board:true 合奏导航的时间戳（0 = 从未直达留言板） */
+  const boardNavStamp = useRef(0);
   const closingViewerFromPop = useRef(false);
   const handleViewerOpenChange = (open: boolean) => {
     if (open) {
@@ -1151,8 +1153,13 @@ export function PhoneApp({
         onPanelClose={() => {
           history.go(page.panel?.kind === "overview" ? -1 : -2);
         }}
-        onOpenEnsemble={() => {
-          navigate({ kind: "ensemble", hostId: page.hostId, sessionId: page.sessionId });
+        onOpenEnsemble={(options) => {
+          if (options?.board === true) boardNavStamp.current = Date.now();
+          navigate({
+            kind: "ensemble",
+            hostId: page.hostId,
+            sessionId: page.sessionId,
+          });
         }}
         onOpenEnsembleMember={(member) => {
           const parentId = page.sessionId;
@@ -1271,6 +1278,7 @@ export function PhoneApp({
           <EnsemblePane
             ensemble={ensemble}
             session={maestroEntry.session}
+            boardNonce={boardNavStamp.current}
             openUrl={(url) => {
               host.openUrl(url);
             }}

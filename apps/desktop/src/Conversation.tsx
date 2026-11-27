@@ -179,6 +179,7 @@ import {
   ensembleToolSummary,
   partitionEnsemblePermissions,
   splitEnsembleMentions,
+  splitHighlight,
 } from "./ensemble-ui";
 import { parseSuiteThreadReport, suiteReportDotTone } from "./suite-ui";
 import { mcpToolLabel, noteItemsFromEntry, noteWriteSummary, toolMeta } from "./tool-meta";
@@ -341,8 +342,11 @@ export interface ConversationProps {
   saveFile?: SaveFileFn | undefined;
   /** 帖子送达头部「作者 → 本会话 · #n」中的本会话显示名：指挥会话默认「指挥」，成员会话传 `@name` */
   ensembleRecipientLabel?: string | undefined;
-  /** 点击合奏工具行打开右侧面板的合奏留言板（仅桌面端指挥会话传入） */
-  onOpenEnsemble?: (() => void) | undefined;
+  /**
+   * 点击合奏工具行打开右侧面板的合奏留言板（仅桌面端指挥会话传入）。
+   * `board: true` 表示直达留言板页签（/ensemble board，ADR-0131 §6）；无参为通用入口。
+   */
+  onOpenEnsemble?: ((options?: { board?: boolean | undefined }) => void) | undefined;
   /** 点击合奏成员待确认提示行打开该成员的会话标签（仅桌面端指挥会话传入） */
   onOpenEnsembleMember?: ((member: { name: string; childSessionId: string }) => void) | undefined;
   /** 点击组曲汇报行在右侧面板打开对应线程 */
@@ -511,17 +515,39 @@ function isShortTableCell(source: string): boolean {
   return true;
 }
 
-function renderEnsembleTextNode(text: string, mentions: readonly string[] | undefined): ReactNode {
-  if (mentions === undefined || mentions.length === 0) return text;
-  const parts = splitEnsembleMentions(text, mentions);
-  if (parts.length === 1 && parts[0]?.kind === "text") return text;
+/** 在单个文本片段内渲染大小写不敏感的关键词命中（`<mark>`），保留原文大小写 */
+function renderHighlightFragment(text: string, highlight: string | undefined, key: number): ReactNode {
+  if (highlight === undefined || highlight.trim() === "") return text;
+  const parts = splitHighlight(text, highlight);
+  if (parts.every((part) => !part.hit)) return text;
+  return parts.map((part, index) =>
+    part.hit ? (
+      <mark key={`${key}-${index}`} className="ensemble-hit">
+        {part.value}
+      </mark>
+    ) : (
+      <Fragment key={`${key}-${index}`}>{part.value}</Fragment>
+    ),
+  );
+}
+
+function renderEnsembleTextNode(
+  text: string,
+  mentions: readonly string[] | undefined,
+  highlight?: string,
+): ReactNode {
+  const hasMentions = mentions !== undefined && mentions.length > 0;
+  const parts = hasMentions ? splitEnsembleMentions(text, mentions) : [];
+  if (!hasMentions || (parts.length === 1 && parts[0]?.kind === "text")) {
+    return renderHighlightFragment(text, highlight, 0);
+  }
   return parts.map((part, index) =>
     part.kind === "mention" ? (
       <span key={index} className="ensemble-at">
         {part.value}
       </span>
     ) : (
-      <Fragment key={index}>{part.value}</Fragment>
+      <Fragment key={index}>{renderHighlightFragment(part.value, highlight, index)}</Fragment>
     ),
   );
 }
@@ -550,16 +576,20 @@ const MarkdownCodeBlock = memo(function MarkdownCodeBlock({
   lang,
   text: codeText,
   closed,
+  highlight,
 }: {
   lang: string;
   text: string;
   closed: boolean;
+  highlight?: string | undefined;
 }) {
   const ref = useCodeHighlight<HTMLElement>(undefined, codeText, "text", {
     language: lang,
     enabled: closed,
   });
   const wrap = shouldWrapCodeBlock(lang);
+  const parts =
+    highlight !== undefined && highlight.trim() !== "" ? splitHighlight(codeText, highlight) : [];
   return (
     <div className={wrap ? "conversation-code wrap" : "conversation-code"}>
       <div className="conversation-code-language">
@@ -567,7 +597,19 @@ const MarkdownCodeBlock = memo(function MarkdownCodeBlock({
         <CopyButton text={codeText} label="复制代码" />
       </div>
       <pre>
-        <code ref={ref}>{codeText}</code>
+        <code ref={ref}>
+          {parts.some((part) => part.hit)
+            ? parts.map((part, index) =>
+                part.hit ? (
+                  <mark key={index} className="ensemble-hit">
+                    {part.value}
+                  </mark>
+                ) : (
+                  <Fragment key={index}>{part.value}</Fragment>
+                ),
+              )
+            : codeText}
+        </code>
       </pre>
     </div>
   );
@@ -578,6 +620,7 @@ function markdownNodes(
   tokens: readonly Token[],
   openUrl: OpenUrl,
   mentions?: readonly string[],
+  highlight?: string,
 ): ReactNode[] {
   return tokens.map((token, index) => {
     const key = index;
@@ -589,7 +632,7 @@ function markdownNodes(
         return <Fragment key={key}>{token.raw}</Fragment>;
       case "heading": {
         const heading = token as Tokens.Heading;
-        const content = markdownNodes(heading.tokens, openUrl, mentions);
+        const content = markdownNodes(heading.tokens, openUrl, mentions, highlight);
         switch (heading.depth) {
           case 1:
             return <h1 key={key}>{content}</h1>;
@@ -607,15 +650,15 @@ function markdownNodes(
       }
       case "paragraph":
         return (
-          <p key={key}>{markdownNodes((token as Tokens.Paragraph).tokens, openUrl, mentions)}</p>
+          <p key={key}>{markdownNodes((token as Tokens.Paragraph).tokens, openUrl, mentions, highlight)}</p>
         );
       case "text": {
         const node = token as Tokens.Text;
         return (
           <Fragment key={key}>
             {node.tokens
-              ? markdownNodes(node.tokens, openUrl, mentions)
-              : renderEnsembleTextNode(node.text, mentions)}
+              ? markdownNodes(node.tokens, openUrl, mentions, highlight)
+              : renderEnsembleTextNode(node.text, mentions, highlight)}
           </Fragment>
         );
       }
@@ -624,14 +667,14 @@ function markdownNodes(
       case "strong":
         return (
           <strong key={key}>
-            {markdownNodes((token as Tokens.Strong).tokens, openUrl, mentions)}
+            {markdownNodes((token as Tokens.Strong).tokens, openUrl, mentions, highlight)}
           </strong>
         );
       case "em":
-        return <em key={key}>{markdownNodes((token as Tokens.Em).tokens, openUrl, mentions)}</em>;
+        return <em key={key}>{markdownNodes((token as Tokens.Em).tokens, openUrl, mentions, highlight)}</em>;
       case "del":
         return (
-          <del key={key}>{markdownNodes((token as Tokens.Del).tokens, openUrl, mentions)}</del>
+          <del key={key}>{markdownNodes((token as Tokens.Del).tokens, openUrl, mentions, highlight)}</del>
         );
       case "codespan":
         return <CodeRef key={key} text={(token as Tokens.Codespan).text} />;
@@ -643,13 +686,14 @@ function markdownNodes(
             lang={code.lang ?? ""}
             text={code.text}
             closed={isClosedCodeFence(code)}
+            highlight={highlight}
           />
         );
       }
       case "blockquote":
         return (
           <blockquote key={key}>
-            {markdownNodes((token as Tokens.Blockquote).tokens, openUrl, mentions)}
+            {markdownNodes((token as Tokens.Blockquote).tokens, openUrl, mentions, highlight)}
           </blockquote>
         );
       case "hr":
@@ -658,7 +702,7 @@ function markdownNodes(
         return <br key={key} />;
       case "link": {
         const link = token as Tokens.Link;
-        const content = markdownNodes(link.tokens, openUrl, mentions);
+        const content = markdownNodes(link.tokens, openUrl, mentions, highlight);
         return isAllowedExternalUrl(link.href) ? (
           <a
             key={key}
@@ -695,7 +739,7 @@ function markdownNodes(
                 onChange={() => undefined}
               />
             ) : null}
-            {markdownNodes(item.tokens, openUrl, mentions)}
+            {markdownNodes(item.tokens, openUrl, mentions, highlight)}
           </li>
         ));
         return list.ordered ? (
@@ -720,7 +764,7 @@ function markdownNodes(
                       className={cell.align === "right" ? "r" : undefined}
                       style={{ textAlign: cell.align ?? "left" }}
                     >
-                      {markdownNodes(cell.tokens, openUrl, mentions)}
+                      {markdownNodes(cell.tokens, openUrl, mentions, highlight)}
                     </th>
                   ))}
                 </tr>
@@ -741,7 +785,7 @@ function markdownNodes(
                         }
                         style={cell.align ? { textAlign: cell.align } : undefined}
                       >
-                        {markdownNodes(cell.tokens, openUrl, mentions)}
+                        {markdownNodes(cell.tokens, openUrl, mentions, highlight)}
                       </td>
                     ))}
                   </tr>
@@ -763,6 +807,7 @@ export function Markdown({
   session,
   fileLinks,
   mentions,
+  highlight,
   quoteSourceSeq,
 }: {
   text: string;
@@ -770,6 +815,8 @@ export function Markdown({
   session?: RpcSession | undefined;
   fileLinks?: FileLinkHooks | undefined;
   mentions?: readonly string[] | undefined;
+  /** 大小写不敏感的命中高亮（合奏留言板搜索，ADR-0131 §7） */
+  highlight?: string | undefined;
   quoteSourceSeq?: string | undefined;
 }) {
   const [refs, setRefs] = useState<Map<string, ResolvedCodeRef> | null>(null);
@@ -859,7 +906,7 @@ export function Markdown({
   return (
     <div className="conversation-markdown" data-quote-source-seq={quoteSourceSeq}>
       <FileLinksContext.Provider value={lookup}>
-        {markdownNodes(marked.lexer(markdown, MARKED_OPTIONS), openUrl, mentions)}
+        {markdownNodes(marked.lexer(markdown, MARKED_OPTIONS), openUrl, mentions, highlight)}
       </FileLinksContext.Provider>
     </div>
   );

@@ -163,8 +163,11 @@ export interface SidePanelController {
   openUrl: (url: string) => boolean;
   /** 改动卡片「查看变更」 */
   viewChanges: (seq: number) => void;
-  /** 打开或切换到当前会话的 Ensemble 标签 */
-  openEnsemble: () => void;
+  /**
+   * 打开或切换到当前会话的 Ensemble 标签。
+   * `board: true` 时直达留言板页签（/ensemble board、「查看留言板」等直接路由，ADR-0131 §6）。
+   */
+  openEnsemble: (options?: { board?: boolean | undefined }) => void;
   /** 打开或切换到指定会话（缺省当前会话）里某名 Ensemble 成员的会话标签 */
   openEnsembleMember: (
     member: { name: string; childSessionId: string },
@@ -1252,15 +1255,21 @@ export function useSidePanel({
       });
     });
   };
-  const openEnsemble = useCallback(() => {
-    hideBrowserThen(() => {
-      update((panel) => {
-        const found = panel.tabs.find((tab) => tab.kind === "ensemble");
-        if (found) return { ...panel, open: true, activeId: found.id };
-        return withTab(panel, { id: newTabId(), kind: "ensemble" });
+  // ADR-0131 §6：通用入口打开落在「概览」页签；board:true（/ensemble board 等）直达留言板
+  const [ensembleBoardNonce, setEnsembleBoardNonce] = useState(0);
+  const openEnsemble = useCallback(
+    (options?: { board?: boolean | undefined }) => {
+      if (options?.board === true) setEnsembleBoardNonce((value) => value + 1);
+      hideBrowserThen(() => {
+        update((panel) => {
+          const found = panel.tabs.find((tab) => tab.kind === "ensemble");
+          if (found) return { ...panel, open: true, activeId: found.id };
+          return withTab(panel, { id: newTabId(), kind: "ensemble" });
+        });
       });
-    });
-  }, [hideBrowserThen, update]);
+    },
+    [hideBrowserThen, update],
+  );
   const openPage = useCallback(
     (page: string, version?: number, targetSessionId?: string) => {
       const target = targetSessionId ?? sessionId;
@@ -2044,6 +2053,7 @@ export function useSidePanel({
           ? {
               ensemble: active.view.ensemble,
               session: active.session,
+              boardNonce: ensembleBoardNonce,
               ensureClient,
               images: imageSource,
               prefs,
@@ -2234,7 +2244,9 @@ export function useSidePanel({
             active.view.ensemble?.status === "active"
               ? {
                   ensemble: active.view.ensemble,
-                  onOpenBoard: openEnsemble,
+                  onOpenBoard: () => {
+                    openEnsemble({ board: true });
+                  },
                   onOpenMember: (member) => {
                     openEnsembleMember({
                       name: member.name,

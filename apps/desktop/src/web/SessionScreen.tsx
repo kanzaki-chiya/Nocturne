@@ -87,8 +87,10 @@ export function SessionScreen({
   onPanel?: ((panel: PhonePanelPage) => void) | undefined;
   onPanelBack?: (() => void) | undefined;
   onPanelClose?: (() => void) | undefined;
-  /** 侧边栏合奏组头或 `/ensemble board` 进入全屏合奏页 */
-  onOpenEnsemble?: (() => void) | undefined;
+  /**
+   * 侧边栏合奏组头（无参，通用入口落在「概览」）或 `/ensemble board`（`board: true` 直达留言板，ADR-0131 §6）进入全屏合奏页
+   */
+  onOpenEnsemble?: ((options?: { board?: boolean | undefined }) => void) | undefined;
   /** 侧边栏合奏成员行进入该成员会话页 */
   onOpenEnsembleMember?: ((member: EnsembleMemberView) => void) | undefined;
   /** 侧边栏组曲线程行或指挥汇报行进入该线程页 */
@@ -287,7 +289,7 @@ export function SessionScreen({
       if (work.action === "ensemble-board" || work.action === "ensemble-end") {
         if (view.ensemble === undefined) return "用法：/ensemble 任务";
         if (work.action === "ensemble-board") {
-          onOpenEnsemble?.();
+          onOpenEnsemble?.({ board: true });
           return true;
         }
         await session.endEnsemble();
