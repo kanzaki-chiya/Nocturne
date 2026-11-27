@@ -95,6 +95,17 @@ export function ensembleToolSummary(name: string, input: unknown): string | unde
       return firstEnsembleLine(rec.text);
     case "ensemble_read":
       return ensembleReadFilterParts(input).text;
+    case "ensemble_overview": {
+      // 指挥概览更新：优先显示目标文本，否则报告行/任务变更数量
+      if (typeof rec.goal === "string" && rec.goal.trim() !== "") return firstEnsembleLine(rec.goal);
+      const lines = Array.isArray(rec.lines) ? rec.lines.length : 0;
+      const tasks = Array.isArray(rec.tasks) ? rec.tasks.length : 0;
+      const removed =
+        (Array.isArray(rec.removeLines) ? rec.removeLines.length : 0) +
+        (Array.isArray(rec.removeTasks) ? rec.removeTasks.length : 0);
+      if (lines + tasks + removed === 0) return "";
+      return "+" + String(lines + tasks) + (removed > 0 ? " -" + String(removed) : "");
+    }
     case "ensemble_change_model": {
       const member = stringOf(rec.name) || stringOf(rec.member);
       const target = shortModelName(stringOf(rec.model) || stringOf(rec.profile));

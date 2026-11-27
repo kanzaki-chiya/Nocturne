@@ -34,6 +34,7 @@ export const TOOL_META: Record<string, string> = {
   ensemble_add_member: "添加",
   ensemble_post: "发帖",
   ensemble_read: "留言板",
+  ensemble_overview: "概览",
   ensemble_change_model: "换模型",
   ensemble_remove_member: "移除",
   ensemble_end: "结束",

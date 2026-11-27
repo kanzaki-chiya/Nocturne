@@ -19,6 +19,7 @@ export const ENSEMBLE_TOOL_LABELS: Readonly<Record<string, string>> = {
   ensemble_add_member: "添加",
   ensemble_post: "发帖",
   ensemble_read: "留言板",
+  ensemble_overview: "概览",
   ensemble_change_model: "换模型",
   ensemble_remove_member: "移除",
   ensemble_end: "结束",
@@ -98,6 +99,16 @@ export function ensembleToolSummary(name: string, input: unknown): string | unde
       return firstLine(rec.text);
     case "ensemble_read":
       return ensembleReadFilterParts(input).text;
+    case "ensemble_overview": {
+      if (typeof rec.goal === "string" && rec.goal.trim() !== "") return firstLine(rec.goal);
+      const lines = Array.isArray(rec.lines) ? rec.lines.length : 0;
+      const tasks = Array.isArray(rec.tasks) ? rec.tasks.length : 0;
+      const removed =
+        (Array.isArray(rec.removeLines) ? rec.removeLines.length : 0) +
+        (Array.isArray(rec.removeTasks) ? rec.removeTasks.length : 0);
+      if (lines + tasks + removed === 0) return "";
+      return "+" + String(lines + tasks) + (removed > 0 ? " -" + String(removed) : "");
+    }
     case "ensemble_change_model": {
       const member = stringOf(rec.name) || stringOf(rec.member);
       const target = shortModelName(stringOf(rec.model) || stringOf(rec.profile));
