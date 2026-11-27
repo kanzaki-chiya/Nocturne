@@ -15,7 +15,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createRuntime, type Runtime, type RuntimeSession } from "../src/index.js";
 import { FakeProvider, type FakeScript } from "../src/provider/index.js";
@@ -245,11 +245,12 @@ describe("ask_user 宿主挂起（r1126l / ADR-0127 第三阶段）", () => {
     // 不让审批挂起阻塞测试。
     const turn2 = session.submit({ text: "方案A" });
     // 等第 2 次推理确实发出（新一轮的证明）
-    await waitEvent(session, events, (e) => e.type === "turn.completed" || inferenceLog.length >= 2);
-    // 轮询直到第 2 次推理记录出现
-    for (let i = 0; i < 50 && inferenceLog.length < 2; i += 1) {
-      await new Promise((r) => setTimeout(r, 20));
-    }
+    await vi.waitFor(
+      () => {
+        if (inferenceLog.length < 2) throw new Error("second inference not yet recorded");
+      },
+      { timeout: 8000 },
+    );
     expect(inferenceLog.length).toBeGreaterThanOrEqual(2);
     const secondReq = provider.requests[1];
     expect(secondReq).toBeDefined();

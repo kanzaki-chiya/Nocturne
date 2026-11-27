@@ -1945,9 +1945,10 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
     onElicitation: (params: unknown) => Promise<unknown>;
     clientCapabilities?: Record<string, unknown>;
   }) {
+    const provider = new FakeProvider({ scripts: options.scripts });
     const rt = await createRuntime({
       cwd: workspaceA,
-      providers: [new FakeProvider({ scripts: options.scripts })],
+      providers: [provider],
       interactive: true,
       sessionsDir: path.join(tempRoot, `sess-eli-${Math.random().toString(36).slice(2, 8)}`),
     });
@@ -1985,7 +1986,7 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: options.clientCapabilities ?? { elicitation: { form: {} } },
     });
-    return { conn, updates, rt };
+    return { conn, updates, rt, provider };
   }
 
   it("多题+多选：schema 反映 array/anyOf，accept 数组回传 selected", async () => {
@@ -2278,7 +2279,12 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
     const scripts: FakeScript[] = [
       // turn1：ask_user
       [
-        { type: "tool_call", toolCallId: "q1", name: "ask_user", input: { questions: [{ question: "q1" }] } },
+        {
+          type: "tool_call",
+          toolCallId: "q1",
+          name: "ask_user",
+          input: { questions: [{ question: "q1" }] },
+        },
         { type: "finish", reason: "tool_calls" },
       ],
       // turn2：先 wait 挂起（持续运行、可被 interrupt），再发文本
@@ -2293,9 +2299,14 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
     const elicitationGate = new Promise<unknown>((resolve) => {
       releaseElicitation = resolve;
     });
+    // elicitation 是否已被调用（turn1 进入等待的可观测信号）
+    let elicitationStarted = false;
     const h = await startElicitationHarness({
       scripts,
-      onElicitation: async () => (await elicitationGate) as never,
+      onElicitation: async () => {
+        elicitationStarted = true;
+        return (await elicitationGate) as never;
+      },
     });
     const created = await h.conn.agent.request(methods.agent.session.new, {
       cwd: workspaceA,
@@ -2308,13 +2319,13 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
       sessionId,
       prompt: [{ type: "text", text: "ask turn1" }],
     });
-    // 等 elicitation 请求确实发出（turn1 进入等待）
-    for (let i = 0; i < 100; i += 1) {
-      await new Promise((r) => setTimeout(r, 15));
-      // turn1 的 elicitation 已发起（onElicitation 被调用即 gate 等待中）
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 80));
+    // 等 elicitation 请求确实发出（turn1 进入等待）——以 onElicitation 被调用为真实信号
+    await vi.waitFor(
+      () => {
+        if (!elicitationStarted) throw new Error("elicitation not yet issued");
+      },
+      { timeout: 8000 },
+    );
     // 取消 turn1
     await h.conn.agent.notify(methods.agent.session.cancel, { sessionId });
     const r1 = await turn1Promise;
@@ -2325,8 +2336,15 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
       sessionId,
       prompt: [{ type: "text", text: "turn2" }],
     });
-    // 让 turn2 开始运行
-    await new Promise((r) => setTimeout(r, 80));
+    // 让 turn2 开始运行：turn2 脚本的第一个事件是 wait 挂起——
+    // 等 provider 进入 wait 状态，证明 turn2 的推理流确实在进行中（busy、可被 interrupt）。
+    // 这是本回归的关键竞态前提，不能用固定延时近似。
+    await vi.waitFor(
+      () => {
+        if (h.provider.waitState.waiting === 0) throw new Error("turn2 not yet in wait");
+      },
+      { timeout: 8000 },
+    );
     // 现在才放行旧轮（turn1）的迟到 cancel 响应
     releaseElicitation({ action: "cancel" });
     const r2 = await turn2Promise;
