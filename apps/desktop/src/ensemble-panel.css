@@ -1148,9 +1148,10 @@
   opacity: 1; /* 触屏没有 hover，更多按钮常显 */
 }
 
-.phone .ensemble-line-title,
-.phone .ensemble-task-title,
-.phone .ensemble-line-progress-text {
+/* 窄屏：标题与进展允许换行，不横向溢出 */
+.phone .ensemble-line-name,
+.phone .ensemble-task-ttl,
+.phone .ensemble-line-progress .txt {
   white-space: normal;
 }
 
