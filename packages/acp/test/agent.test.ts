@@ -2861,7 +2861,12 @@ describe("执行进度与命令发现（ADR-0127 第四阶段）", () => {
         ? { handler: options.handler }
         : { scripts: options?.scripts ?? [textScript("ok")] }),
     });
-    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    // 进度事件（plan/compaction）是 UNSTABLE 能力，需客户端显式声明才发送——
+    // 进度测试声明完整能力，核对真实发送路径。
+    await h.conn.agent.request(methods.agent.initialize, {
+      protocolVersion: PROTOCOL_VERSION,
+      clientCapabilities: { plan: {}, session: { compaction: {} } },
+    });
     const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
       cwd: workspaceA,
       mcpServers: [],
@@ -3050,6 +3055,201 @@ describe("执行进度与命令发现（ADR-0127 第四阶段）", () => {
     expect(promptInputs.some((t) => t.trim() === "/compact")).toBe(false);
   });
 
+  it("/compact 在途压缩可被 session/cancel 中断：compaction 无残留 in_progress，下一轮正常", async () => {
+    // 摘要请求（user 块含「压缩为摘要」）返回无限挂起的 wait 脚本——压缩在途可控；
+    // 普通对话请求返回正常文本。wait 响应 abort signal，中断时 reject。
+    const h = await startProgressHarness({
+      handler: (request) => {
+        const firstUser = [...request.messages].reverse().find((m) => m.role === "user");
+        const text =
+          firstUser !== undefined && typeof firstUser.content !== "string"
+            ? firstUser.content.find((b) => b.type === "text")?.text
+            : undefined;
+        if (text !== undefined && text.includes("压缩为摘要")) {
+          return [{ type: "wait" }];
+        }
+        return textScript("normal reply");
+      },
+    });
+    // 先跑一轮产生历史（压缩需要可行边界）
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "start some work" }],
+    });
+    // 发 /compact——压缩摘要请求挂起，压缩在途
+    const compactPromise = h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "/compact" }],
+    });
+    // 等压缩开始（compaction_update in_progress 投递）
+    await vi.waitFor(
+      () => {
+        if (updatesOf(h, "compaction_update").some((u) => (u.update as { status?: string }).status === "in_progress")) {
+          return;
+        }
+        throw new Error("compaction not yet started");
+      },
+      { timeout: 8000 },
+    );
+    // 在压缩结束前发 session/cancel——中断在途压缩（session/cancel 是通知不是请求）
+    await h.conn.agent.notify(methods.agent.session.cancel, { sessionId: h.sessionId });
+    // compact 的 prompt 请求应按 cancelled 收尾（不是压缩失败、不是 end_turn）
+    const res = await compactPromise;
+    expect(res).toEqual({ stopReason: "cancelled" });
+    // 宿主无残留进行中状态：in_progress 必须有终态配对（cancelled），
+    // 且不再有停留在 in_progress 的压缩条目
+    await vi.waitFor(
+      () => {
+        const updates = updatesOf(h, "compaction_update").map(
+          (u) => u.update as { compactionId: string; status: string },
+        );
+        const started = updates.find((u) => u.status === "in_progress");
+        const terminal = updates.find((u) => u.status === "cancelled" || u.status === "completed");
+        if (started === undefined || terminal === undefined) {
+          throw new Error("compaction not yet terminalized");
+        }
+      },
+      { timeout: 8000 },
+    );
+    const updates = updatesOf(h, "compaction_update").map(
+      (u) => u.update as { compactionId: string; status: string },
+    );
+    const started = updates.find((u) => u.status === "in_progress");
+    const cancelled = updates.find((u) => u.status === "cancelled");
+    expect(started).toBeDefined();
+    expect(cancelled).toBeDefined();
+    expect(cancelled?.compactionId).toBe(started?.compactionId);
+    // 压缩被中断不写 context.compacted——不应有 completed
+    expect(updates.some((u) => u.status === "completed")).toBe(false);
+    // 下一轮正常使用：会话未被取消的压缩破坏
+    const next = await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "continue after cancel" }],
+    });
+    expect(next).toEqual({ stopReason: "end_turn" });
+  });
+
+  it("/compact 压缩在途时并发 prompt 被拒绝为 session_busy，压缩收尾后下一轮正常", async () => {
+    // 摘要请求挂起（压缩在途），普通请求正常返回。
+    const h = await startProgressHarness({
+      handler: (request) => {
+        const firstUser = [...request.messages].reverse().find((m) => m.role === "user");
+        const text =
+          firstUser !== undefined && typeof firstUser.content !== "string"
+            ? firstUser.content.find((b) => b.type === "text")?.text
+            : undefined;
+        if (text !== undefined && text.includes("压缩为摘要")) {
+          return [{ type: "wait" }];
+        }
+        return textScript("normal reply");
+      },
+    });
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "seed history" }],
+    });
+    const compactPromise = h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "/compact" }],
+    });
+    // 等压缩在途
+    await vi.waitFor(
+      () => {
+        if (updatesOf(h, "compaction_update").some((u) => (u.update as { status?: string }).status === "in_progress")) {
+          return;
+        }
+        throw new Error("compaction not yet started");
+      },
+      { timeout: 8000 },
+    );
+    // 压缩在途时第二个 prompt 必须被拒绝为 session_busy——压缩与推理共享同一会话 busy 生命周期
+    await expect(
+      h.conn.agent.request(methods.agent.session.prompt, {
+        sessionId: h.sessionId,
+        prompt: [{ type: "text", text: "concurrent prompt during compaction" }],
+      }),
+    ).rejects.toMatchObject({
+      code: -32600,
+      data: expect.objectContaining({ code: "session_busy" }),
+    });
+    // 取消压缩收尾
+    await h.conn.agent.notify(methods.agent.session.cancel, { sessionId: h.sessionId });
+    expect(await compactPromise).toEqual({ stopReason: "cancelled" });
+    // 压缩收尾后下一轮正常
+    const next = await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "after busy rejection" }],
+    });
+    expect(next).toEqual({ stopReason: "end_turn" });
+  });
+
+  it("/compact 压缩在途时 session/close 中断压缩并完成关闭，压缩不留 in_progress", async () => {
+    // 摘要请求挂起（压缩在途）；关闭应中断压缩、等待 turn 收尾、释放会话。
+    const h = await startProgressHarness({
+      handler: (request) => {
+        const firstUser = [...request.messages].reverse().find((m) => m.role === "user");
+        const text =
+          firstUser !== undefined && typeof firstUser.content !== "string"
+            ? firstUser.content.find((b) => b.type === "text")?.text
+            : undefined;
+        if (text !== undefined && text.includes("压缩为摘要")) {
+          return [{ type: "wait" }];
+        }
+        return textScript("normal reply");
+      },
+    });
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "seed history" }],
+    });
+    const compactPromise = h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId: h.sessionId,
+      prompt: [{ type: "text", text: "/compact" }],
+    });
+    await vi.waitFor(
+      () => {
+        if (updatesOf(h, "compaction_update").some((u) => (u.update as { status?: string }).status === "in_progress")) {
+          return;
+        }
+        throw new Error("compaction not yet started");
+      },
+      { timeout: 8000 },
+    );
+    // 压缩在途时关闭会话：closeEntry 经 cancelEntry 中断压缩、等待 turnPromise 收尾
+    const closeResult = await h.conn.agent.request(methods.agent.session.close, { sessionId: h.sessionId });
+    expect(closeResult).toBeDefined();
+    // 压缩的 prompt 请求按 cancelled 收尾——close 触发中断，压缩不留在途
+    expect(await compactPromise).toEqual({ stopReason: "cancelled" });
+    // 无残留 in_progress：close resolve 前压缩已收尾（close 等待 turnPromise），
+    // cancelled 已 enqueue 进入异步 flush 链——等投递完成后核对配对。
+    await vi.waitFor(
+      () => {
+        const ups = updatesOf(h, "compaction_update").map(
+          (u) => u.update as { compactionId: string; status: string },
+        );
+        if (!ups.some((u) => u.status === "cancelled")) {
+          throw new Error("cancelled not yet delivered");
+        }
+      },
+      { timeout: 8000 },
+    );
+    const updates = updatesOf(h, "compaction_update").map(
+      (u) => u.update as { compactionId: string; status: string },
+    );
+    const started = updates.find((u) => u.status === "in_progress");
+    const cancelled = updates.find((u) => u.status === "cancelled");
+    expect(started).toBeDefined();
+    expect(cancelled?.compactionId).toBe(started?.compactionId);
+    expect(updates.some((u) => u.status === "completed")).toBe(false);
+    // 会话已关闭：再 prompt 报会话不存在
+    await expect(
+      h.conn.agent.request(methods.agent.session.prompt, {
+        sessionId: h.sessionId,
+        prompt: [{ type: "text", text: "after close" }],
+      }),
+    ).rejects.toMatchObject({ code: -32002 });
+  });
+
   it("普通文本 /compact 之外的斜杠文本不拦截：进入正常推理", async () => {
     const h = await startProgressHarness();
     const res = await h.conn.agent.request(methods.agent.session.prompt, {
@@ -3108,5 +3308,53 @@ describe("执行进度与命令发现（ADR-0127 第四阶段）", () => {
       );
       expect(paired).toBe(true);
     }
+  });
+
+  it("capability 门槛：未声明 compaction 的宿主收不到 compaction_update，但仍收到稳定协议的 plan/usage", async () => {
+    // 协议规则（SDK schema/types.gen.d.ts）：compaction 约束 "MUST only send when the
+    // Client advertised ClientSessionCapabilities::compaction"；plan/usage_update 是稳定
+    // 协议、无能力门槛。本测试用未声明任何能力的 initialize 核对差异。
+    const h = await startHarness({
+      scripts: [
+        [
+          {
+            type: "tool_call",
+            toolCallId: "t1",
+            name: "todo_write",
+            input: { items: [{ text: "任务一", status: "in_progress" }] },
+          },
+        ],
+        textScript("done"),
+      ],
+    });
+    // 不声明任何 clientCapabilities（Paseo 0.17.5 风格 {}）
+    await h.conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    // 跑一轮触发 todo_write → plan + usage
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "do work" }],
+    });
+    // plan（稳定协议）即使未声明能力也应收到
+    await vi.waitFor(
+      () => {
+        if (updatesOf(h, "plan").length === 0) throw new Error("plan not yet received");
+      },
+      { timeout: 8000 },
+    );
+    expect(updatesOf(h, "plan").length).toBeGreaterThanOrEqual(1);
+    // usage_update（稳定协议）也应收到
+    expect(updatesOf(h, "usage_update").length).toBeGreaterThanOrEqual(1);
+    // 触发压缩——未声明 compaction 能力，compaction_update 不应发送
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [{ type: "text", text: "/compact" }],
+    });
+    // 给压缩足够时间完成后断言：全程无 compaction_update 投递
+    await new Promise((r) => setTimeout(r, 500));
+    expect(updatesOf(h, "compaction_update").length).toBe(0);
   });
 });

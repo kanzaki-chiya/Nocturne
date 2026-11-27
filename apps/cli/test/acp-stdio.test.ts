@@ -51,6 +51,8 @@ interface ProviderReply {
   toolCalls?: ScriptedToolCall[];
 }
 
+type ProviderHandlerResult = ProviderReply | Promise<ProviderReply>;
+
 interface RecordedProviderRequest {
   body: Record<string, unknown>;
   rawBody: string;
@@ -90,7 +92,7 @@ interface JsonRpcErrorPayload {
 
 let providerServer: Server;
 let providerBaseUrl = "";
-let providerHandler: (req: RecordedProviderRequest) => ProviderReply = () => ({
+let providerHandler: (req: RecordedProviderRequest) => ProviderHandlerResult = () => ({
   textParts: ["default reply"],
 });
 const providerRequests: RecordedProviderRequest[] = [];
@@ -570,11 +572,12 @@ beforeAll(async () => {
       const record: RecordedProviderRequest = { body, rawBody };
       providerRequests.push(record);
 
-      // 后台自动生成会话标题请求不带 tools，直接返回简短标题，不干扰测试脚本状态
-      const reply =
-        toolNamesOf(record).length === 0
+      void (async () => {
+        // 后台自动生成会话标题请求不带 tools，直接返回简短标题，不干扰测试脚本状态。
+        // handler 可返回 Promise（可控延迟），用于在途压缩取消等需要挂起 provider 的场景。
+        const reply = await (toolNamesOf(record).length === 0
           ? { textParts: ["acp-test-title"] }
-          : providerHandler(record);
+          : providerHandler(record));
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       const emit = (delta: Record<string, unknown>, finish?: string) => {
         res.write(
@@ -611,6 +614,10 @@ beforeAll(async () => {
         emit({}, "stop");
       }
       res.end("data: [DONE]\n\n");
+      })().catch(() => {
+        if (!res.headersSent) res.writeHead(500);
+        res.end();
+      });
     });
   });
   providerBaseUrl = `http://127.0.0.1:${await listenFetchSafe(providerServer)}/v1`;
@@ -1748,7 +1755,11 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
       }
       return { textParts: ["work done"] };
     };
-    await child.request("initialize", { protocolVersion: 1 });
+    // plan/usage 进度事件需声明能力：plan 是 UNSTABLE 能力，须显式声明才发送
+    await child.request("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: { plan: {}, session: { compaction: {} } },
+    });
     const { sessionId } = await child.request<{ sessionId: string }>("session/new", {
       cwd: ws,
       mcpServers: [],
@@ -1816,7 +1827,11 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
     const child = spawnAcpCli({});
     // 所有请求（含压缩的摘要请求）都返回文本——压缩需要模型完成摘要。
     providerHandler = () => ({ textParts: ["reply text for compaction boundary"] });
-    await child.request("initialize", { protocolVersion: 1 });
+    // compaction 是 UNSTABLE 能力，须显式声明才发送 compaction_update
+    await child.request("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: { session: { compaction: {} } },
+    });
     const { sessionId } = await child.request<{ sessionId: string }>("session/new", {
       cwd: ws,
       mcpServers: [],
@@ -1858,6 +1873,106 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
     );
     expect(sawCompactAsUserInput).toBe(false);
     void requestsBeforeCompact;
+
+    child.closeStdin();
+    expect((await child.exit).code).toBe(0);
+    assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
+  }, 60_000);
+
+  it("/compact 真实 stdio 在途压缩可被 session/cancel 中断：取消发生在结束前，宿主无残留进行中", async () => {
+    const ws = makeTempDir("nctrn-acp-compact-cancel-");
+    const child = spawnAcpCli({});
+    // 可控在途压缩：摘要请求（user 块含「压缩为摘要」）返回一个永不 resolve 的 Promise，
+    // provider SSE 响应被无限挂起——压缩保持在途。普通对话请求立即返回。
+    const summaryGate = Promise.withResolvers<ProviderReply>();
+    let summaryRequested = false;
+    providerHandler = (req) => {
+      const user = latestUserText(req);
+      if (user.includes("压缩为摘要")) {
+        summaryRequested = true;
+        return summaryGate.promise;
+      }
+      return { textParts: ["normal reply"] };
+    };
+    await child.request("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: { session: { compaction: {} } },
+    });
+    const { sessionId } = await child.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [],
+    });
+    // 先跑一轮产生历史（压缩需要可行边界）
+    const r1 = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text: "start some work" }],
+    });
+    expect(r1.stopReason).toBe("end_turn");
+
+    // 发 /compact——摘要请求挂起，压缩在途
+    const compactPromise = child.request<{ stopReason: string }>("session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text: "/compact" }],
+    });
+    // 等压缩开始（compaction_update in_progress 投递到 wire）
+    await vi.waitFor(
+      () => {
+        const started = child.updates.some(
+          (u) =>
+            u.sessionId === sessionId &&
+            u.update.sessionUpdate === "compaction_update" &&
+            (u.update as { status?: string }).status === "in_progress",
+        );
+        if (!started) throw new Error("compaction not yet started on wire");
+      },
+      { timeout: 8000 },
+    );
+    // 确认摘要请求确实发出（压缩真的在途，而非尚未开始）
+    await vi.waitFor(
+      () => {
+        if (!summaryRequested) throw new Error("summary request not yet sent");
+      },
+      { timeout: 8000 },
+    );
+
+    // 在压缩结束前发 session/cancel（通知）——中断在途压缩
+    child.notify("session/cancel", { sessionId });
+    // compact 的 prompt 请求按 cancelled 收尾：取消发生在压缩结束前
+    // （若取消无效，压缩会无限挂起，此 Promise 永不 resolve，测试超时失败）
+    const res = await compactPromise;
+    expect(res.stopReason).toBe("cancelled");
+    // 清理挂起的 provider 请求，避免资源泄漏
+    summaryGate.resolve({ textParts: ["summary-after-cancel"] });
+
+    // 宿主无残留进行中状态：in_progress 必须有同 compactionId 的 cancelled 终态配对
+    await vi.waitFor(
+      () => {
+        const ups = child.updates
+          .filter((u) => u.sessionId === sessionId && u.update.sessionUpdate === "compaction_update")
+          .map((u) => u.update as unknown as { compactionId: string; status: string });
+        if (!ups.some((u) => u.status === "cancelled")) {
+          throw new Error("cancelled terminal not yet on wire");
+        }
+      },
+      { timeout: 8000 },
+    );
+    const ups = child.updates
+      .filter((u) => u.sessionId === sessionId && u.update.sessionUpdate === "compaction_update")
+      .map((u) => u.update as unknown as { compactionId: string; status: string });
+    const started = ups.find((u) => u.status === "in_progress");
+    const cancelled = ups.find((u) => u.status === "cancelled");
+    expect(started).toBeDefined();
+    expect(cancelled).toBeDefined();
+    expect(cancelled?.compactionId).toBe(started?.compactionId);
+    // 压缩被中断不写 context.compacted——无 completed
+    expect(ups.some((u) => u.status === "completed")).toBe(false);
+
+    // 下一轮正常使用：会话未被取消的压缩破坏
+    const next = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text: "continue after cancel" }],
+    });
+    expect(next.stopReason).toBe("end_turn");
 
     child.closeStdin();
     expect((await child.exit).code).toBe(0);

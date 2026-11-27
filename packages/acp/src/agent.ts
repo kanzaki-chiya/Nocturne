@@ -873,6 +873,12 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
   // 仅当宿主显式声明 form 时才走结构化 elicitation；否则按文本退化路径
   // 把问题作为 agent_message_chunk 展示、结算为 handoff_suspended 后交还控制。
   let clientSupportsElicitationForm = false;
+  // ADR-0127 第四阶段返工：UNSTABLE compaction 事件的能力门槛。规范约束
+  // "Agents MUST only send this update when the Client advertised
+  // ClientSessionCapabilities::compaction"——omitted/null 均视为不支持，
+  // 未声明时不发送 compaction_update（协议兼容路径），宿主不会因未知更新类型出错。
+  // plan（sessionUpdate:"plan"）与 usage_update 是稳定协议，无能力门槛，总是发送。
+  let clientSupportsCompaction = false;
 
   const recordDiag = (record: AcpAgentDiagnostic): void => {
     diagnostics?.(record);
@@ -899,15 +905,23 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
 
   const closeEntry = (entry: ManagedSession): Promise<void> => {
     if (entry.closePromise !== undefined) return entry.closePromise;
-    entry.closing = true;
     sessions.delete(entry.id);
     const promise = (async () => {
+      // ADR-0127 第四阶段返工：closing 门闩不能在中断在途压缩之前置位——
+      // 压缩被 cancelEntry 中断后，收尾的 idle 事件要 enqueue compaction cancelled
+      // 配对终态（协议义务：在途压缩必须配对终态，宿主不留 in_progress 残留）。
+      // 若 closing 已置位，enqueueUpdate 丢弃该终态，宿主看到压缩永远卡在 in_progress。
+      // 因此：先中断 busy turn 并等待收尾（压缩终态此时 enqueue+flush），再置 closing。
       if (entry.busy) {
         cancelEntry(entry);
         await entry.turnPromise?.catch(() => undefined);
+        // turnPromise 收尾意味着压缩/推理的收尾事件已 enqueue；
+        // flush 确保 cancelled 终态在 closing 置位前进入投递链。
+        await entry.flushUpdates().catch(() => undefined);
       } else {
         abortEntryPermissions(entry);
       }
+      entry.closing = true;
       entry.unsubscribe();
       try {
         await entry.session.close();
@@ -1459,6 +1473,9 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     entry: ManagedSession,
     payload: { name: string; status: string; output?: unknown },
   ): void => {
+    // sessionUpdate:"plan" 是稳定协议（完整清单替换语义），无 capability 门槛，总是发送。
+    // 注意区别于 UNSTABLE 的 plan_update/plan_removed（后者才需 clientCapabilities.plan，
+    // 本实现不使用）。规范仅对 compaction/notices 约束 "MUST only send when advertised"。
     const items = todoItemsFromCompletion(payload);
     if (items === undefined) return;
     const signature = JSON.stringify(items);
@@ -1522,6 +1539,9 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
    * 本映射按真实可工作路径发送（验收记录 wire 依据）。
    */
   const forwardCompactionStarted = (entry: ManagedSession): void => {
+    // compaction 是 UNSTABLE 能力：仅当宿主声明 clientCapabilities.session.compaction 时
+    // 发送；未声明遵从协议兼容路径（不发送）。tracking 仍进行以配对后续状态，但不投递。
+    if (!clientSupportsCompaction) return;
     entry.compactionSeq += 1;
     entry.activeCompactionId = `compact-${entry.compactionSeq}`;
     entry.enqueueUpdate({
@@ -1532,6 +1552,7 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
   };
 
   const forwardCompactionCompleted = (entry: ManagedSession): void => {
+    if (!clientSupportsCompaction) return;
     const id = entry.activeCompactionId;
     if (id === undefined) return;
     entry.activeCompactionId = undefined;
@@ -1808,7 +1829,8 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
         if (
           event.payload.status === "idle" &&
           event.turnId === undefined &&
-          entry.activeCompactionId !== undefined
+          entry.activeCompactionId !== undefined &&
+          clientSupportsCompaction
         ) {
           const id = entry.activeCompactionId;
           entry.activeCompactionId = undefined;
@@ -1844,6 +1866,12 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     clientSupportsElicitationForm =
       _params.clientCapabilities?.elicitation?.form !== null &&
       _params.clientCapabilities?.elicitation?.form !== undefined;
+    // ADR-0127 第四阶段返工：捕获 UNSTABLE compaction 能力声明。
+    // compaction 在 clientCapabilities.session.compaction，规范约束 MUST only send when
+    // advertised——omitted/null 均视为不支持，未声明不发送 compaction_update。
+    clientSupportsCompaction =
+      _params.clientCapabilities?.session?.compaction !== null &&
+      _params.clientCapabilities?.session?.compaction !== undefined;
     return {
       protocolVersion: PROTOCOL_VERSION,
       agentInfo: {
@@ -2393,29 +2421,14 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
     const converted = convertPromptBlocks(params.prompt);
     // ADR-0127 第四阶段：斜杠命令拦截。Paseo 等宿主把 available_commands 的命令
     // 作为 `/name args` 纯文本 prompt 发回（toAcpPrompt）；/compact 是唯一经 ACP 真实
-    // 可工作的会话命令——在此拦截并调用 session.compact()，不进入模型推理。
+    // 可工作的会话命令——识别后在 busy/取消/关闭生命周期内调用 session.compact()，
+    // 不进入模型推理（见下方分支；这里只做判定，不提前执行）。
     // 带参数或非 compact 的 `/` 文本按普通用户输入处理（用户可能真的想输入斜杠文本）。
-    if (
+    const isCompactCommand =
       converted.attachments.length === 0 &&
       converted.content.length === 1 &&
       converted.content[0]?.type === "text" &&
-      converted.content[0].text.trim() === "/compact"
-    ) {
-      try {
-        await entry.session.compact();
-        await entry.flushUpdates();
-        return { stopReason: "end_turn" };
-      } catch (err) {
-        await entry.flushUpdates();
-        const message = err instanceof Error ? err.message : String(err);
-        entry.enqueueUpdate({
-          sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: `压缩失败：${message}` },
-        });
-        await entry.flushUpdates();
-        return { stopReason: "end_turn" };
-      }
-    }
+      converted.content[0].text.trim() === "/compact";
     // 模型能力校验（ADR-0127 第四阶段）：图片内容只在当前模型支持图片输入时提交；
     // 不支持时整体拒绝并明确反馈——不降级丢弃图片、不提交残缺消息。
     if (converted.hasImages) {
@@ -2450,6 +2463,34 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
 
     try {
       recordDiag({ event: "prompt_start", sessionId: entry.id });
+      // ADR-0127 第四阶段返工：/compact 在 busy/取消/关闭生命周期内执行压缩。
+      // 此时 entry.busy=true、turnAbort 已建立、abort 监听已注册——session/cancel
+      // 经 cancelEntry abort turnAbort 并调 session.interrupt()，后者中止压缩
+      // （compactController.abort()）；session/close 经 closeEntry 等待 turnPromise
+      // 收尾。压缩不进入模型推理，与正常推理轮分支互斥。
+      if (isCompactCommand) {
+        try {
+          await entry.session.compact();
+          await entry.flushUpdates();
+          // 压缩被 cancel 中断：interrupt 中止压缩后 compact() 抛 compaction_interrupted，
+          // 走下方 catch；能到这里说明压缩完整结束（成功或失败但不中断）。
+          return { stopReason: entry.cancelRequested ? "cancelled" : "end_turn" };
+        } catch (err) {
+          await entry.flushUpdates();
+          // 取消优先：中断（compaction_interrupted）或宿主 abort 都按 cancelled 收尾，
+          // 不写成「压缩失败」。
+          if (entry.cancelRequested || signal.aborted || isEntryStopped(entry)) {
+            return { stopReason: "cancelled" };
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          entry.enqueueUpdate({
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: `压缩失败：${message}` },
+          });
+          await entry.flushUpdates();
+          return { stopReason: "end_turn" };
+        }
+      }
       const endReason = await entry.session.submit({
         content: converted.content,
         ...(converted.attachments.length > 0 ? { attachments: converted.attachments } : {}),
