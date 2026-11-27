@@ -777,6 +777,94 @@ describe("ADR-0127 第五阶段：worker 续派", () => {
     expect(record.providerSnapshot.envKeys).toContain("NOCTURNE_TEST_PID_FILE");
   });
 
+  it("返工第 2 条：持久记录最小化——可能含密的 args/configOptions 原值不落盘", async () => {
+    // 合成哨兵：把明显可识别的哨兵值放进启动参数与 configOptions，
+    // 验证这些原值不出现在持久化 worker 记录的任何字段里（含嵌套序列化）。
+    const ARG_SENTINEL = "SENTINEL-ARG-9f3kd7-secret-path";
+    const OPT_SENTINEL = "SENTINEL-OPT-7h2jz4-credential-fragment";
+    const { connector, ctx, request } = setup("loadable", {
+      args: [fixture, "loadable", `--token=${ARG_SENTINEL}`],
+      configOptions: { model: OPT_SENTINEL },
+    });
+    const result = await connector.run(request, ctx);
+    expect(result.status).toBe("ok");
+    const workerFile = path.join(
+      process.env.NOCTURNE_HOME ?? "",
+      "external-workers",
+      `${result.output?.workerId}.json`,
+    );
+    const raw = await fs.readFile(workerFile, "utf8");
+    // 哨兵原值不得以任何形式出现在持久记录原文里
+    expect(raw).not.toContain(ARG_SENTINEL);
+    expect(raw).not.toContain(OPT_SENTINEL);
+    const record = JSON.parse(raw);
+    // 快照只保留恢复与身份校验所需的最小信息：command 与 envKeys
+    expect(record.providerSnapshot).not.toHaveProperty("args");
+    expect(record.providerSnapshot).not.toHaveProperty("configOptions");
+    expect(record.providerSnapshot).not.toHaveProperty("mode");
+    expect(record.providerSnapshot.command).toBe(process.execPath);
+    // env 只留键名——值（含可能的凭据）永不落盘
+    expect(record.providerSnapshot.envKeys).toEqual(
+      expect.arrayContaining(["NOCTURNE_TEST_PID_FILE"]),
+    );
+    expect(record.providerSnapshot).not.toHaveProperty("env");
+    // 身份摘要仍存在（sha256 hex），供续派前变更识别——但单向不可逆
+    expect(record.providerDigest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("返工第 2 条：历史含 args/configOptions 原值的记录读取兼容——digest 缺失按不可验证拒绝", async () => {
+    // 模拟 fix1 时期的旧记录：providerSnapshot 含 args/configOptions 原值、
+    // 但缺 providerDigest。读取应兼容（shape 容忍），续派按不可验证拒绝。
+    const homeDir = process.env.NOCTURNE_HOME ?? "";
+    const workerDir = path.join(homeDir, "external-workers");
+    await fs.mkdir(workerDir, { recursive: true });
+    const workerId = "ew-aaaa1111bbbb2222";
+    const now = new Date().toISOString();
+    await fs.writeFile(
+      path.join(workerDir, `${workerId}.json`),
+      JSON.stringify({
+        formatVersion: 1,
+        workerId,
+        agentName: "fixture",
+        externalSessionId: "legacy-session",
+        cwd: root,
+        // 旧格式：无 providerDigest，但 snapshot 含原值（历史遗留，不落盘新值）
+        providerSnapshot: {
+          command: process.execPath,
+          args: ["legacy-arg-secret"],
+          envKeys: [],
+          configOptions: { apiKey: "legacy-opt-secret" },
+        },
+        loadSessionCapable: true,
+        createdAt: now,
+        lastUsedAt: now,
+      }),
+    );
+    // 直接读 store 验证兼容策略：多余字段容忍、必需字段齐全即 shape 通过，
+    // digest 缺失读取为 undefined（不可验证状态，由 Core 续派前拒绝）。
+    const { createExternalWorkerStore, createPlatform: cp } = await import("@nocturne/core");
+    const realPlatform = cp();
+    const store = createExternalWorkerStore({
+      fs: realPlatform.fs,
+      paths: realPlatform.paths,
+      dir: workerDir,
+    });
+    const record = await store.read(workerId);
+    // 兼容读取：不因多余字段（args/configOptions）判损坏
+    expect(record).not.toBeUndefined();
+    expect(record?.agentName).toBe("fixture");
+    // digest 缺失 → undefined（不可验证），Core 续派前据此拒绝
+    expect(record?.providerDigest).toBeUndefined();
+    // touch 兼容：更新 lastUsedAt 重写整条记录。重写后的序列化原样保留
+    // 读取到的字段（含遗留多余字段）——touch 不做格式迁移，也不因重写而注入新泄漏；
+    // 关键是不崩溃、不丢核心字段，digest 状态保持。
+    const touchAt = new Date().toISOString();
+    await store.touch(workerId, touchAt);
+    const touched = await store.read(workerId);
+    expect(touched?.lastUsedAt).toBe(touchAt);
+    expect(touched?.providerDigest).toBeUndefined();
+  });
+
   it("loadSession=false 时不登记 worker（output 无 workerId，磁盘无记录）", async () => {
     const { connector, ctx, request } = setup();
     const result = await connector.run(request, ctx);

@@ -673,12 +673,7 @@ async function runAgent(
           providerDigest: computeProviderDigest(identity),
           providerSnapshot: {
             command: config.command,
-            args: [...config.args],
             envKeys: Object.keys(config.env ?? {}),
-            ...(config.mode !== undefined ? { mode: config.mode } : {}),
-            ...(config.configOptions !== undefined
-              ? { configOptions: { ...config.configOptions } }
-              : {}),
           },
           loadSessionCapable: true,
           agentReportedName: initialized.agentInfo?.name,

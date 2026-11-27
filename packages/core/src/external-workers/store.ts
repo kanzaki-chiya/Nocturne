@@ -5,16 +5,17 @@
  * - 一个 worker 一份 JSON 文件 `<NOCTURNE_HOME>/external-workers/<workerId>.json`，
  *   原子写入（写临时文件 + rename）；文件损坏按不存在处理（返回 undefined 并记录诊断）。
  * - worker 记录什么：归属 agent 名、外部 ACP 会话 id、工作树（cwd 绝对路径）、
- *   provider 身份摘要（`providerDigest`，见下）与启动配置快照（command/args/env 键名——
- *   快照而非引用，配置改写后已登记的 worker 仍按创建时的命令恢复）、`loadSession` 能力
- *   （来自 initialize 回报）、创建/最近使用时间。不记录任何凭据、env 实值
- *   或宿主注入的工具列表。
+ *   provider 身份摘要（`providerDigest`，见下）、`loadSession` 能力（来自 initialize
+ *   回报）、agent 自报名与版本（诊断用）、创建/最近使用时间。不记录任何凭据、
+ *   env 实值、启动参数原值、configOptions 原值或宿主注入的工具列表——
+ *   恢复与身份校验只需要摘要，最小化持久化（返工第 2 条）。
  * - provider 变更识别（返工）：`providerDigest` 是 command/args/env 键名/mode/
  *   configOptions 结构归一化后的 sha256 摘要。同名 agent 的启动目标（command/args）
  *   改变时摘要不匹配，续派在披露外部会话 ID 或注入 MCP 之前拒绝（worker_mismatch）。
- *   摘要按结构哈希、不含任何 env 值——args 中可能含敏感路径但属启动身份本身；
- *   摘要单向不可逆，落盘不泄露原值。缺失摘要的历史记录（formatVersion 1 早期）
- *   按"不可验证"处理：读取时 `providerDigest` 为 undefined，续派拒绝并说明需重建，
+ *   摘要按结构哈希、不含任何 env 值；启动参数与 configOptions 的原值不落盘——
+ *   它们可能含路径或凭据片段，身份核对用单向摘要即可完成，落盘既不必要也泄露。
+ *   缺失摘要的历史记录（formatVersion 1 早期）按"不可验证"处理：读取时
+ *   `providerDigest` 为 undefined，续派拒绝并说明需重建，
  *   不以宽松匹配放行（文档 subagent.md 第 17 节与此行为一致）。
  * - 跨重启语义：进程 id 与存活状态不入档——每次续派调用方重新起进程，
  *   凭 `externalSessionId` 与 `loadSession` 能力决定走 `session/load` 还是
@@ -45,13 +46,16 @@ export interface ExternalWorkerRecord {
    * undefined = 历史记录（早期 formatVersion 1）缺失摘要，续派按不可验证拒绝。
    */
   providerDigest?: string | undefined;
-  /** provider 启动配置快照（command/args；env 不含值只含键名——值不持久化） */
+  /**
+   * provider 启动身份的最小化快照（返工第 2 条）：只保留 command 与 env 键名
+   * （快照而非引用，配置改写后已登记的 worker 仍按创建时的命令恢复）。
+   * args 与 configOptions 的原值不持久化——它们可能含敏感路径、token 或凭据片段，
+   * 身份校验由 providerDigest 完成，恢复只需要 command 与外部会话 ID。
+   * env 键名按创建时快照保留（值永不持久化）。
+   */
   providerSnapshot: {
     command: string;
-    args: string[];
     envKeys: string[];
-    mode?: string | undefined;
-    configOptions?: Record<string, string> | undefined;
   };
   /** initialize 回报的 loadSession 能力 */
   loadSessionCapable: boolean;
@@ -138,10 +142,9 @@ function isRecordShape(value: unknown): value is ExternalWorkerRecord {
   if (typeof rec.cwd !== "string" || rec.cwd.length === 0) return false;
   if (typeof rec.loadSessionCapable !== "boolean") return false;
   if (typeof rec.createdAt !== "string" || typeof rec.lastUsedAt !== "string") return false;
-  const snap = rec.providerSnapshot as
-    { command?: unknown; args?: unknown; envKeys?: unknown } | null | undefined;
+  const snap = rec.providerSnapshot as { command?: unknown; envKeys?: unknown } | null | undefined;
   if (typeof snap !== "object" || snap === null) return false;
-  if (typeof snap.command !== "string" || !Array.isArray(snap.args)) return false;
+  if (typeof snap.command !== "string") return false;
   if (!Array.isArray(snap.envKeys)) return false;
   // providerDigest 缺失（历史记录）不视为损坏——作为可识别的"不可验证"状态保留；
   // 但若存在必须是字符串形状。
