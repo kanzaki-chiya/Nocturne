@@ -590,6 +590,20 @@ beforeAll(async () => {
           })}\n\n`,
         );
       };
+      // OpenAI 流式 stream_options.include_usage 语义：finish chunk 后追加一个
+      // choices:[] 的 chunk 携带非零 usage——核实合成 provider 能让 turn.completed.usage 非零。
+      const emitUsage = () => {
+        res.write(
+          `data: ${JSON.stringify({
+            id: "acp-e2e",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "e2e-model",
+            choices: [],
+            usage: { prompt_tokens: 1234, completion_tokens: 56, total_tokens: 1290 },
+          })}\n\n`,
+        );
+      };
 
       if (reply.toolCalls && reply.toolCalls.length > 0) {
         emit({ role: "assistant" });
@@ -606,12 +620,14 @@ beforeAll(async () => {
           });
         });
         emit({}, "tool_calls");
+        emitUsage();
       } else {
         emit({ role: "assistant" });
         for (const part of reply.textParts ?? ["ok"]) {
           emit({ content: part });
         }
         emit({}, "stop");
+        emitUsage();
       }
       res.end("data: [DONE]\n\n");
       })().catch(() => {
@@ -1800,10 +1816,22 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
       (u) => u.sessionId === sessionId && u.update.sessionUpdate === "usage_update",
     );
     expect(usageUpdates.length).toBeGreaterThanOrEqual(1);
-    const usage = usageUpdates[0]?.update as unknown as { used: number; size: number };
+    const usage = usageUpdates[0]?.update as unknown as {
+      used: number;
+      size: number;
+      _meta?: { inputTokens?: number; outputTokens?: number };
+    };
     expect(usage.used).toBeGreaterThanOrEqual(0);
     expect(usage.size).toBeGreaterThan(0);
     expect(usage.used).toBeLessThanOrEqual(usage.size);
+    // 合成 provider 返回非零 usage（SSE include_usage 每次推理 1234/56）——核实 turn.completed.usage
+    // 非零并累计进 usage_update._meta（端到端链路灯芯：provider usage → Core turn → ACP update）。
+    // 本轮含两次推理（todo_write 工具轮 + 工具结果后的完成轮），每次 1234/56，累计 2468/112。
+    // 关键断言：inputTokens 非零且为每次用量的整数倍——证明 usage 字段真实流入而非恒 0。
+    expect(usage._meta?.inputTokens).toBeGreaterThan(0);
+    expect((usage._meta?.inputTokens ?? 0) % 1234).toBe(0);
+    expect(usage._meta?.outputTokens).toBeGreaterThan(0);
+    expect((usage._meta?.outputTokens ?? 0) % 56).toBe(0);
 
     // 事件顺序与归属：available_commands 早于 plan，plan 早于 usage（turn 结束才发）。
     // 全部归属同一 sessionId。
