@@ -5,6 +5,8 @@
 import { describe, expect, it } from "vitest";
 
 import { classifyStreamErrorKind, toProviderError } from "./adapters/ai-sdk-common.js";
+import { buildContext } from "../context/build.js";
+import type { HistoryEntry, ImageAttachment } from "../protocol/index.js";
 import {
   createOpenAICompatibleProvider,
   type OpenAICompatibleConfig,
@@ -553,6 +555,213 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
     expect(parts[1]?.["text"]).toBe("text A");
     expect(parts[2]?.["type"]).toBe("image_url");
     expect(imgFingerprint(parts[2])).toContain("QkxVRQ");
+  });
+
+  it("端到端 context→provider：缺图占位膨胀后有效蓝图不错位（对旧实现失败）", async () => {
+    // r1126n-fix2 问题2 的确定性回归：buildContext 投影缺图占位（膨胀 textParts 索引），
+    // 有效蓝图 afterBlock 同步重映射。任务书例 [A,缺失图,B,有效蓝图,C] 应得
+    // [A,缺图占位,B,蓝图,C]——蓝图在 B 之后而非提前到 B 之前。旧实现蓝图按原索引错位。
+    const visionModel = {
+      ref: { provider: "oai", model: "gpt-x" },
+      contextWindow: 100_000,
+      maxOutputTokens: 8_000,
+      capabilities: {
+        toolCalls: true,
+        parallelToolCalls: true,
+        reasoning: "none",
+        imageInput: true,
+        promptCache: false,
+        editTool: "edit",
+      },
+    } as const;
+    const mkAtt = (sha: string, afterBlock: number): ImageAttachment => ({
+      type: "image",
+      file: `img-${sha}.png`,
+      mimeType: "image/png",
+      bytes: 29,
+      sha256: sha,
+      width: 2,
+      height: 3,
+      source: "paste",
+      afterBlock,
+    });
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [
+          { type: "text", text: "A" },
+          { type: "text", text: "B" },
+          { type: "text", text: "C" },
+        ],
+        attachments: [mkAtt("missing-red", 0), mkAtt("valid-blue", 1)],
+      },
+    ];
+    const built = buildContext({
+      history,
+      model: visionModel,
+      tools: [{ name: "read", description: "read a file", inputSchema: { type: "object" } }],
+      instructions: { project: [] },
+      environment: {
+        os: "Windows 11",
+        shell: "pwsh",
+        cwd: "C:\\ws",
+        workspaceRoot: "C:\\ws",
+        sessionDate: "2025-01-01",
+      },
+      // 只给 valid-blue 的数据——missing-red 走缺失占位（膨胀 textParts）
+      attachmentData: new Map([["valid-blue", "QkxVRQ=="]]),
+    });
+    const userMsg = built.request.messages.find((m) => m.role === "user");
+    expect(userMsg).toBeDefined();
+    if (userMsg === undefined) return;
+    // 把 buildContext 的真实输出喂给适配器，capture 实际 wire payload
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(p, { ...built.request, messages: [userMsg] });
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    const parts = msgs[1]?.["content"] as Record<string, unknown>[];
+    // 逐 part 核对类型与顺序：A / 缺图占位 / B / 蓝图 / C
+    const shape = parts.map((part) =>
+      part["type"] === "image_url" ? "image" : `text:${String(part["text"])}`,
+    );
+    expect(shape).toEqual([
+      "text:A",
+      "text:[image unavailable: attachment file missing]",
+      "text:B",
+      "image",
+      "text:C",
+    ]);
+    // 蓝图指纹身份确认：image part 是 valid-blue（BLUE），且在 B 之后
+    const imagePart = parts.find((part) => part["type"] === "image_url");
+    expect(imgFingerprint(imagePart)).toContain("QkxVRQ");
+    // 蓝图的位置：在 text:B（索引2）之后、text:C 之前——不在 B 之前
+    const blueIdx = parts.findIndex((part) => part["type"] === "image_url");
+    const bIdx = parts.findIndex((part) => part["text"] === "B");
+    const cIdx = parts.findIndex((part) => part["text"] === "C");
+    expect(blueIdx).toBeGreaterThan(bIdx);
+    expect(blueIdx).toBeLessThan(cIdx);
+  });
+
+  it("端到端 context→provider：压缩重注入保留原任务图片/文字对应关系（对旧实现失败）", async () => {
+    // r1126n-fix2 问题1 的确定性回归，按实际 provider payload 验证压缩后的真实构建分支。
+    // 原任务 [红图(开头),「请看左图」,蓝图(请看左图后),「请看右图」]：压缩重注入在 content 前
+    // 插 MARK 前缀，但原任务内部顺序应保留——红图在「请看左图」前、蓝图在「请看左图」后，
+    // 而非剥掉位置变成两段文字后跟两图。
+    const visionModel = {
+      ref: { provider: "oai", model: "gpt-x" },
+      contextWindow: 100_000,
+      maxOutputTokens: 8_000,
+      capabilities: {
+        toolCalls: true,
+        parallelToolCalls: true,
+        reasoning: "none",
+        imageInput: true,
+        promptCache: false,
+        editTool: "edit",
+      },
+    } as const;
+    const mkAtt = (sha: string, afterBlock: number): ImageAttachment => ({
+      type: "image",
+      file: `img-${sha}.png`,
+      mimeType: "image/png",
+      bytes: 29,
+      sha256: sha,
+      width: 2,
+      height: 3,
+      source: "paste",
+      afterBlock,
+    });
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 2,
+        turnId: "t1",
+        messageId: "u2",
+        content: [
+          { type: "text", text: "请看左图" },
+          { type: "text", text: "请看右图" },
+        ],
+        attachments: [mkAtt("red", -1), mkAtt("blue", 0)],
+      },
+      {
+        kind: "assistant",
+        seq: 3,
+        turnId: "t1",
+        messageId: "a3",
+        model: { provider: "oai", model: "gpt-x" },
+        content: [{ type: "text", text: "看到了" }],
+        toolCalls: [],
+        usage: undefined,
+        finishReason: "stop",
+      },
+      {
+        kind: "compaction",
+        seq: 4,
+        turnId: "t1",
+        compactKind: "summary",
+        throughSeq: 3,
+        summary: "前半段摘要",
+      },
+    ];
+    const evT = (seq: number, type: string, payload: Record<string, unknown>, turnId = "t1") =>
+      ({ type, sessionId: "s", seq, time: "t", payload, turnId }) as never;
+    const events = [
+      evT(1, "turn.started", { turnIndex: 1 }),
+      evT(2, "message.user", { messageId: "u2" }),
+      evT(4, "context.compacted", { kind: "summary", throughSeq: 3, summary: "前半段摘要" }),
+    ];
+    const built = buildContext({
+      history,
+      events,
+      model: visionModel,
+      tools: [{ name: "read", description: "read a file", inputSchema: { type: "object" } }],
+      instructions: { project: [] },
+      environment: {
+        os: "Windows 11",
+        shell: "pwsh",
+        cwd: "C:\\ws",
+        workspaceRoot: "C:\\ws",
+        sessionDate: "2025-01-01",
+      },
+      attachmentData: new Map([
+        ["red", "UkVE"], // "RED"
+        ["blue", "QkxVRQ=="], // "BLUE"
+      ]),
+    });
+    const reinjected = built.request.messages.find(
+      (m) => m.role === "user" && JSON.stringify(m.content).includes("当前 Turn 开始时"),
+    );
+    expect(reinjected).toBeDefined();
+    if (reinjected === undefined) return;
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(p, { ...built.request, messages: [reinjected] });
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    const parts = msgs[1]?.["content"] as Record<string, unknown>[];
+    // 逐 part 核对：MARK / 红图 / 请看左图 / 蓝图 / 请看右图——红在左图前、蓝在左图后
+    const shape = parts.map((part) =>
+      part["type"] === "image_url"
+        ? imgFingerprint(part).includes("UkVE")
+          ? "red"
+          : "blue"
+        : `text:${String(part["text"]).slice(0, 12)}`,
+    );
+    // 红图紧跟 MARK（在「请看左图」之前），蓝图在「请看左图」之后、「请看右图」之前
+    const redIdx = shape.indexOf("red");
+    const blueIdx = shape.indexOf("blue");
+    const leftIdx = parts.findIndex((part) => part["text"] === "请看左图");
+    const rightIdx = parts.findIndex((part) => part["text"] === "请看右图");
+    expect(redIdx).toBeGreaterThanOrEqual(0);
+    expect(blueIdx).toBeGreaterThanOrEqual(0);
+    expect(leftIdx).toBeGreaterThanOrEqual(0);
+    expect(rightIdx).toBeGreaterThanOrEqual(0);
+    // 红图在「请看左图」前；蓝图在「请看左图」后、「请看右图」前
+    expect(redIdx).toBeLessThan(leftIdx);
+    expect(blueIdx).toBeGreaterThan(leftIdx);
+    expect(blueIdx).toBeLessThan(rightIdx);
   });
 });
 

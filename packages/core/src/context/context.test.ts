@@ -2092,6 +2092,194 @@ describe("自动 L2 与进行中输入保留（context.md 6.5）", () => {
     expect(text.indexOf("修复登录")).toBeLessThan(text.indexOf("蓝色主题"));
   });
 
+  it("r1126n-fix2：压缩重注入保留原任务内部图片与文字对应关系（不错位成两段文字后跟两图）", () => {
+    // 原任务 [红图(开头),「请看左图」,蓝图(请看左图后),「请看右图」]。
+    // 压缩重注入在原 content 前插入 MARK 前缀——原任务内部顺序可保留：
+    // MARK 占索引0，原 afterBlock=N 重映射为 N+1，afterBlock=-1（开头）重映射为 0（MARK 后）。
+    // 而非把 afterBlock 全剥掉变成两段文字后跟两图。
+    const vision: ModelInfo = {
+      ...model,
+      capabilities: { ...model.capabilities, imageInput: true },
+    };
+    const mkAtt = (sha: string, afterBlock: number): ImageAttachment => ({
+      type: "image",
+      file: `img-${sha}.png`,
+      mimeType: "image/png",
+      bytes: 29,
+      sha256: sha,
+      width: 2,
+      height: 3,
+      source: "paste",
+      afterBlock,
+    });
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 2,
+        turnId: "t1",
+        messageId: "u2",
+        content: [
+          { type: "text", text: "请看左图" },
+          { type: "text", text: "请看右图" },
+        ],
+        attachments: [mkAtt("red", -1), mkAtt("blue", 0)],
+      },
+      {
+        kind: "assistant",
+        seq: 3,
+        turnId: "t1",
+        messageId: "a3",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: "看到了" }],
+        toolCalls: [],
+        usage: undefined,
+        finishReason: "stop",
+      },
+      {
+        kind: "compaction",
+        seq: 4,
+        turnId: "t1",
+        compactKind: "summary",
+        throughSeq: 3,
+        summary: "前半段摘要",
+      },
+    ];
+    const events = [
+      evT(1, "turn.started", { turnIndex: 1 }, "t1"),
+      evT(2, "message.user", { messageId: "u2" }, "t1"),
+      evT(4, "context.compacted", { kind: "summary", throughSeq: 3, summary: "前半段摘要" }, "t1"),
+    ];
+    const dataOfTwo = new Map([
+      ["red", Buffer.from("bytes-red").toString("base64")],
+      ["blue", Buffer.from("bytes-blue").toString("base64")],
+    ]);
+    const built = buildContext(
+      baseInput({ history, events, model: vision, attachmentData: dataOfTwo }),
+    );
+    const reinjected = built.request.messages.find(
+      (message) =>
+        message.role === "user" && JSON.stringify(message.content).includes("当前 Turn 开始时"),
+    );
+    expect(reinjected).toBeDefined();
+    if (reinjected?.role !== "user") return;
+    // content 文本序：MARK / 请看左图 / 请看右图（占位无——两图都有效）
+    const texts = reinjected.content.map((b) => b.text);
+    expect(texts[0]).toContain("当前 Turn 开始时");
+    expect(texts[1]).toBe("请看左图");
+    expect(texts[2]).toBe("请看右图");
+    // 图片 afterBlock 重映射保留对应关系：红图原-1（开头，c0前）→ 0（MARK后、请看左图前）；
+    // 蓝图原0（c0=请看左图后）→ 1（请看左图在新索引1后）。不错位成全部末尾。
+    const afters = reinjected.images?.map((i) => ({ sha: i.data, after: i.afterBlock })) ?? [];
+    // 红图（bytes-red base64）在前、蓝图（bytes-blue base64）在后
+    const redIdx = afters.findIndex((a) => a.sha === Buffer.from("bytes-red").toString("base64"));
+    const blueIdx = afters.findIndex((a) => a.sha === Buffer.from("bytes-blue").toString("base64"));
+    expect(redIdx).toBeGreaterThanOrEqual(0);
+    expect(blueIdx).toBeGreaterThanOrEqual(0);
+    expect(afters[redIdx]?.after).toBe(0);
+    expect(afters[blueIdx]?.after).toBe(1);
+  });
+
+  it("r1126n-fix2：压缩重注入连续前置图保持提交顺序、旧无位置附件与插话附件追加末尾", () => {
+    // 连续前置图（均 afterBlock=-1）平移后同槽（0）按提交顺序；无位置旧附件保持末尾追加；
+    // 插话附件位置失真剥掉 afterBlock 追加末尾，不影响 original 内部顺序。
+    const vision: ModelInfo = {
+      ...model,
+      capabilities: { ...model.capabilities, imageInput: true },
+    };
+    const mkAtt = (sha: string, afterBlock: number | undefined): ImageAttachment => ({
+      type: "image",
+      file: `img-${sha}.png`,
+      mimeType: "image/png",
+      bytes: 29,
+      sha256: sha,
+      width: 2,
+      height: 3,
+      source: "paste",
+      ...(afterBlock !== undefined ? { afterBlock } : {}),
+    });
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 2,
+        turnId: "t1",
+        messageId: "u2",
+        content: [{ type: "text", text: "正文" }],
+        // 两张连续前置图（leadA 先 leadB 后）+ 一张无位置旧附件
+        attachments: [mkAtt("leadA", -1), mkAtt("leadB", -1), mkAtt("legacy", undefined)],
+      },
+      {
+        kind: "user",
+        seq: 3,
+        turnId: "t1",
+        messageId: "u3",
+        steer: true,
+        content: [{ type: "text", text: "插话补充" }],
+        attachments: [mkAtt("steer-img", 0)],
+      },
+      {
+        kind: "assistant",
+        seq: 4,
+        turnId: "t1",
+        messageId: "a4",
+        model: { provider: "test", model: "m1" },
+        content: [{ type: "text", text: "好" }],
+        toolCalls: [],
+        usage: undefined,
+        finishReason: "stop",
+      },
+      {
+        kind: "compaction",
+        seq: 5,
+        turnId: "t1",
+        compactKind: "summary",
+        throughSeq: 4,
+        summary: "前半段摘要",
+      },
+    ];
+    const events = [
+      evT(1, "turn.started", { turnIndex: 1 }, "t1"),
+      evT(2, "message.user", { messageId: "u2" }, "t1"),
+      evT(3, "message.user", { messageId: "u3", steer: true }, "t1"),
+      evT(5, "context.compacted", { kind: "summary", throughSeq: 4, summary: "前半段摘要" }, "t1"),
+    ];
+    const allData = new Map(
+      ["leadA", "leadB", "legacy", "steer-img"].map((s) => [
+        s,
+        Buffer.from(`b-${s}`).toString("base64"),
+      ]),
+    );
+    const built = buildContext(
+      baseInput({ history, events, model: vision, attachmentData: allData }),
+    );
+    const reinjected = built.request.messages.find(
+      (message) =>
+        message.role === "user" && JSON.stringify(message.content).includes("当前 Turn 开始时"),
+    );
+    expect(reinjected).toBeDefined();
+    if (reinjected?.role !== "user") return;
+    // content：MARK / 正文 / 插话补充（无占位——全部有效）
+    const texts = reinjected.content.map((b) => b.text);
+    expect(texts[1]).toBe("正文");
+    expect(texts[2]).toBe("插话补充");
+    const afterOf = (sha: string) =>
+      reinjected.images?.find((i) => i.data === Buffer.from(`b-${sha}`).toString("base64"))
+        ?.afterBlock;
+    // 连续前置图：leadA/leadB 原 -1 → 平移 0，同槽（0）且 leadA 先于 leadB（提交顺序）
+    expect(afterOf("leadA")).toBe(0);
+    expect(afterOf("leadB")).toBe(0);
+    const leadAIdx = reinjected.images?.findIndex(
+      (i) => i.data === Buffer.from("b-leadA").toString("base64"),
+    );
+    const leadBIdx = reinjected.images?.findIndex(
+      (i) => i.data === Buffer.from("b-leadB").toString("base64"),
+    );
+    expect(leadAIdx).toBeLessThan(leadBIdx ?? 0);
+    // 旧无位置附件：保持 undefined（末尾追加）
+    expect(afterOf("legacy")).toBeUndefined();
+    // 插话附件：位置失真剥掉 → undefined（末尾追加），不混入 original 内部位置
+    expect(afterOf("steer-img")).toBeUndefined();
+  });
+
   // 日志分析（f0136a6d）：摘要压缩后模型把待办改回全部未开始并从头开工。
   // 待办全部完成 + 已提交 → 摘要压缩后，完成状态与提交信息必须仍在上下文里，
   // 且原始请求排在保留区之前，最后一条消息是模型自己的最新进展而不是"新请求"。
@@ -2572,6 +2760,100 @@ describe("图片附件投影（ADR-0023）", () => {
       "text B",
       "[image omitted: current model does not support image input]",
     ]);
+  });
+
+  it("缺图占位膨胀文本索引后，有效图 afterBlock 同步重映射：不错位到相邻文本块之前", () => {
+    // r1126n-fix2 问题2：mergeUserBlocks 把缺图占位插进文本流后 textParts 索引膨胀，
+    // 有效图的 afterBlock 若仍按原始 content 索引，会被 provider 当成膨胀后索引而错位。
+    // 场景（任务书例）：原 content [A,B,C]，缺失图 afterBlock=0（想在 A 后）→ 占位，
+    // 有效蓝图 afterBlock=1（想在 B 后）→ images。期望最终顺序 [A,缺图占位,B,蓝图,C]，
+    // 蓝图在 B 之后而非提前到 B 之前。
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [
+          { type: "text", text: "A" },
+          { type: "text", text: "B" },
+          { type: "text", text: "C" },
+        ],
+        attachments: [
+          { ...att("missing-red"), afterBlock: 0 }, // 数据缺失 → 占位
+          { ...att("valid-blue"), afterBlock: 1 }, // 数据齐全 → 图片
+        ],
+      },
+    ];
+    // vision 模型，只给 valid-blue 的数据——missing-red 走缺失占位
+    const built = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf("valid-blue") }),
+    );
+    const msg = built.request.messages[0];
+    const texts = (msg?.role === "user" ? msg.content : []).map((b) => b.text);
+    // 占位文本穿插在 A 之后（afterBlock=0）
+    expect(texts).toEqual(["A", "[image unavailable: attachment file missing]", "B", "C"]);
+    // 膨胀后 textParts 索引：A=0,占位=1,B=2,C=3。蓝图想在原 B（原 idx1）之后，
+    // 重映射后应指向膨胀索引 2（B）——provider 据此把蓝图插到 B 之后而非占位之后。
+    const blueAfter = msg?.role === "user" ? msg.images?.[0]?.afterBlock : undefined;
+    expect(blueAfter).toBe(2);
+  });
+
+  it("分片说明与图片同位置：note 文本膨胀后图片跟随同一逻辑位置，同位置保持提交顺序", () => {
+    // 分片图（processed 多片）既产生 note 说明文本（进 content）又产生图片（进 images），
+    // 两者共享同一 afterBlock。图片应跟随 note 之后而非错位。构造两片 processed 触发 note。
+    const tiled: ImageAttachment = {
+      ...att("tiled-img"),
+      afterBlock: 0,
+      width: 4000,
+      height: 100,
+      processed: [
+        {
+          file: "img-tiled-img-1.jpg",
+          mimeType: "image/png",
+          bytes: 29,
+          sha256: "tiled-img",
+          width: 2000,
+          height: 100,
+          region: { x: 0, y: 0, width: 2000, height: 100 },
+        },
+        {
+          file: "img-tiled-img-2.jpg",
+          mimeType: "image/png",
+          bytes: 29,
+          sha256: "tiled-img",
+          width: 2000,
+          height: 100,
+          region: { x: 2000, y: 0, width: 2000, height: 100 },
+        },
+      ],
+    };
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [
+          { type: "text", text: "A" },
+          { type: "text", text: "B" },
+        ],
+        attachments: [tiled],
+      },
+    ];
+    const built = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf("tiled-img") }),
+    );
+    const msg = built.request.messages[0];
+    const texts = (msg?.role === "user" ? msg.content : []).map((b) => b.text);
+    // note 说明（分片）穿插在 A 之后
+    expect(texts[0]).toBe("A");
+    expect(texts[1]).toMatch(/split into 2 JPEG tiles/);
+    expect(texts[2]).toBe("B");
+    // 图片（两片）应与 note 同位置——afterBlock 重映射指向 note 文本块（膨胀 idx1），
+    // provider 据此把图片插在 note 之后、B 之前，而不是按原索引 0 插到 A 之后、note 之前。
+    const imgAfters = msg?.role === "user" ? msg.images?.map((i) => i.afterBlock) : undefined;
+    expect(imgAfters).toEqual([1, 1]);
   });
 });
 

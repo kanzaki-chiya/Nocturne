@@ -665,6 +665,41 @@ function mergeUserBlocks(
 }
 
 /**
+ * r1126n-fix2：占位/分片说明文本插入 textParts 后会使其索引膨胀，而图片的 afterBlock
+ * 仍按原始 content 文本块索引记录——若直接交给适配器（按膨胀后 textParts 索引穿插），
+ * 图片会被错位到相邻文本块之前（例：原 [A,缺失图,B,有效蓝图,C] 蓝图被提前到 B 之前）。
+ * 这里把图片 afterBlock 一致重映射到膨胀后的文本块索引空间：
+ * 图片 afterBlock=jp（想在原始第 jp 块之后）→ 新位置 = jp + 锚定在 -1..jp 的占位/说明
+ * 文本总数（这些文本在膨胀序列中占据原始第 jp 块之前的索引）。afterBlock=-1（开头）
+ * 与越界（末尾）保持原值：-1 是序列最前、越界 clamp 到末尾，重映射不改变其语义。
+ * 同位置的附件提交顺序由 texts/images 各自桶内顺序保留。
+ */
+function remapImagePositions(
+  images: readonly ModelImage[],
+  texts: readonly { text: string; afterBlock?: number | undefined }[],
+): ModelImage[] {
+  const positioned = texts.filter((t) => t.afterBlock !== undefined);
+  if (positioned.length === 0) return [...images];
+  // 每个锚点位置插入的文本数
+  const countAt = new Map<number, number>();
+  for (const t of positioned) {
+    const pos = t.afterBlock ?? 0;
+    countAt.set(pos, (countAt.get(pos) ?? 0) + 1);
+  }
+  return images.map((img) => {
+    const jp = img.afterBlock;
+    if (jp === undefined || jp < 0) return img; // 无位置或开头(-1)：不重映射
+    // 锚定在 -1..jp 的文本总数（含 -1 开头桶，它在最前占据索引、把后续文本块往后推）
+    let shift = 0;
+    for (const [pos, count] of countAt) {
+      if (pos <= jp) shift += count;
+    }
+    if (shift === 0) return img;
+    return { ...img, afterBlock: jp + shift };
+  });
+}
+
+/**
  * 按消息顺序排列、落在最新 20 张之内的附件引用（对象身份）。与
  * historyToMessages / buildContext 共用同一套 6.4 cutoff：跳过摘要覆盖的
  * 条目、跳过 L1 修剪覆盖的 tool 条目；open Turn 被摘要覆盖而重新注入的
@@ -962,10 +997,13 @@ function historyToMessages(
         const atts = resolveAttachments(entry.attachments, imgOpts, "user");
         const blocks: ContentBlock[] = mergeUserBlocks(entry.content, atts.texts);
         byChars.user += blockChars(blocks);
+        // r1126n-fix2：占位/说明文本插入使 textParts 索引膨胀，图片 afterBlock 同步
+        // 重映射到膨胀后索引，避免适配器按原索引把图片错位到相邻文本块之前。
+        const remappedImages = remapImagePositions(atts.images, atts.texts);
         const msg: ModelMessage = {
           role: "user",
           content: blocks,
-          ...(atts.images.length > 0 ? { images: atts.images } : {}),
+          ...(remappedImages.length > 0 ? { images: remappedImages } : {}),
         };
         if (atts.imageGroups.length > 0) imgOpts.imageGroups?.set(msg, atts.imageGroups);
         if (atts.virtualGroups.length > 0) imgOpts.virtualGroups?.set(msg, atts.virtualGroups);
@@ -1549,29 +1587,63 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     const original = coveredUsers[0];
     if (original?.kind === "user") {
       const steers = coveredUsers.slice(1).flatMap((e) => (e.kind === "user" ? e.content : []));
-      const atts = resolveAttachments(
-        coveredUsers.flatMap((e) => (e.kind === "user" ? (e.attachments ?? []) : [])),
+      // r1126n-fix2：原任务内部的图片/文字对应关系可保留。重注入在 original.content
+      // 前插入 MARK 前缀（占索引 0），original 第 i 块在新结构索引 i+1——把 original
+      // 附件的 afterBlock 平移：N → N+1，-1（开头，original c0 前）→ 0（MARK 后、original
+      // c0 前）。随后走标准 mergeUserBlocks + remapImagePositions（占位膨胀后图片同步
+      // 重映射），不再一律剥掉位置。插话（额外内容，无 original content 索引对应）的
+      // 附件位置提示失真，剥掉 afterBlock 追加末尾。
+      const shiftPosition = (pos: number | undefined): number | undefined => {
+        if (pos === undefined) return undefined;
+        return pos === -1 ? 0 : pos + 1;
+      };
+      // 注意：resolveAttachments 的 inCap 判定按附件对象身份——不能改写附件对象本身，
+      // 只在解析输出（texts/images 复制的 afterBlock）上平移位置，保持原对象身份。
+      const originalAtts = resolveAttachments(original.attachments ?? [], imageOpts, "user");
+      const shiftedTexts = originalAtts.texts.map((t) => ({
+        text: t.text,
+        ...(t.afterBlock !== undefined ? { afterBlock: shiftPosition(t.afterBlock) } : {}),
+      }));
+      const shiftedImages = originalAtts.images.map((img) => ({
+        ...img,
+        ...(img.afterBlock !== undefined ? { afterBlock: shiftPosition(img.afterBlock) } : {}),
+      }));
+      const baseContent: ContentBlock[] = [
+        { type: "text", text: REINJECTED_TASK_MARK },
+        ...original.content,
+      ];
+      // original 占位/说明按平移后位置穿插进 [MARK, ...original.content]（膨胀 textParts）
+      const mergedOriginal = mergeUserBlocks(baseContent, shiftedTexts);
+      // original 图片 afterBlock 同步重映射到膨胀后索引
+      const originalImages = remapImagePositions(shiftedImages, shiftedTexts);
+      // 插话附件：位置失真，剥掉 afterBlock 后占位/图片都追加末尾
+      const steerAtts = resolveAttachments(
+        coveredUsers.slice(1).flatMap((e) => (e.kind === "user" ? (e.attachments ?? []) : [])),
         imageOpts,
         "user",
       );
       const blocks: ContentBlock[] = [
-        { type: "text", text: REINJECTED_TASK_MARK },
-        ...original.content,
+        ...mergedOriginal,
         ...steers,
-        // 重注入消息在原始 content 前插入了固定说明块（且合并了插话），附件的
-        // afterBlock 位置相对原始消息已失真；这条压缩后的边缘路径把占位/说明文本
-        // 追加到末尾，图片 likewise 剥掉位置提示追加末尾——避免按失真索引错位。
-        ...atts.texts.map((t) => ({ type: "text" as const, text: t.text })),
+        ...steerAtts.texts.map((t) => ({ type: "text" as const, text: t.text })),
       ];
-      const reinjectedImages = atts.images.map((img) => {
+      const stripPosition = (img: ModelImage): ModelImage => {
         if (img.afterBlock === undefined) return img;
         const { afterBlock: _dropped, ...rest } = img;
         return rest;
-      });
+      };
+      const reinjectedImages = [...originalImages, ...steerAtts.images.map(stripPosition)];
       const msg: ModelMessage = {
         role: "user",
         content: blocks,
         ...(reinjectedImages.length > 0 ? { images: reinjectedImages } : {}),
+      };
+      // imageGroups/virtualGroups 统计合并 original + 插话（计数用，不分位置）
+      const atts: ResolvedAttachments = {
+        images: reinjectedImages,
+        texts: [...originalAtts.texts, ...steerAtts.texts],
+        imageGroups: [...originalAtts.imageGroups, ...steerAtts.imageGroups],
+        virtualGroups: [...originalAtts.virtualGroups, ...steerAtts.virtualGroups],
       };
       if (atts.imageGroups.length > 0) imageOpts.imageGroups?.set(msg, atts.imageGroups);
       if (atts.virtualGroups.length > 0) imageOpts.virtualGroups?.set(msg, atts.virtualGroups);
