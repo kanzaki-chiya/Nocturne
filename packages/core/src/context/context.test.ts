@@ -2855,6 +2855,96 @@ describe("图片附件投影（ADR-0023）", () => {
     const imgAfters = msg?.role === "user" ? msg.images?.map((i) => i.afterBlock) : undefined;
     expect(imgAfters).toEqual([1, 1]);
   });
+
+  it("r1126n-fix2 同锚点混合附件：蓝图先于缺图提交则蓝图在缺图占位前（不错位到占位后）", () => {
+    // 原 [A,有效蓝图,缺图,B]，两图同 afterBlock=0（都想在 A 后），蓝图先提交、缺图后提交。
+    // 缺图变占位（锚点0）使 textParts 膨胀为 [A,占位,B]。蓝图在缺图前——重映射后蓝图
+    // afterBlock 应为 0（插到 A 之后、占位之前），而非被统一抬到占位之后。
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [
+          { type: "text", text: "A" },
+          { type: "text", text: "B" },
+        ],
+        attachments: [
+          { ...att("valid-blue"), afterBlock: 0 }, // 先提交，数据齐全 → 图片
+          { ...att("missing-red"), afterBlock: 0 }, // 后提交，数据缺失 → 占位
+        ],
+      },
+    ];
+    const built = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf("valid-blue") }),
+    );
+    const msg = built.request.messages[0];
+    const texts = (msg?.role === "user" ? msg.content : []).map((b) => b.text);
+    expect(texts).toEqual(["A", "[image unavailable: attachment file missing]", "B"]);
+    // 蓝图在缺图占位之前：afterBlock=0（插到 A 之后、占位 idx1 之前）
+    const blueAfter = msg?.role === "user" ? msg.images?.[0]?.afterBlock : undefined;
+    expect(blueAfter).toBe(0);
+  });
+
+  it("r1126n-fix2 同锚点混合附件：缺图先于蓝图提交则蓝图在缺图占位后", () => {
+    // 相反排列：原 [A,缺图,有效蓝图,B]，两图同 afterBlock=0，缺图先提交、蓝图后提交。
+    // 蓝图在缺图占位之后——afterBlock 应为 1（插到占位 idx1 之后）。
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [
+          { type: "text", text: "A" },
+          { type: "text", text: "B" },
+        ],
+        attachments: [
+          { ...att("missing-red"), afterBlock: 0 }, // 先提交，数据缺失 → 占位
+          { ...att("valid-blue"), afterBlock: 0 }, // 后提交，数据齐全 → 图片
+        ],
+      },
+    ];
+    const built = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf("valid-blue") }),
+    );
+    const msg = built.request.messages[0];
+    const texts = (msg?.role === "user" ? msg.content : []).map((b) => b.text);
+    expect(texts).toEqual(["A", "[image unavailable: attachment file missing]", "B"]);
+    // 蓝图在缺图占位之后：afterBlock=1（插到占位 idx1 之后）
+    const blueAfter = msg?.role === "user" ? msg.images?.[0]?.afterBlock : undefined;
+    expect(blueAfter).toBe(1);
+  });
+
+  it("r1126n-fix2 开头同槽混合附件：afterBlock=-1 的有效图与占位按输入顺序保序", () => {
+    // 开头同槽：原 [有效蓝图,缺图,A]，两图同 afterBlock=-1（开头）。缺图占位插入开头桶
+    // 占据 textParts 最前索引；蓝图有效但不重映射（-1 开头桶由适配器在最前输出）。
+    // 开头同槽的保序由适配器桶内提交顺序保证——这里核对占位进开头桶、蓝图保持 -1。
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [{ type: "text", text: "A" }],
+        attachments: [
+          { ...att("valid-blue"), afterBlock: -1 }, // 先提交，数据齐全 → 图片
+          { ...att("missing-red"), afterBlock: -1 }, // 后提交，数据缺失 → 占位
+        ],
+      },
+    ];
+    const built = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf("valid-blue") }),
+    );
+    const msg = built.request.messages[0];
+    const texts = (msg?.role === "user" ? msg.content : []).map((b) => b.text);
+    // 占位插入开头（第 0 块之前）
+    expect(texts).toEqual(["[image unavailable: attachment file missing]", "A"]);
+    // 有效蓝图保持 -1（开头桶）——适配器在最前按提交顺序输出，不错位
+    const blueAfter = msg?.role === "user" ? msg.images?.[0]?.afterBlock : undefined;
+    expect(blueAfter).toBe(-1);
+  });
 });
 
 describe("history 细分（ADR-0046 第 5 节）", () => {

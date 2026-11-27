@@ -604,6 +604,79 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
     expect(blueIdx).toBeLessThan(cIdx);
   });
 
+  it("端到端：同锚点混合附件蓝图先缺图后——wire 为 A/蓝图/占位/B（蓝图不错位到占位后）", async () => {
+    // r1126n-fix2 同锚点保序（provider 半段）：原 [A,有效蓝图,缺图,B]，两图同 afterBlock=0，
+    // 蓝图先提交。投影 textParts=[A,占位,B]，蓝图正确 afterBlock=0（context 半段钉住）。
+    // 适配器应穿插为 A/蓝图/占位/B——蓝图在缺图占位之前，而非被机械错位到占位后。
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "A" },
+              { type: "text", text: "[image unavailable: attachment file missing]" },
+              { type: "text", text: "B" },
+            ],
+            images: [{ ...pngBlue, afterBlock: 0 }],
+          },
+        ],
+      }),
+    );
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    const parts = msgs[1]?.["content"] as Record<string, unknown>[];
+    const shape = parts.map((part) =>
+      part["type"] === "image_url" ? "image" : `text:${String(part["text"])}`,
+    );
+    // 蓝图在 A 之后、缺图占位之前
+    expect(shape).toEqual([
+      "text:A",
+      "image",
+      "text:[image unavailable: attachment file missing]",
+      "text:B",
+    ]);
+    expect(imgFingerprint(parts.find((part) => part["type"] === "image_url"))).toContain("QkxVRQ");
+  });
+
+  it("端到端：同锚点混合附件缺图先蓝图后——wire 为 A/占位/蓝图/B（蓝图在占位后）", async () => {
+    // 相反排列：原 [A,缺图,有效蓝图,B]，两图同 afterBlock=0，缺图先提交。
+    // 蓝图正确 afterBlock=1（插到占位 idx1 之后），适配器穿插为 A/占位/蓝图/B。
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "A" },
+              { type: "text", text: "[image unavailable: attachment file missing]" },
+              { type: "text", text: "B" },
+            ],
+            images: [{ ...pngBlue, afterBlock: 1 }],
+          },
+        ],
+      }),
+    );
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    const parts = msgs[1]?.["content"] as Record<string, unknown>[];
+    const shape = parts.map((part) =>
+      part["type"] === "image_url" ? "image" : `text:${String(part["text"])}`,
+    );
+    // 蓝图在缺图占位之后、B 之前
+    expect(shape).toEqual([
+      "text:A",
+      "text:[image unavailable: attachment file missing]",
+      "image",
+      "text:B",
+    ]);
+    expect(imgFingerprint(parts.find((part) => part["type"] === "image_url"))).toContain("QkxVRQ");
+  });
+
   it("端到端 context→provider：压缩重注入保留原任务图片/文字对应关系（对旧实现失败）", async () => {
     // r1126n-fix2 问题1 的确定性回归（provider 半段）：压缩重注入在 content 前插 MARK
     // 前缀，original 附件 afterBlock 平移（N→N+1，-1→0）后按位置穿插。原任务

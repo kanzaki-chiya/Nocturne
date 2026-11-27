@@ -571,6 +571,12 @@ function resolveAttachment(
 interface ResolvedAttachments {
   images: ModelImage[];
   /**
+   * 与 images 平行：每张图片在同一锚点（afterBlock 相同）中、按附件提交顺序
+   * 在它之前的占位/说明文本数。重映射用它把图片定位到正确的占位文本之间，
+   * 保留同锚点混合附件（有效图与缺图占位交错）的输入顺序（ADR-0127 第四阶段）。
+   */
+  precedingTexts: number[];
+  /**
    * 占位/标记或分段说明文本（调用方按消息类型落位：user 追加 text 块，tool 追加到 content）。
    * afterBlock 与来源附件一致：有位置信息时 user 投影把它穿插到对应文本块之后，
    * 而不是一律追加到末尾（ADR-0127 第四阶段保序）。
@@ -585,8 +591,23 @@ function resolveAttachments(
   opts: ImageProjectionOpts,
   role: "user" | "tool",
 ): ResolvedAttachments {
-  const out: ResolvedAttachments = { images: [], texts: [], imageGroups: [], virtualGroups: [] };
+  const out: ResolvedAttachments = {
+    images: [],
+    precedingTexts: [],
+    texts: [],
+    imageGroups: [],
+    virtualGroups: [],
+  };
   const list = atts ?? [];
+  // 每个锚点（afterBlock）已产生的占位/说明文本数。遍历按附件提交顺序，产生图片时
+  // 记录其前驱占位计数，产生占位文本时递增——同锚点混合附件由此保留输入顺序。
+  const anchorTexts = new Map<number, number>();
+  const preceding = (pos: number | undefined): number =>
+    pos === undefined ? 0 : (anchorTexts.get(pos) ?? 0);
+  const bumpTexts = (pos: number | undefined, delta: number): void => {
+    if (pos === undefined) return;
+    anchorTexts.set(pos, (anchorTexts.get(pos) ?? 0) + delta);
+  };
   for (let i = 0; i < list.length; i++) {
     const att = list[i];
     if (att === undefined) continue;
@@ -594,7 +615,13 @@ function resolveAttachments(
     const noteText = role === "user" ? formatTiledUserImageNote(att, i, list.length) : undefined;
     const pos = att.afterBlock;
     if (r.images !== undefined) {
-      if (noteText !== undefined) out.texts.push({ text: noteText, afterBlock: pos });
+      if (noteText !== undefined) {
+        out.texts.push({ text: noteText, afterBlock: pos });
+        bumpTexts(pos, 1);
+      }
+      // 同一附件的分片图共享同一前驱计数（含自身 note）——同位置按提交顺序输出
+      const before = preceding(pos);
+      for (const _img of r.images) out.precedingTexts.push(before);
       out.images.push(...r.images);
       out.imageGroups.push({
         count: r.images.length,
@@ -602,8 +629,12 @@ function resolveAttachments(
       });
     } else if (r.text !== undefined) {
       out.texts.push({ text: r.text, afterBlock: pos });
+      bumpTexts(pos, 1);
     } else if (r.virtualCount !== undefined) {
-      if (noteText !== undefined) out.texts.push({ text: noteText, afterBlock: pos });
+      if (noteText !== undefined) {
+        out.texts.push({ text: noteText, afterBlock: pos });
+        bumpTexts(pos, 1);
+      }
       out.virtualGroups.push({
         count: r.virtualCount,
         ...(noteText !== undefined ? { noteText } : {}),
@@ -668,15 +699,18 @@ function mergeUserBlocks(
  * r1126n-fix2：占位/分片说明文本插入 textParts 后会使其索引膨胀，而图片的 afterBlock
  * 仍按原始 content 文本块索引记录——若直接交给适配器（按膨胀后 textParts 索引穿插），
  * 图片会被错位到相邻文本块之前（例：原 [A,缺失图,B,有效蓝图,C] 蓝图被提前到 B 之前）。
- * 这里把图片 afterBlock 一致重映射到膨胀后的文本块索引空间：
- * 图片 afterBlock=jp（想在原始第 jp 块之后）→ 新位置 = jp + 锚定在 -1..jp 的占位/说明
- * 文本总数（这些文本在膨胀序列中占据原始第 jp 块之前的索引）。afterBlock=-1（开头）
- * 与越界（末尾）保持原值：-1 是序列最前、越界 clamp 到末尾，重映射不改变其语义。
- * 同位置的附件提交顺序由 texts/images 各自桶内顺序保留。
+ * 这里把图片 afterBlock 一致重映射到膨胀后的文本块索引空间。content[jp] 在膨胀序列中
+ * 的索引 = jp + 锚点严格小于 jp 的占位/说明文本总数（含 -1 开头桶，它在最前推高后续
+ * 索引）；图片要落在 content[jp] 之后、同锚点提交顺序在它之前的 b 个占位之后，故
+ * 新位置 = jp + shift + b（b 即 precedingTexts，同锚点前驱占位计数）。这样同锚点的
+ * 混合附件（有效图与缺图占位交错）按输入顺序穿插——蓝图先于缺图提交则蓝图在占位前，
+ * 反之在占位后。afterBlock=-1（开头）与越界（末尾）保持原值：-1 是序列最前、越界
+ * clamp 到末尾，重映射不改变其语义。
  */
 function remapImagePositions(
   images: readonly ModelImage[],
   texts: readonly { text: string; afterBlock?: number | undefined }[],
+  precedingTexts?: readonly number[],
 ): ModelImage[] {
   const positioned = texts.filter((t) => t.afterBlock !== undefined);
   if (positioned.length === 0) return [...images];
@@ -686,16 +720,19 @@ function remapImagePositions(
     const pos = t.afterBlock ?? 0;
     countAt.set(pos, (countAt.get(pos) ?? 0) + 1);
   }
-  return images.map((img) => {
+  return images.map((img, index) => {
     const jp = img.afterBlock;
     if (jp === undefined || jp < 0) return img; // 无位置或开头(-1)：不重映射
-    // 锚定在 -1..jp 的文本总数（含 -1 开头桶，它在最前占据索引、把后续文本块往后推）
+    // 锚点严格小于 jp 的文本总数（含 -1 开头桶，它在最前占据索引、把后续文本块往后推）；
+    // 同锚点 jp 的占位不计入 shift——它们相对图片的先后由 precedingTexts(b) 表达
     let shift = 0;
     for (const [pos, count] of countAt) {
-      if (pos <= jp) shift += count;
+      if (pos < jp) shift += count;
     }
-    if (shift === 0) return img;
-    return { ...img, afterBlock: jp + shift };
+    const before = precedingTexts?.[index] ?? 0;
+    const next = jp + shift + before;
+    if (next === jp) return img;
+    return { ...img, afterBlock: next };
   });
 }
 
@@ -999,7 +1036,8 @@ function historyToMessages(
         byChars.user += blockChars(blocks);
         // r1126n-fix2：占位/说明文本插入使 textParts 索引膨胀，图片 afterBlock 同步
         // 重映射到膨胀后索引，避免适配器按原索引把图片错位到相邻文本块之前。
-        const remappedImages = remapImagePositions(atts.images, atts.texts);
+        // precedingTexts 保留同锚点混合附件（有效图与缺图占位交错）的输入顺序。
+        const remappedImages = remapImagePositions(atts.images, atts.texts, atts.precedingTexts);
         const msg: ModelMessage = {
           role: "user",
           content: blocks,
@@ -1062,7 +1100,7 @@ function historyToMessages(
         // L1 修剪覆盖的工具结果：占位说明原样，附件随正文省略（不加图片占位）
         let content = pruned ? prunedPlaceholder(entry) : entry.modelContent;
         const atts = pruned
-          ? { images: [], texts: [], imageGroups: [], virtualGroups: [] }
+          ? { images: [], precedingTexts: [], texts: [], imageGroups: [], virtualGroups: [] }
           : resolveAttachments(entry.attachments, imgOpts, "tool");
         for (const t of atts.texts) content += `\n${t.text}`;
         // ADR-0063 + ADR-0028：第 warnAt 次连续相同结果的循环说明与清单久未更新提醒
@@ -1614,8 +1652,13 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       ];
       // original 占位/说明按平移后位置穿插进 [MARK, ...original.content]（膨胀 textParts）
       const mergedOriginal = mergeUserBlocks(baseContent, shiftedTexts);
-      // original 图片 afterBlock 同步重映射到膨胀后索引
-      const originalImages = remapImagePositions(shiftedImages, shiftedTexts);
+      // original 图片 afterBlock 同步重映射到膨胀后索引。precedingTexts 是同锚点内的
+      // 前驱占位计数，与绝对位置无关——平移（统一 +1）不改变同锚点相对顺序，故直接沿用。
+      const originalImages = remapImagePositions(
+        shiftedImages,
+        shiftedTexts,
+        originalAtts.precedingTexts,
+      );
       // 插话附件：位置失真，剥掉 afterBlock 后占位/图片都追加末尾
       const steerAtts = resolveAttachments(
         coveredUsers.slice(1).flatMap((e) => (e.kind === "user" ? (e.attachments ?? []) : [])),
@@ -1641,6 +1684,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
       // imageGroups/virtualGroups 统计合并 original + 插话（计数用，不分位置）
       const atts: ResolvedAttachments = {
         images: reinjectedImages,
+        precedingTexts: [...originalAtts.precedingTexts, ...steerAtts.images.map(() => 0)],
         texts: [...originalAtts.texts, ...steerAtts.texts],
         imageGroups: [...originalAtts.imageGroups, ...steerAtts.imageGroups],
         virtualGroups: [...originalAtts.virtualGroups, ...steerAtts.virtualGroups],
