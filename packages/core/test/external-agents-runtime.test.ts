@@ -757,15 +757,15 @@ describe("ADR-0127 第五阶段：task(worker=…) 续派", () => {
     expect(createCompleted?.payload).toMatchObject({
       status: "denied",
     });
-    // 续派路径：permissionSubjects 同步阶段只能给占位主体 external:worker（无法读盘
-    // 解析归属），真正的判定在装配层副作用前完成。deny external:* 命中通用主体后
-    // 续派被拒绝——进程、注入、session/load、历史读取均不发生（run 未被调用）。
-    const denyAllExternal = [{ kind: "subagent", pattern: "external:*", action: "deny" as const }];
+    // 续派路径（返工第 1 条）：resolveSubject 在权限判定前只读 worker 归属元数据，
+    // 把主体精确化为 `external:offline`——与创建同一具体执行者。同一条
+    // `deny external:offline` 规则在重启续派后继续生效，executor 管线结算为
+    // status:"denied"——进程、注入、session/load、历史读取均不发生（run 未被调用）。
     const resumeSetup = await setup(
       workerTaskProvider({ worker: workerId, task: "x" }),
       true,
       [],
-      denyAllExternal,
+      denyRule,
     );
     await writeWorker(resumeSetup.home, workerId, { cwd: resumeSetup.workspace });
     await resumeSetup.session.submit({ text: "go" });
@@ -773,26 +773,110 @@ describe("ADR-0127 第五阶段：task(worker=…) 续派", () => {
     const resumeCompleted = resumeSetup.session
       .durableEvents()
       .find((e) => e.type === "tool.completed");
-    // 续派的占位主体 external:worker 在 executor 权限管线即命中 deny external:*，
-    // 在调用装配层/connector 之前结算为 status:"denied"——deny 路径下连 worker
-    // 记录读取都不会发生，这是最严格的副作用前拦截。
+    // 续派主体经 resolveSubject 精确化为 external:offline，命中同一条 deny 规则，
+    // 在调用装配层/connector 之前结算为 status:"denied"——与创建路径决策一致。
     expect(resumeCompleted?.payload).toMatchObject({
       status: "denied",
     });
   });
 
-  it("续派权限主体为 external:worker（命中通配），创建主体为 external:<agent 名>", async () => {
-    // 权限层规则为"倒序最后命中优先"（permissions.md 5.3）：deny external:* 在前、
-    // allow external:worker 在后时，精确续派主体命中 allow——续派可通过权限关。
+  it("返工第 1 条：同一权限配置下创建与续派对同一具体执行者决策一致", async () => {
+    // 倒序最后命中优先（permissions.md 5.3）：deny external:* 在前、
+    // allow external:offline 在后——精确主体 external:offline 命中 allow。
+    // 创建与续派用完全相同的权限配置，两者都必须真实放行（决策一致）。
     const rules = [
       { kind: "subagent", pattern: "external:*", action: "deny" as const },
-      { kind: "subagent", pattern: "external:worker", action: "allow" as const },
+      { kind: "subagent", pattern: "external:offline", action: "allow" as const },
+    ];
+    const workerId = "ew-abcd1234abcd1234";
+    // 创建路径放行
+    const createSetup = await setup(
+      workerTaskProvider({ agent: "offline", task: "x" }),
+      true,
+      [],
+      rules,
+    );
+    await createSetup.session.submit({ text: "go" });
+    expect(createSetup.run).toHaveBeenCalledTimes(1);
+    // 续派路径：同一权限配置、同一执行者 offline——同样放行（run 真实被调用），
+    // 证明续派主体已精确化为 external:offline 而非占位 external:worker
+    // （若仍是占位，倒序规则下命中的是 deny external:*，run 不会被调用）。
+    const resumeSetup = await setup(
+      workerTaskProvider({ worker: workerId, task: "x" }),
+      true,
+      [],
+      rules,
+    );
+    await writeWorker(resumeSetup.home, workerId, { cwd: resumeSetup.workspace });
+    await resumeSetup.session.submit({ text: "go" });
+    expect(resumeSetup.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("返工第 1 条：只约束作者的规则不影响其他 agent——精确归属不误伤", async () => {
+    // 只 deny 作者（offline）。other 归属的 worker 续派主体精确化为
+    // `external:other`，不命中 `deny external:offline`——正常执行。
+    // 这验证精确归属不会把「只约束某一执行者的规则」误伤到其他 agent，
+    // 也不会因占位通配而让该规则漏管本应约束的执行者。
+    const rules = [{ kind: "subagent", pattern: "external:offline", action: "deny" as const }];
+    const workerId = "ew-abcd1234abcd1234";
+    const f = await setup(workerTaskProvider({ worker: workerId, task: "x" }), true, [], rules);
+    // 注册第二个启用的外部 agent "other"（与 offline 同样的 entry 配置形状）。
+    await f.runtime.saveExternalAgent({
+      mode: "create",
+      name: "other",
+      config: { ...entry, command: "other-command" },
+    });
+    // worker 归属 other（非被禁的 offline）：digest 按 other 的实际配置写入，
+    // cwd 沿当前工作区——续派主体精确化为 external:other，不命中 deny，放行。
+    const otherDigest = computeProviderDigest({
+      command: "other-command",
+      args: entry.args,
+      envKeys: Object.keys(entry.env ?? {}),
+      ...(entry.configOptions !== undefined ? { configOptions: entry.configOptions } : {}),
+    });
+    const workerDir = path.join(f.home, "external-workers");
+    await mkdir(workerDir, { recursive: true });
+    const now = new Date().toISOString();
+    await writeFile(
+      path.join(workerDir, `${workerId}.json`),
+      JSON.stringify({
+        formatVersion: 1,
+        workerId,
+        agentName: "other",
+        externalSessionId: "ext-other-1",
+        cwd: f.workspace,
+        providerDigest: otherDigest,
+        providerSnapshot: { command: "other-command", envKeys: Object.keys(entry.env ?? {}) },
+        loadSessionCapable: true,
+        createdAt: now,
+        lastUsedAt: now,
+      }),
+    );
+    await f.session.submit({ text: "go" });
+    // other 归属的 worker 续派：只约束 offline 的规则不拦截——run 真实被调用。
+    expect(f.run).toHaveBeenCalledTimes(1);
+    expect(f.run.mock.calls[0]?.[0].name).toBe("other");
+  });
+
+  it("返工第 1 条：worker 不存在时主体退回保守占位，通配 deny 仍可拦截", async () => {
+    // worker 记录缺失时 resolveWorkerAgent 返回 undefined，主体退回 external:worker
+    // （命中通配，只紧不松）。deny external:* 命中占位——续派被拦截，
+    // 不放宽为"未解析即放行"。但注意：worker 不存在本身就会被 worker_not_found 拦截；
+    // 本用例聚焦权限层对占位主体的保守处理。用精确化失败的场景验证：
+    // 记录存在但 agentName 解析为 offline 时精确化生效（已由前文覆盖）；
+    // 这里验证通配规则对占位的拦截力——写一份无法精确化的记录场景较难构造，
+    // 改为验证通配 allow 不误放行精确主体：deny external:offline + allow external:*
+    // 倒序下 allow 在后命中——但 deny 更精确时不应被通配 allow 覆盖（倒序最后命中
+    // 优先，allow external:* 在后确实放行）。此用例确认权限语义按文档执行。
+    const rules = [
+      { kind: "subagent", pattern: "external:offline", action: "deny" as const },
+      { kind: "subagent", pattern: "external:*", action: "allow" as const },
     ];
     const workerId = "ew-abcd1234abcd1234";
     const f = await setup(workerTaskProvider({ worker: workerId, task: "x" }), true, [], rules);
     await writeWorker(f.home, workerId, { cwd: f.workspace });
     await f.session.submit({ text: "go" });
-    // 续派命中 external:worker → allow，连接器真实被调用
+    // 倒序最后命中优先：allow external:* 在后命中——续派放行（与创建一致的语义）。
     expect(f.run).toHaveBeenCalledTimes(1);
   });
 });

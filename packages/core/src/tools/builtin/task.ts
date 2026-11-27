@@ -14,6 +14,7 @@ import {
   type SubagentProfileConfig,
 } from "../../protocol/index.js";
 import type { JsonSchema, SubjectRequest } from "../../protocol/index.js";
+import type { PermissionSubject } from "../../protocol/index.js";
 import type {
   ExternalAgentInfo,
   ExternalAgentOutcome,
@@ -69,6 +70,13 @@ const DESCRIPTION =
 /** Core 装配补全工作目录、附件路径和权限回调，工具只负责按输入字段分流。 */
 interface ExternalTaskRunner {
   agents: readonly ExternalAgentInfo[];
+  /**
+   * 按 worker id 解析归属 agent 名（只读 worker 归属元数据，不读外部历史）。
+   * 供权限主体精确化（返工第 1 条）：续派与创建在同一权限层用同一具体执行者
+   * 主体 `subagent external:<agent 名>` 判定。worker 不存在/损坏返回 undefined，
+   * 主体退回保守占位 `external:worker`（命中通配规则，只紧不松）。
+   */
+  resolveWorkerAgent?(workerId: string): Promise<string | undefined>;
   run(
     request:
       | (Pick<ExternalAgentRequest, "agent" | "task" | "timeoutMs"> & {
@@ -306,14 +314,13 @@ export function createTaskTool(
     validateInput,
 
     permissionSubjects(input: TaskInput): SubjectRequest[] {
+      // ADR-0127 第五阶段返工第 1 条：worker 续派主体在同步纯函数阶段无法解析
+      // 精确 agent 名（需异步读盘）。占位 target 编码 worker id 为
+      // `external:worker:<workerId>`——命中通配规则 `subagent external:*` 只紧不松，
+      // 同时让 resolveSubject 在同一管线内无共享状态地提取 worker id 做精确化。
       const target =
         input.worker !== undefined
-          ? // ADR-0127 第五阶段：worker 续派主体无法在权限判定的同步阶段解析出
-            // 精确 agent 名（worker 记录需异步读盘）。用占位后缀 worker 表示
-            // 「worker 续派」这一具体动作——命中通配规则 `subagent external:*`，
-            // 与原外部调用同样默认 ask；用户可写 `subagent external:worker → allow`
-            // 精确放行续派，或写 `subagent external:* → allow` 一并放行。
-            "external:worker"
+          ? `external:worker:${input.worker}`
           : selectedAgent(input) !== undefined
             ? `external:${selectedAgent(input)?.name}`
             : input.tools !== undefined
@@ -322,6 +329,29 @@ export function createTaskTool(
                 profiles.find((profile) => profile.name === input.profile)?.tools ??
                 "general");
       return [{ kind: "subagent", target }];
+    },
+
+    // ADR-0127 第五阶段返工第 1 条：worker 续派主体的精确化。
+    // 执行管线的资源解析步（permissionSubjects 之后、权限判定之前）调用本解析器，
+    // 只读 worker 归属元数据（不读外部历史），把占位 `external:worker:<id>` 改写为
+    // `external:<agent 名>`。worker 不存在/损坏时回退为保守占位 `external:worker`——
+    // 仍命中通配规则可拦截，不放宽；解析失败也只紧不松。创建路径主体已是精确名。
+    resolveSubject: async (request: SubjectRequest): Promise<PermissionSubject> => {
+      if (request.kind !== "subagent" || externalAgents?.resolveWorkerAgent === undefined) {
+        return request;
+      }
+      const prefix = "external:worker:";
+      if (!request.target.startsWith(prefix)) return request;
+      const workerId = request.target.slice(prefix.length);
+      try {
+        const agentName = await externalAgents.resolveWorkerAgent(workerId);
+        if (agentName !== undefined) {
+          return { ...request, target: `external:${agentName}` };
+        }
+      } catch {
+        // 解析失败只紧不松：退回保守占位 external:worker（命中通配，不精确放行）
+      }
+      return { ...request, target: "external:worker" };
     },
 
     async execute(input: TaskInput, ctx: ToolContext): Promise<ToolResult> {

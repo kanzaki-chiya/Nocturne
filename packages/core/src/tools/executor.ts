@@ -77,6 +77,26 @@ export async function resolveSubjects(
       } catch {
         subjects.push({ ...req, appUnresolved: true });
       }
+    } else if (!PATH_KINDS.has(req.kind) && resolver !== undefined) {
+      // 非路径、非 app 主体（如 subagent）：工具可经 resolveSubject 在权限判定前
+      // 异步精确化（ADR-0127 第五阶段返工：task worker 续派把占位 external:worker:<id>
+      // 改写为精确执行者 external:<agent 名>）。解析失败只紧不松——保留原主体，
+      // 通配规则仍可拦截，不放宽为"未解析即放行"。
+      try {
+        subjects.push(await resolver(req));
+      } catch {
+        subjects.push({
+          kind: req.kind,
+          target: req.target,
+          detail: req.detail,
+          shell: req.shell,
+          shellCwd:
+            req.shellCwd === undefined ? undefined : await scope.platform.resolveReal(req.shellCwd),
+          shellRisk: req.shellRisk,
+          shellRiskByDialect: req.shellRiskByDialect,
+          readOnly: req.readOnly,
+        });
+      }
     } else if (PATH_KINDS.has(req.kind)) {
       const resolved = await scope.platform.resolveReal(req.target);
       subjects.push({

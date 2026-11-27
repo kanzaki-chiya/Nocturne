@@ -4118,6 +4118,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         hasExternalAgents && externalConnector !== undefined
           ? {
               agents: agentSnapshot,
+              // ADR-0127 第五阶段返工第 1 条：供 task 工具的 resolveSubject
+              // 在权限判定前把续派主体精确化为 `external:<agent 名>`——
+              // 只读 worker 归属元数据（agentName 字段），不读外部历史，
+              // 不触碰进程/注入/session。worker 不存在/损坏返回 undefined，
+              // 主体保持保守占位（只紧不松）。
+              async resolveWorkerAgent(workerId: string): Promise<string | undefined> {
+                const record = await externalWorkerStore.read(workerId);
+                return record?.agentName;
+              },
               async run(
                 request:
                   | (Pick<ExternalAgentRequest, "agent" | "task" | "timeoutMs"> & {
@@ -4227,12 +4236,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
                     };
                   }
                 }
-                // ADR-0127 第五阶段返工：创建与续派的权限都在执行管线完成——
-                // task 工具的 permissionSubjects 对创建产出精确主体
-                // `subagent external:<agent 名>`、对续派产出通用主体 `subagent external:worker`，
+                // ADR-0127 第五阶段返工（fix2）：创建与续派的权限都在执行管线完成，
+                // 且按同一具体执行者主体判定——task 工具的 permissionSubjects 对创建
+                // 产出 `subagent external:<agent 名>`，对续派先产出占位并经 resolveSubject
+                // 在权限判定前精确化为同一个 `subagent external:<agent 名>`（见 task.ts）。
                 // 两者都经同一权限层的完整判定（deny 在 executor 结算、ask 走交互/审批），
-                // 且在调用本 runner 之前就拦截——进程、注入、session/load、worker 记录读取
-                // 均不发生。本装配层不再重复判定，避免双重结算与状态不一致。
+                // 且在调用本 runner 之前就拦截——进程、注入、session/load 均不发生。
+                // 本装配层不再重复判定，避免双重结算与状态不一致。
                 if (!subagentLimiter.tryAcquire()) {
                   const message = `子代理并发上限已满（${subagentLimits.maxConcurrent}），请稍后重试`;
                   return {
