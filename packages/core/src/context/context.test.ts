@@ -2482,6 +2482,97 @@ describe("图片附件投影（ADR-0023）", () => {
     expect(attachmentsToLoad(many, visionModel)).toHaveLength(20);
     expect(attachmentsToLoad(many, visionModel)[0]?.sha256).toBe("m2");
   });
+
+  it("user 附件带 afterBlock：占位文本穿插到对应文本块之后，图片引用带位置", () => {
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [
+          { type: "text", text: "text A" },
+          { type: "text", text: "text B" },
+          { type: "text", text: "text C" },
+        ],
+        attachments: [
+          { ...att("p1"), afterBlock: 0 },
+          { ...att("p2"), afterBlock: 1 },
+        ],
+      },
+    ];
+    // 不支持看图的模型：占位文本按 afterBlock 穿插，而不是一律堆到末尾
+    const plain = buildContext(baseInput({ history, attachmentData: dataOf("p1", "p2") }));
+    const msg = plain.request.messages[0];
+    const texts = (msg?.role === "user" ? msg.content : []).map((b) => b.text);
+    expect(texts).toEqual([
+      "text A",
+      "[image omitted: current model does not support image input]",
+      "text B",
+      "[image omitted: current model does not support image input]",
+      "text C",
+    ]);
+    // 支持看图的模型：images 引用保留 afterBlock，供适配器穿插进文本流
+    const vision = buildContext(
+      baseInput({ history, model: visionModel, attachmentData: dataOf("p1", "p2") }),
+    );
+    const vmsg = vision.request.messages[0];
+    expect(vmsg?.role === "user" && vmsg.images?.map((i) => i.afterBlock)).toEqual([0, 1]);
+    expect((vmsg?.role === "user" ? vmsg.content : []).map((b) => b.text)).toEqual([
+      "text A",
+      "text B",
+      "text C",
+    ]);
+  });
+
+  it("user 附件无 afterBlock：占位文本追加末尾（旧行为不变）", () => {
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [
+          { type: "text", text: "text A" },
+          { type: "text", text: "text B" },
+        ],
+        attachments: [att("q1")],
+      },
+    ];
+    const built = buildContext(baseInput({ history, attachmentData: dataOf("q1") }));
+    const msg = built.request.messages[0];
+    const texts = (msg?.role === "user" ? msg.content : []).map((b) => b.text);
+    expect(texts).toEqual([
+      "text A",
+      "text B",
+      "[image omitted: current model does not support image input]",
+    ]);
+  });
+
+  it("user 附件混合位置：带位置的穿插、无位置的追加末尾", () => {
+    const history: HistoryEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        turnId: "t",
+        messageId: "u1",
+        content: [
+          { type: "text", text: "text A" },
+          { type: "text", text: "text B" },
+        ],
+        attachments: [{ ...att("r1"), afterBlock: 0 }, att("r2")],
+      },
+    ];
+    const built = buildContext(baseInput({ history, attachmentData: dataOf("r1", "r2") }));
+    const msg = built.request.messages[0];
+    const texts = (msg?.role === "user" ? msg.content : []).map((b) => b.text);
+    expect(texts).toEqual([
+      "text A",
+      "[image omitted: current model does not support image input]",
+      "text B",
+      "[image omitted: current model does not support image input]",
+    ]);
+  });
 });
 
 describe("history 细分（ADR-0046 第 5 节）", () => {

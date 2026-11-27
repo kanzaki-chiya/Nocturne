@@ -229,9 +229,9 @@ describe("ACP Agent 协议与能力契约（ADR-0120 §1–3）", () => {
     expect(res.agentCapabilities).toEqual({
       loadSession: true,
       promptCapabilities: {
-        image: false,
+        image: true,
         audio: false,
-        embeddedContext: false,
+        embeddedContext: true,
       },
       mcpCapabilities: {
         http: true,
@@ -2396,5 +2396,217 @@ describe("ask_user 提问 - 补强场景（ADR-0127 第三阶段）", () => {
       prompt: [{ type: "text", text: "继续" }],
     });
     expect(r2.stopReason).toBe("end_turn");
+  });
+});
+
+describe("图片与文本附件（ADR-0127 第四阶段）", () => {
+  const PNG_B64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+  function imageModelEntry(model: string, imageInput: boolean): ModelInfo {
+    return {
+      ref: { provider: "fake", model },
+      contextWindow: 128_000,
+      maxOutputTokens: 8_192,
+      capabilities: {
+        toolCalls: true,
+        parallelToolCalls: true,
+        reasoning: "none",
+        imageInput,
+        promptCache: false,
+        editTool: "edit",
+        historyPrune: true,
+      },
+    };
+  }
+
+  async function startAttachmentHarness(options: { imageInput: boolean }) {
+    const provider = new FakeProvider({
+      models: [imageModelEntry("fake-1", options.imageInput)],
+      scripts: [textScript("ok")],
+    });
+    const rt = await createRuntime({
+      cwd: workspaceA,
+      providers: [provider],
+      interactive: true,
+      sessionsDir: path.join(tempRoot, `sess-att-${Math.random().toString(36).slice(2, 8)}`),
+    });
+    const pair = createPairStreams();
+    const server = createAcpAgentServer({
+      runtime: rt,
+      platform: createPlatform(),
+      version: "0.67.0-test",
+      resolveModel: async () => "fake/fake-1",
+    });
+    const served = server.serve(pair.agentStream);
+    cleanups.push(async () => {
+      pair.closeClientInput();
+      await served;
+      await rt.close();
+    });
+    const cliApp = client({ name: "test-host-att" }).onNotification(
+      methods.client.session.update,
+      () => undefined,
+    );
+    const conn = cliApp.connect(pair.clientStream);
+    cleanups.push(async () => {
+      conn.close();
+    });
+    await conn.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    return { conn, provider };
+  }
+
+  it("混合文本与图片保持顺序：content 块按序、images 携带 afterBlock 位置", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    const res = await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [
+        { type: "text", text: "text A" },
+        { type: "image", data: PNG_B64, mimeType: "image/png" },
+        { type: "text", text: "text B" },
+        { type: "image", data: PNG_B64, mimeType: "image/png" },
+        { type: "text", text: "text C" },
+      ],
+    });
+    expect(res).toEqual({ stopReason: "end_turn" });
+    // 中性请求：最后一条 user 消息的 content 块按 textA/B/C 顺序，
+    // images 两张各带 afterBlock（image1 在块0 textA 后、image2 在块1 textB 后）
+    const req = h.provider.requests.find((r) =>
+      r.messages.some(
+        (m) =>
+          m.role === "user" &&
+          m.content.some((b) => b.type === "text" && b.text.includes("text A")),
+      ),
+    );
+    expect(req).toBeDefined();
+    const userMsg = req?.messages.filter((m) => m.role === "user").at(-1);
+    expect(userMsg?.role).toBe("user");
+    if (userMsg?.role !== "user") throw new Error("unreachable");
+    const texts = userMsg.content.filter((b) => b.type === "text").map((b) => b.text);
+    expect(texts).toEqual(["text A", "text B", "text C"]);
+    const images = userMsg.images ?? [];
+    expect(images.length).toBe(2);
+    expect(images[0]?.afterBlock).toBe(0);
+    expect(images[1]?.afterBlock).toBe(1);
+    expect(images[0]?.mimeType).toBe("image/png");
+    expect(images[0]?.data).toBe(PNG_B64);
+  });
+
+  it("内嵌文本资源转为有序 resource 快照块", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [
+        { type: "text", text: "before" },
+        {
+          type: "resource",
+          resource: {
+            uri: "file:///src/a.ts",
+            text: "const x = 1;",
+            mimeType: "text/x-typescript",
+          },
+        },
+        { type: "text", text: "after" },
+      ],
+    });
+    const req = h.provider.requests.find((r) =>
+      r.messages.some(
+        (m) => m.role === "user" && m.content.some((b) => b.text.includes("const x = 1;")),
+      ),
+    );
+    const userMsg = req?.messages.filter((m) => m.role === "user").at(-1);
+    if (userMsg?.role !== "user") throw new Error("unreachable");
+    const texts = userMsg.content.filter((b) => b.type === "text").map((b) => b.text);
+    expect(texts[0]).toBe("before");
+    expect(texts[1]).toContain('<resource uri="file:///src/a.ts">');
+    expect(texts[1]).toContain("const x = 1;");
+    expect(texts[2]).toBe("after");
+  });
+
+  it("resource_link 保留链接语义，不抓取 URL 或文件", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    await h.conn.agent.request(methods.agent.session.prompt, {
+      sessionId,
+      prompt: [
+        { type: "text", text: "看这里" },
+        { type: "resource_link", uri: "https://example.com/doc", name: "doc", title: "文档" },
+      ],
+    });
+    const req = h.provider.requests.find((r) =>
+      r.messages.some((m) => m.role === "user" && m.content.some((b) => b.text.includes("看这里"))),
+    );
+    const userMsg = req?.messages.filter((m) => m.role === "user").at(-1);
+    if (userMsg?.role !== "user") throw new Error("unreachable");
+    const texts = userMsg.content.filter((b) => b.type === "text").map((b) => b.text);
+    // 链接语义：markdown 链接文本，不是抓取来的内容
+    expect(texts.some((t) => t.includes("[文档](https://example.com/doc)"))).toBe(true);
+  });
+
+  it("模型不支持图片输入时明确拒绝（image_input_unsupported），不提交残缺消息", async () => {
+    const h = await startAttachmentHarness({ imageInput: false });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    const before = h.provider.requests.length;
+    await expect(
+      h.conn.agent.request(methods.agent.session.prompt, {
+        sessionId,
+        prompt: [
+          { type: "text", text: "带图" },
+          { type: "image", data: PNG_B64, mimeType: "image/png" },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      code: -32602,
+      data: expect.objectContaining({ code: "image_input_unsupported" }),
+    });
+    // 部分失败不提交：没有发出任何主推理请求
+    expect(h.provider.requests.length).toBe(before);
+  });
+
+  it("audio 内容块明确拒绝", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    await expect(
+      h.conn.agent.request(methods.agent.session.prompt, {
+        sessionId,
+        prompt: [{ type: "audio", data: "AAAA", mimeType: "audio/wav" }],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+  });
+
+  it("非图片内嵌二进制资源明确拒绝", async () => {
+    const h = await startAttachmentHarness({ imageInput: true });
+    const { sessionId } = (await h.conn.agent.request(methods.agent.session.new, {
+      cwd: workspaceA,
+      mcpServers: [],
+    })) as { sessionId: string };
+    await expect(
+      h.conn.agent.request(methods.agent.session.prompt, {
+        sessionId,
+        prompt: [
+          {
+            type: "resource",
+            resource: { uri: "file:///a.bin", blob: "AAAA", mimeType: "application/octet-stream" },
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
   });
 });

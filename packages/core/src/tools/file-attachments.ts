@@ -16,7 +16,9 @@ export function validateAttachmentInputs(inputs: AttachmentInput[]): string | un
       !(input.data instanceof Uint8Array) ||
       typeof input.mimeType !== "string" ||
       (input.label !== undefined && typeof input.label !== "string") ||
-      (input.source !== undefined && !["paste", "upload", "answer"].includes(input.source))
+      (input.source !== undefined && !["paste", "upload", "answer"].includes(input.source)) ||
+      (input.afterBlock !== undefined &&
+        (!Number.isInteger(input.afterBlock) || input.afterBlock < 0))
     )
       return "附件参数无效";
     const sniffed = sniffImageMime(input.data);
@@ -49,7 +51,10 @@ export async function saveInputAttachments(
       (input.mimeType === mimeType || input.mimeType === "application/octet-stream");
     if (mimeMatches && size !== undefined) {
       try {
-        attachments.push(await store.save({ ...input, mimeType, source: "paste", signal }));
+        const saved = await store.save({ ...input, mimeType, source: "paste", signal });
+        attachments.push(
+          input.afterBlock !== undefined ? { ...saved, afterBlock: input.afterBlock } : saved,
+        );
         continue;
       } catch (err) {
         if (signal?.aborted) throw err;

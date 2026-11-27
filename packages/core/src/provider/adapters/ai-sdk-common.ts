@@ -91,10 +91,36 @@ export function toAiMessages(
     switch (m.role) {
       case "user": {
         flushToolImages();
-        const content: (TextPart | FilePart)[] = m.content
+        const textParts = m.content
           .filter((c): c is Extract<ContentBlock, { type: "text" }> => c.type === "text")
           .map((c) => ({ type: "text" as const, text: c.text }));
-        for (const img of m.images ?? []) content.push(toFilePart(img));
+        // ADR-0127 第四阶段：带 afterBlock 的图片穿插到对应文本块之后，
+        // 不默认把图片移到所有文字后面；无位置信息的图片沿用末尾追加。
+        const images = m.images ?? [];
+        const positioned = images.some((img) => img.afterBlock !== undefined);
+        const content: (TextPart | FilePart)[] = [];
+        if (!positioned) {
+          content.push(...textParts);
+          for (const img of images) content.push(toFilePart(img));
+        } else {
+          const trailing = images.filter((img) => img.afterBlock === undefined);
+          const byPosition = new Map<number, ModelImage[]>();
+          for (const img of images) {
+            if (img.afterBlock === undefined) continue;
+            const pos = Math.min(img.afterBlock, textParts.length - 1);
+            const bucket = byPosition.get(pos) ?? [];
+            bucket.push(img);
+            byPosition.set(pos, bucket);
+          }
+          for (const [index, part] of textParts.entries()) {
+            content.push(part);
+            const inserted = byPosition.get(index);
+            if (inserted !== undefined) {
+              for (const img of inserted) content.push(toFilePart(img));
+            }
+          }
+          for (const img of trailing) content.push(toFilePart(img));
+        }
         out.push({ role: "user", content });
         break;
       }

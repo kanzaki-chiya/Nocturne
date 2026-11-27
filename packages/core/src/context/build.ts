@@ -559,15 +559,23 @@ function resolveAttachment(
       opts.missing?.push(att);
       return { text: IMAGE_PLACEHOLDER_MISSING };
     }
-    resolved.push({ mimeType: item.mimeType, data });
+    resolved.push({
+      mimeType: item.mimeType,
+      data,
+      ...(att.afterBlock !== undefined ? { afterBlock: att.afterBlock } : {}),
+    });
   }
   return { images: resolved };
 }
 
 interface ResolvedAttachments {
   images: ModelImage[];
-  /** 占位/标记或分段说明文本（调用方按消息类型落位：user 追加 text 块，tool 追加到 content） */
-  texts: string[];
+  /**
+   * 占位/标记或分段说明文本（调用方按消息类型落位：user 追加 text 块，tool 追加到 content）。
+   * afterBlock 与来源附件一致：有位置信息时 user 投影把它穿插到对应文本块之后，
+   * 而不是一律追加到末尾（ADR-0127 第四阶段保序）。
+   */
+  texts: { text: string; afterBlock?: number | undefined }[];
   imageGroups: ImageGroupInfo[];
   virtualGroups: ImageGroupInfo[];
 }
@@ -584,23 +592,61 @@ function resolveAttachments(
     if (att === undefined) continue;
     const r = resolveAttachment(att, opts);
     const noteText = role === "user" ? formatTiledUserImageNote(att, i, list.length) : undefined;
+    const pos = att.afterBlock;
     if (r.images !== undefined) {
-      if (noteText !== undefined) out.texts.push(noteText);
+      if (noteText !== undefined) out.texts.push({ text: noteText, afterBlock: pos });
       out.images.push(...r.images);
       out.imageGroups.push({
         count: r.images.length,
         ...(noteText !== undefined ? { noteText } : {}),
       });
     } else if (r.text !== undefined) {
-      out.texts.push(r.text);
+      out.texts.push({ text: r.text, afterBlock: pos });
     } else if (r.virtualCount !== undefined) {
-      if (noteText !== undefined) out.texts.push(noteText);
+      if (noteText !== undefined) out.texts.push({ text: noteText, afterBlock: pos });
       out.virtualGroups.push({
         count: r.virtualCount,
         ...(noteText !== undefined ? { noteText } : {}),
       });
     }
   }
+  return out;
+}
+
+/**
+ * user 消息附件占位/说明文本的落位归并（ADR-0127 第四阶段保序）。
+ * - afterBlock undefined → 追加到全部内容块之后（旧行为，read/mcp 工具结果与
+ *   无位置信息的旧附件一致）；
+ * - afterBlock N → 插入到 content[N] 之后；同一位置的文本保持附件提交顺序；
+ * - 越界位置 clamp 到末尾。
+ * 图片本身不进 content（中性请求里走 images 通道），这里只归并文本占位/说明。
+ */
+function mergeUserBlocks(
+  content: readonly ContentBlock[],
+  texts: readonly { text: string; afterBlock?: number | undefined }[],
+): ContentBlock[] {
+  const trailing = texts.filter((t) => t.afterBlock === undefined);
+  const positioned = texts.filter((t) => t.afterBlock !== undefined);
+  if (positioned.length === 0) {
+    return [...content, ...trailing.map((t) => ({ type: "text" as const, text: t.text }))];
+  }
+  // 按位置分桶（保持提交顺序）；位置相对原始 content 块索引计算
+  const byPosition = new Map<number, string[]>();
+  for (const t of positioned) {
+    const pos = Math.min(t.afterBlock ?? 0, content.length - 1);
+    const bucket = byPosition.get(pos) ?? [];
+    bucket.push(t.text);
+    byPosition.set(pos, bucket);
+  }
+  const out: ContentBlock[] = [];
+  for (const [index, block] of content.entries()) {
+    out.push(block);
+    const inserted = byPosition.get(index);
+    if (inserted !== undefined) {
+      for (const text of inserted) out.push({ type: "text", text });
+    }
+  }
+  for (const t of trailing) out.push({ type: "text", text: t.text });
   return out;
 }
 
@@ -900,10 +946,7 @@ function historyToMessages(
       case "user": {
         // ADR-0023：附件按能力投影——images / 占位 text 块 / 估算计数
         const atts = resolveAttachments(entry.attachments, imgOpts, "user");
-        const blocks: ContentBlock[] = [
-          ...entry.content,
-          ...atts.texts.map((text) => ({ type: "text" as const, text })),
-        ];
+        const blocks: ContentBlock[] = mergeUserBlocks(entry.content, atts.texts);
         byChars.user += blockChars(blocks);
         const msg: ModelMessage = {
           role: "user",
@@ -969,7 +1012,7 @@ function historyToMessages(
         const atts = pruned
           ? { images: [], texts: [], imageGroups: [], virtualGroups: [] }
           : resolveAttachments(entry.attachments, imgOpts, "tool");
-        for (const text of atts.texts) content += `\n${text}`;
+        for (const t of atts.texts) content += `\n${t.text}`;
         // ADR-0063 + ADR-0028：第 warnAt 次连续相同结果的循环说明与清单久未更新提醒
         // （均不写事件，由持久事件重建；位置固定在这条工具结果末尾，修剪后同样保留；
         // 同时出现时循环说明在前、清单提醒在后）
@@ -1501,7 +1544,9 @@ export function buildContext(input: BuildContextInput): BuiltContext {
         { type: "text", text: REINJECTED_TASK_MARK },
         ...original.content,
         ...steers,
-        ...atts.texts.map((text) => ({ type: "text" as const, text })),
+        // 重注入消息在原始 content 前插入了固定说明块，附件的 afterBlock 位置
+        // 相对原始消息已失真；这条压缩后的边缘路径把占位/说明文本追加到末尾。
+        ...atts.texts.map((t) => ({ type: "text" as const, text: t.text })),
       ];
       const msg: ModelMessage = {
         role: "user",

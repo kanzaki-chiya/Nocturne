@@ -1517,6 +1517,210 @@ describe("nctrn acp 真实 CLI 子进程集成（ADR-0120 §4 第 1 项）", () 
     expect((await child.exit).code).toBe(0);
     assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
   }, 60_000);
+
+  it("混合图片与文本附件：真实 provider 请求按 text A/image1/text B/image2/text C 顺序投影", async () => {
+    // 1x1 PNG（与 page-comments 测试同源的有效字节）
+    const PNG_B64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+    const ws = makeTempDir("nctrn-acp-mixed-");
+    const child = spawnAcpCli({
+      modelsConfig: {
+        "e2e-model": {
+          contextWindow: 128_000,
+          maxOutputTokens: 4096,
+          capabilities: { imageInput: true },
+        },
+      },
+    });
+    providerHandler = () => ({ textParts: ["mixed-reply"] });
+    await child.request("initialize", { protocolVersion: 1 });
+    const { sessionId } = await child.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [],
+    });
+
+    providerRequests.length = 0;
+    const res = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId,
+      prompt: [
+        { type: "text", text: "text A" },
+        { type: "image", data: PNG_B64, mimeType: "image/png" },
+        { type: "text", text: "text B" },
+        { type: "image", data: PNG_B64, mimeType: "image/png" },
+        { type: "text", text: "text C" },
+      ],
+    });
+    expect(res).toEqual({ stopReason: "end_turn" });
+
+    // 找到携带本轮输入的主推理请求（带 tools；标题生成请求不带 tools 须排除），
+    // 断言 user 消息 content parts 的交错顺序
+    const req = providerRequests.find(
+      (r) => toolNamesOf(r).length > 0 && latestUserText(r).includes("text A"),
+    );
+    expect(req).toBeDefined();
+    const userMsg = messagesOf(req as RecordedProviderRequest)
+      .filter((m) => m.role === "user")
+      .at(-1);
+    expect(userMsg).toBeDefined();
+    // 多 part 时 openai-compatible 序列化为数组；逐 part 断言类型与顺序
+    const content = userMsg?.content;
+    expect(Array.isArray(content)).toBe(true);
+    const parts = content as { type?: string; text?: string; image_url?: { url?: string } }[];
+    const shape = parts.map((p) => {
+      if (p.type === "text") return `text:${p.text ?? ""}`;
+      if (p.type === "image_url") return "image";
+      return `other:${String(p.type)}`;
+    });
+    expect(shape).toEqual(["text:text A", "image", "text:text B", "image", "text:text C"]);
+    // 图片内容指纹：data URL 携带 PNG base64
+    const imageUrls = parts
+      .filter((p) => p.type === "image_url")
+      .map((p) => p.image_url?.url ?? "");
+    expect(imageUrls.length).toBe(2);
+    for (const url of imageUrls) {
+      expect(url.startsWith("data:image/png;base64,")).toBe(true);
+      expect(url).toContain(PNG_B64);
+    }
+
+    child.closeStdin();
+    expect((await child.exit).code).toBe(0);
+    assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
+  }, 60_000);
+
+  it("附件错误与边界：不支持模型/坏 base64/非图片二进制明确拒绝且不提交残缺，两会话隔离", async () => {
+    const PNG_B64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+    const ws = makeTempDir("nctrn-acp-att-err-");
+    // vision-model 支持图片；plain 默认不支持
+    const child = spawnAcpCli({
+      modelsConfig: {
+        "e2e-model": { contextWindow: 128_000, maxOutputTokens: 4096 },
+        "vision-model": {
+          contextWindow: 128_000,
+          maxOutputTokens: 4096,
+          capabilities: { imageInput: true },
+        },
+      },
+    });
+    providerHandler = () => ({ textParts: ["att-reply"] });
+    await child.request("initialize", { protocolVersion: 1 });
+
+    // ══ 会话一：默认 e2e-model 不支持图片 → image_input_unsupported，不提交残缺 ══
+    const s1 = await child.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [],
+    });
+    await child.request("session/set_config_option", {
+      sessionId: s1.sessionId,
+      configId: "model",
+      value: "scripted/e2e-model",
+    });
+    providerRequests.length = 0;
+    await expect(
+      child.request("session/prompt", {
+        sessionId: s1.sessionId,
+        prompt: [
+          { type: "text", text: "带图" },
+          { type: "image", data: PNG_B64, mimeType: "image/png" },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      code: -32602,
+      data: expect.objectContaining({ code: "image_input_unsupported" }),
+    });
+    // 部分失败不提交：未发出任何带 tools 的主推理请求
+    expect(providerRequests.filter((r) => toolNamesOf(r).length > 0).length).toBe(0);
+
+    // 坏 base64 / 空图片 / 非图片二进制资源：均 -32602 且不提交
+    await expect(
+      child.request("session/prompt", {
+        sessionId: s1.sessionId,
+        prompt: [{ type: "image", data: "", mimeType: "image/png" }],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    await expect(
+      child.request("session/prompt", {
+        sessionId: s1.sessionId,
+        prompt: [
+          {
+            type: "resource",
+            resource: { uri: "file:///a.bin", blob: "AAAA", mimeType: "application/octet-stream" },
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+    await expect(
+      child.request("session/prompt", {
+        sessionId: s1.sessionId,
+        prompt: [{ type: "audio", data: "AAAA", mimeType: "audio/wav" }],
+      }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    // ══ 会话二：vision-model 支持图片 → 内嵌文本资源保序进入请求 ══
+    const s2 = await child.request<{ sessionId: string }>("session/new", {
+      cwd: ws,
+      mcpServers: [],
+    });
+    await child.request("session/set_config_option", {
+      sessionId: s2.sessionId,
+      configId: "model",
+      value: "scripted/vision-model",
+    });
+    providerRequests.length = 0;
+    const r2 = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId: s2.sessionId,
+      prompt: [
+        { type: "text", text: "EMBED-START" },
+        {
+          type: "resource",
+          resource: {
+            uri: "file:///src/snippet.ts",
+            text: "SNIPPET-BODY-42",
+            mimeType: "text/x-typescript",
+          },
+        },
+        { type: "text", text: "EMBED-END" },
+      ],
+    });
+    expect(r2).toEqual({ stopReason: "end_turn" });
+    const embedReq = providerRequests.find(
+      (r) => toolNamesOf(r).length > 0 && latestUserText(r).includes("EMBED-START"),
+    );
+    expect(embedReq).toBeDefined();
+    const embedUser = messagesOf(embedReq as RecordedProviderRequest)
+      .filter((m) => m.role === "user")
+      .at(-1);
+    const embedText = messageText(embedUser?.content);
+    // 内嵌文本资源快照进入请求（保序：START 在 snippet 前、END 在后）
+    expect(embedText).toContain("SNIPPET-BODY-42");
+    expect(embedText.indexOf("EMBED-START")).toBeLessThan(embedText.indexOf("SNIPPET-BODY-42"));
+    expect(embedText.indexOf("SNIPPET-BODY-42")).toBeLessThan(embedText.indexOf("EMBED-END"));
+
+    // ══ 两会话隔离：会话一（e2e-model）仍不支持图片，不受会话二切模型影响 ══
+    providerRequests.length = 0;
+    await expect(
+      child.request("session/prompt", {
+        sessionId: s1.sessionId,
+        prompt: [
+          { type: "text", text: "s1-again" },
+          { type: "image", data: PNG_B64, mimeType: "image/png" },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      data: expect.objectContaining({ code: "image_input_unsupported" }),
+    });
+    expect(providerRequests.filter((r) => toolNamesOf(r).length > 0).length).toBe(0);
+    // 会话二纯文本下一轮正常（会话隔离互不干扰）
+    const r2b = await child.request<{ stopReason: string }>("session/prompt", {
+      sessionId: s2.sessionId,
+      prompt: [{ type: "text", text: "s2-plain-next" }],
+    });
+    expect(r2b).toEqual({ stopReason: "end_turn" });
+
+    child.closeStdin();
+    expect((await child.exit).code).toBe(0);
+    assertAllStdoutLinesValidJsonRpc(child.stdoutLines);
+  }, 60_000);
 });
 
 describe("session/load 真实进程 A/B 交接（ADR-0127 第二阶段）", () => {

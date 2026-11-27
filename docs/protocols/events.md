@@ -273,6 +273,7 @@ type ImageAttachment = {
   label?: string            // 人读名（如原始文件名）
   source: "paste" | "read" | "mcp"   // 附件来源
   processed?: ProcessedImage[]       // 可选（ADR-0090）：自动缩小或长图切段结果；旧日志缺省，不提升 formatVersion
+  afterBlock?: number         // 可选（ADR-0127 第四阶段）：交错位置提示——该图片应插入所属 user 消息 content 文本块序列第 N 块（0-based）之后；缺省 = 末尾追加。仅用户提交保序场景设置，read/mcp 工具结果图不使用；兼容扩展，旧版本忽略，不提升 formatVersion
 }
 
 /** ask_user 提问条目（ADR-0032 §1）；字段边界与校验规则
@@ -324,7 +325,7 @@ ADR-0061：`message.assistant.protocol` 可为 `gemini`。正文与推理块的 
 
 | 命令 | 前置条件 | 效果事件 | 实现阶段 |
 |---|---|---|---|
-| `submit({ text?, content?, attachments?, skill?, delegate?, workMode?, pageComments?, quotes? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label? }[]`，由 Core 校验并落盘；文本中的 `@文件` 由 Core 读取并固定为快照；`skill` 与 `delegate` 互斥，点名 agent 必须已启用、任务必须非空，否则 `invalid_command` 且不写 Turn 事件；`workMode` 与两者互斥、正文不得为空、子会话不可用，否则同样 `invalid_command`（ADR-0076）；`pageComments` 为面板页面评论（ADR-0113），允许正文为空，由 Core 校验、对无文字评论且支持图片输入的模型按图片附件保存局部截图，并在末尾追加 `<page-comments>` 文本块；`quotes` 为对话文字引用（[ADR-0116](../decisions/ADR-0116-quote-reply.md)），允许正文为空，由 Core 校验并在 `content` 最前面写入 `> ` 引用文本块 | `turn.started`、`message.user`（含 `attachments`、`fileRefs`、`pageComments`、`quotes` 及可选调用快照）、…… | 图片见 ADR-0023、ADR-0040；文件引用见 ADR-0033；外部点名见 ADR-0049；页面评论见 ADR-0113；引用回复见 ADR-0116 |
+| `submit({ text?, content?, attachments?, skill?, delegate?, workMode?, pageComments?, quotes? })` | 会话空闲，否则返回 `session_busy`；`attachments` 是可选的 `{ data, mimeType, label?, afterBlock? }[]`，由 Core 校验并落盘；文本中的 `@文件` 由 Core 读取并固定为快照；`skill` 与 `delegate` 互斥，点名 agent 必须已启用、任务必须非空，否则 `invalid_command` 且不写 Turn 事件；`workMode` 与两者互斥、正文不得为空、子会话不可用，否则同样 `invalid_command`（ADR-0076）；`pageComments` 为面板页面评论（ADR-0113），允许正文为空，由 Core 校验、对无文字评论且支持图片输入的模型按图片附件保存局部截图，并在末尾追加 `<page-comments>` 文本块；`quotes` 为对话文字引用（[ADR-0116](../decisions/ADR-0116-quote-reply.md)），允许正文为空，由 Core 校验并在 `content` 最前面写入 `> ` 引用文本块 | `turn.started`、`message.user`（含 `attachments`、`fileRefs`、`pageComments`、`quotes` 及可选调用快照）、…… | 图片见 ADR-0023、ADR-0040；文件引用见 ADR-0033；外部点名见 ADR-0049；页面评论见 ADR-0113；引用回复见 ADR-0116 |
 | `enqueueInput(mode, input)` | `mode` 为 `"steer" \| "queue"`，否则 `invalid_command`（`"subagent"` 只由 Runtime 写入，见 ADR-0073）；子会话返回 `invalid_command`；`steer` 带 `workMode` 返回 `invalid_command`（ADR-0076）；Turn 运行中入列（返回 `{ id, queued: true }`），空闲时等同 `submit`（返回 `queued: false`，`id` 只是对齐标记）；暂停中提交追加到队尾并恢复 | 入列时 `input.pending`（临时）；插话在安全点写 `message.user(steer: true)`，排队在 `done` 后开新 Turn 写普通 `message.user` | ADR-0070 |
 | `updateInput(id, { mode?, input?: { text? } })` | 条目仍在列表中；已被消费返回 `input_consumed` | `input.pending`（临时） | ADR-0070；只替换文本，附件、`@` 引用与技能、执行方式快照随原提交保留；带 `workMode` 的条目不能切成插话、文本不能改成空，否则 `invalid_command`（ADR-0076） |
 | `cancelInput(id)` | 条目仍在列表中；已被消费返回 `input_consumed` | `input.pending`（临时） | ADR-0070 |

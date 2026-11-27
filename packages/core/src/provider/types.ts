@@ -117,6 +117,12 @@ export interface ModelImage {
   mimeType: ImageMimeType;
   /** base64 编码的图片字节 */
   data: string;
+  /**
+   * 交错位置提示（ADR-0127 第四阶段）：仅 user 消息。该图片在 content 文本块
+   * 序列中应插入到第 N 个块（0-based）之后；undefined = 追加到全部文本之后。
+   * 适配器据此把图片部件穿插进有序 content parts，而不是一律堆到末尾。
+   */
+  afterBlock?: number | undefined;
 }
 
 export type ModelMessage =

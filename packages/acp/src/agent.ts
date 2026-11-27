@@ -369,33 +369,126 @@ function translateHostMcpServers(
   };
 }
 
-function extractPromptText(blocks: readonly AcpContentBlock[]): string {
+/** ACP prompt 转换结果：保序的 Core content 文本块与图片附件（带交错位置）。 */
+interface ConvertedPrompt {
+  content: { type: "text"; text: string }[];
+  attachments: {
+    data: Uint8Array;
+    mimeType: string;
+    label?: string | undefined;
+    source?: "paste" | "upload" | "answer" | undefined;
+    afterBlock?: number | undefined;
+  }[];
+  /** 是否含图片内容（用于模型能力校验与 promptCapabilities 一致性） */
+  hasImages: boolean;
+}
+
+/**
+ * 把 ACP prompt 内容块数组转换为 Core SubmitInput（ADR-0127 第四阶段）。
+ *
+ * 保序规则：
+ * - text 块原样进 content（保持相对顺序）；
+ * - image 块落 attachments，afterBlock 记录它应插入到第几个文本块之后——
+ *   投影与适配器据此把图片穿插进文本流，而不是一律堆到末尾；
+ * - resource（内嵌文本）转为 `<resource>` 快照文本块，保持位置；
+ * - resource_link 保留链接语义（`[title](uri)` 文本），不抓取 URL 或文件，
+ *   不绕开既有文件读取权限；
+ * - audio 与 resource 的非图片二进制明确拒绝（不提交残缺消息）。
+ *
+ * 失败关闭：任何块无法解码或类型不支持，整体抛错——不会产生部分提交。
+ */
+function convertPromptBlocks(blocks: readonly AcpContentBlock[]): ConvertedPrompt {
   if (blocks.length === 0) {
     throw RequestError.invalidParams(undefined, "prompt 内容不能为空");
   }
-  const parts: string[] = [];
+  const content: { type: "text"; text: string }[] = [];
+  const attachments: ConvertedPrompt["attachments"] = [];
+  // 当前应把图片插入到其后的文本块索引：取当前已产出文本块的末位。
+  // 尚无文本块时（图片在开头）插入到位置 0 之前——用 0 并依赖投影的 clamp。
+  const currentTextIndex = (): number => Math.max(0, content.length - 1);
+
+  const decodeBase64 = (b64: string, kind: string): Uint8Array => {
+    try {
+      return new Uint8Array(Buffer.from(b64, "base64"));
+    } catch {
+      throw RequestError.invalidParams({ contentType: kind }, `${kind} 内容块的 base64 无法解码`);
+    }
+  };
+
+  const pushImage = (
+    data: Uint8Array,
+    mimeType: string,
+    label: string | undefined,
+    uri?: string | null,
+  ): void => {
+    if (data.byteLength === 0) {
+      throw RequestError.invalidParams({ contentType: "image" }, "图片内容块为空");
+    }
+    attachments.push({
+      data,
+      mimeType,
+      ...(label !== undefined ? { label } : {}),
+      source: "upload",
+      afterBlock: currentTextIndex(),
+      // uri 仅作展示标签来源，不触发任何抓取
+      ...(uri != null && label === undefined ? { label: uri } : {}),
+    });
+  };
+
   for (const block of blocks) {
     switch (block.type) {
       case "text":
-        parts.push(block.text);
+        content.push({ type: "text", text: block.text });
         break;
+      case "image": {
+        const bytes = decodeBase64(block.data, "image");
+        pushImage(bytes, block.mimeType, undefined, block.uri);
+        break;
+      }
       case "resource_link": {
         const label = block.title ?? block.name;
-        parts.push(label ? `[${label}](${block.uri})` : block.uri);
+        content.push({
+          type: "text",
+          text: label ? `[${label}](${block.uri})` : block.uri,
+        });
+        break;
+      }
+      case "resource": {
+        const resource = block.resource;
+        if ("text" in resource) {
+          // 内嵌文本资源：快照为文本块，保持顺序；uri/name 仅作标注
+          const name = resource.uri;
+          content.push({
+            type: "text",
+            text: `<resource uri="${name}">\n${resource.text}\n</resource>`,
+          });
+        } else {
+          // 内嵌二进制资源：图片进附件通道；其他类型不支持
+          const mime = resource.mimeType ?? "application/octet-stream";
+          if (!mime.startsWith("image/")) {
+            throw RequestError.invalidParams(
+              { contentType: "resource", mimeType: mime },
+              `内嵌二进制资源仅支持图片，不支持 ${mime}`,
+            );
+          }
+          const bytes = decodeBase64(resource.blob, "resource");
+          pushImage(bytes, mime, undefined, resource.uri);
+        }
         break;
       }
       default:
         throw RequestError.invalidParams(
-          { unsupportedContentType: block.type },
-          `当前仅支持文本输入，不支持 ${block.type} 内容块`,
+          { unsupportedContentType: (block as { type?: unknown }).type },
+          `不支持 ${String((block as { type?: unknown }).type)} 内容块（当前支持文本、图片与内嵌文本资源）`,
         );
     }
   }
-  const joined = parts.join("\n");
-  if (joined.trim().length === 0) {
-    throw RequestError.invalidParams(undefined, "prompt 文本不能为空");
+
+  const hasText = content.some((b) => b.text.trim().length > 0);
+  if (!hasText && attachments.length === 0) {
+    throw RequestError.invalidParams(undefined, "prompt 内容不能为空");
   }
-  return joined;
+  return { content, attachments, hasImages: attachments.length > 0 };
 }
 
 function isAbsolutePath(platform: Platform, raw: string): boolean {
@@ -1585,9 +1678,13 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       agentCapabilities: {
         loadSession: true,
         promptCapabilities: {
-          image: false,
+          // ADR-0127 第四阶段：agent 接受图片与内嵌上下文内容块。
+          // 图片是否真正发给模型取决于会话模型的 imageInput 能力——
+          // 不支持时 session/prompt 明确拒绝（image_input_unsupported），
+          // 不降级丢弃、不提交残缺消息。audio 不支持。
+          image: true,
           audio: false,
-          embeddedContext: false,
+          embeddedContext: true,
         },
         mcpCapabilities: {
           http: true,
@@ -2101,7 +2198,21 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
       );
     }
 
-    const promptText = extractPromptText(params.prompt);
+    const converted = convertPromptBlocks(params.prompt);
+    // 模型能力校验（ADR-0127 第四阶段）：图片内容只在当前模型支持图片输入时提交；
+    // 不支持时整体拒绝并明确反馈——不降级丢弃图片、不提交残缺消息。
+    if (converted.hasImages) {
+      const currentRef = entry.session.state().config.model;
+      const modelInfo = runtime
+        .listModels({ workspaceRoot: entry.realCwd })
+        .find((m) => m.ref.provider === currentRef.provider && m.ref.model === currentRef.model);
+      if (modelInfo?.capabilities.imageInput !== true) {
+        throw RequestError.invalidParams(
+          { code: "image_input_unsupported", model: `${currentRef.provider}/${currentRef.model}` },
+          `当前模型 ${currentRef.provider}/${currentRef.model} 不支持图片输入；请切换支持图片的模型后重试`,
+        );
+      }
+    }
     entry.busy = true;
     entry.cancelRequested = false;
     entry.turnError = undefined;
@@ -2122,7 +2233,10 @@ export function createAcpAgentServer(options: AcpAgentOptions): AcpAgentServer {
 
     try {
       recordDiag({ event: "prompt_start", sessionId: entry.id });
-      const endReason = await entry.session.submit({ text: promptText });
+      const endReason = await entry.session.submit({
+        content: converted.content,
+        ...(converted.attachments.length > 0 ? { attachments: converted.attachments } : {}),
+      });
       // 保证最终 prompt 响应一定跟在本轮最后一次 session/update 之后（ADR-0120 §2）
       await entry.flushUpdates();
       const stopReason = mapTurnEndReason(endReason, entry.cancelRequested, entry.turnError);

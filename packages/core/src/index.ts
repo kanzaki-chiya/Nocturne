@@ -657,6 +657,11 @@ export interface SubmitInput {
         mimeType: string;
         label?: string | undefined;
         source?: "paste" | "upload" | "answer" | undefined;
+        /**
+         * 交错位置提示（ADR-0127 第四阶段）：该图片在 content 文本块序列中
+         * 插入到第 N 个块（0-based）之后；缺省 = 末尾追加（旧行为）。
+         */
+        afterBlock?: number | undefined;
       }[]
     | undefined;
   /** 技能调用（skills.md 第 2 节）：Core 校验后把正文快照附到用户消息 */

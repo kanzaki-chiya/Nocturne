@@ -267,6 +267,13 @@ export interface ImageAttachment {
   label?: string | undefined;
   source: "paste" | "read" | "mcp";
   processed?: ProcessedImage[] | undefined;
+  /**
+   * 交错位置提示（ADR-0127 第四阶段；兼容扩展，旧版本忽略，不提升 formatVersion）：
+   * 该图片在所属 user 消息 content 文本块序列中应插入到第 N 个块（0-based）之后。
+   * 仅用户提交（paste/upload 来源、ACP 混合内容等保序场景）设置；
+   * 缺省 = 无位置信息，投影沿用末尾追加行为。read/mcp 工具结果图不使用。
+   */
+  afterBlock?: number | undefined;
 }
 
 export interface AttachmentInput {
@@ -274,6 +281,11 @@ export interface AttachmentInput {
   mimeType: string;
   label?: string | undefined;
   source?: "paste" | "upload" | "answer" | undefined;
+  /**
+   * 交错位置提示（ADR-0127 第四阶段）：见 ImageAttachment.afterBlock。
+   * 由调用方按输入内容块顺序计算后传入，保存时复制到引用上。
+   */
+  afterBlock?: number | undefined;
 }
 
 export type InlinePageDisplay = "inline" | "panel";

@@ -382,6 +382,62 @@ describe("openai-compatible 适配器：图片（ADR-0023）", () => {
     expect(noImgMsgs.map((m) => m["role"])).toEqual(["system", "user"]);
     expect(noImgMsgs[1]?.["content"]).toBe("hi");
   });
+
+  it("用户图片带 afterBlock：image_url 部件穿插到对应文本块之后，不默认堆到末尾", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "text A" },
+              { type: "text", text: "text B" },
+              { type: "text", text: "text C" },
+            ],
+            images: [
+              { ...png, afterBlock: 0 },
+              { ...png, afterBlock: 1 },
+            ],
+          },
+        ],
+      }),
+    );
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    const parts = msgs[1]?.["content"] as Record<string, unknown>[];
+    const shape = parts.map((part) =>
+      part["type"] === "image_url" ? "image" : `text:${String(part["text"])}`,
+    );
+    expect(shape).toEqual(["text:text A", "image", "text:text B", "image", "text:text C"]);
+  });
+
+  it("用户图片混合位置：带位置的穿插、无位置的追加末尾", async () => {
+    const capture: { body?: Record<string, unknown> } = {};
+    const p = createOpenAICompatibleProvider(config(), envWithKey, sseFetch(doneChunk, capture));
+    await collect(
+      p,
+      request({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "text A" },
+              { type: "text", text: "text B" },
+            ],
+            images: [{ ...png, afterBlock: 0 }, png],
+          },
+        ],
+      }),
+    );
+    const msgs = capture.body?.["messages"] as Record<string, unknown>[];
+    const parts = msgs[1]?.["content"] as Record<string, unknown>[];
+    const shape = parts.map((part) =>
+      part["type"] === "image_url" ? "image" : `text:${String(part["text"])}`,
+    );
+    expect(shape).toEqual(["text:text A", "image", "text:text B", "image"]);
+  });
 });
 
 // ADR-0070：插话紧跟工具结果。Chat Completions 用独立的 role=tool 消息承载结果，
