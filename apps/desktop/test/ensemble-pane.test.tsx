@@ -253,10 +253,17 @@ describe("Ensemble 面板页签与概览", () => {
       "任务单 schema",
       "失败重派策略进行中",
     ]);
-    expect(texts(lines[1] as HTMLElement, ".ensemble-owner > span:last-child")).toEqual(["@runtime", "@runtime"]);
+    expect(texts(lines[1] as HTMLElement, ".ensemble-owner > span:last-child")).toEqual([
+      "@runtime",
+      "@runtime",
+    ]);
     // 线头负责人为头像组，帖号引用在进展行右端
-    expect(lines[1]?.querySelectorAll(".ensemble-line-owners .ensemble-av").length).toBeGreaterThan(0);
-    expect(lines[1]?.querySelector(".ensemble-line-head .ensemble-postref")?.textContent).toBe("#5");
+    expect(lines[1]?.querySelectorAll(".ensemble-line-owners .ensemble-av").length).toBeGreaterThan(
+      0,
+    );
+    expect(lines[1]?.querySelector(".ensemble-line-head .ensemble-postref")?.textContent).toBe(
+      "#5",
+    );
     // 等待中的线显示 time 图标与 warning 进度
     expect(lines[2]?.classList.contains("wait")).toBe(true);
     expect(lines[2]?.querySelector(".ensemble-line-progress")?.textContent).toContain(
@@ -299,9 +306,7 @@ describe("Ensemble 面板页签与概览", () => {
     const field = screen.getByRole("textbox", { name: "留言板" }) as HTMLTextAreaElement;
     fireEvent.change(field, { target: { value: "还没写完的草稿" } });
     // 新帖到达：页签与草稿都保留
-    page.show(
-      makeEnsemble({ overview: makeOverview(), posts: [makePost(1), makePost(2)] }),
-    );
+    page.show(makeEnsemble({ overview: makeOverview(), posts: [makePost(1), makePost(2)] }));
     expect(screen.getByRole("tab", { name: "留言板" }).getAttribute("aria-selected")).toBe("true");
     expect(field.value).toBe("还没写完的草稿");
   });
@@ -446,7 +451,12 @@ describe("Ensemble 面板留言板", () => {
       ensemble: makeEnsemble({
         members: [makeMember("users"), makeMember("orders")],
         posts: [
-          makePost(1, { from: "users", fromKind: "member", recipients: ["maestro"], text: "users 汇报" }),
+          makePost(1, {
+            from: "users",
+            fromKind: "member",
+            recipients: ["maestro"],
+            text: "users 汇报",
+          }),
           makePost(2, { recipients: ["orders"], text: "请 orders 复核" }),
           makePost(3, { recipients: ["maestro"], text: "整体进度" }),
         ],
@@ -496,9 +506,24 @@ describe("Ensemble 面板留言板", () => {
       ensemble: makeEnsemble({
         members: [makeMember("runtime"), makeMember("cli")],
         posts: [
-          makePost(1, { from: "runtime", fromKind: "runtime", recipients: ["maestro"], text: "run-114 在重启后恢复失败" }),
-          makePost(2, { from: "runtime", fromKind: "runtime", recipients: ["cli"], text: "runtime 发给 cli" }),
-          makePost(3, { from: "cli", fromKind: "member", recipients: ["maestro"], text: "cli 汇报重启" }),
+          makePost(1, {
+            from: "runtime",
+            fromKind: "runtime",
+            recipients: ["maestro"],
+            text: "run-114 在重启后恢复失败",
+          }),
+          makePost(2, {
+            from: "runtime",
+            fromKind: "runtime",
+            recipients: ["cli"],
+            text: "runtime 发给 cli",
+          }),
+          makePost(3, {
+            from: "cli",
+            fromKind: "member",
+            recipients: ["maestro"],
+            text: "cli 汇报重启",
+          }),
         ],
       }),
     });

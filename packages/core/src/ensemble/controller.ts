@@ -378,7 +378,8 @@ function formatEnsembleReadModelContent(input: {
     const o = input.overview;
     const lineBlocks = o.lines.map((line) => {
       const taskLines = line.tasks.map(
-        (task) => `    - [${task.status}] ${task.title} (@${task.owner}${task.post !== undefined ? `, post #${task.post}` : ""})`,
+        (task) =>
+          `    - [${task.status}] ${task.title} (@${task.owner}${task.post !== undefined ? `, post #${task.post}` : ""})`,
       );
       const progress =
         line.progress !== undefined
@@ -1616,7 +1617,9 @@ export function createEnsembleController(deps: EnsembleControllerDeps): Ensemble
      * 持久写成功后才发布内存镜像（revision/指纹/概览），写失败时旧状态保持可读、
      * 完全相同的请求可以安全重试；未落盘的内容永远不会被误报为已接受，也不会被误去重。
      */
-    async overview(rawInput: unknown): Promise<EnsembleToolActionResult<EnsembleOverviewWriteOutput>> {
+    async overview(
+      rawInput: unknown,
+    ): Promise<EnsembleToolActionResult<EnsembleOverviewWriteOutput>> {
       if (!active) {
         return {
           ok: false,

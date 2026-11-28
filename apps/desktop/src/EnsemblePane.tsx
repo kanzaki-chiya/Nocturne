@@ -163,17 +163,8 @@ export function EnsemblePane({
       },
     }));
   };
-  const {
-    tab,
-    query,
-    filterFrom,
-    filterTo,
-    filterOpen,
-    follow,
-    retiredOpen,
-    draft,
-    lineToggles,
-  } = pane;
+  const { tab, query, filterFrom, filterTo, filterOpen, follow, retiredOpen, draft, lineToggles } =
+    pane;
   const setTab = (next: EnsembleTab) => {
     patch({ tab: next });
   };
@@ -373,7 +364,9 @@ export function EnsemblePane({
 
   // ── 概览（ADR-0131 §6）：初始展开规则与用户手动折叠状态分离 ──
   const overview = ensemble.overview;
-  const defaultOpenLines = new Set(overview !== undefined ? ensembleDefaultOpenLines(overview) : []);
+  const defaultOpenLines = new Set(
+    overview !== undefined ? ensembleDefaultOpenLines(overview) : [],
+  );
   const stats = overview !== undefined ? ensembleOverviewStats(overview) : undefined;
   const allTasks = overview !== undefined ? overview.lines.flatMap((line) => line.tasks) : [];
   const ended = ensemble.status === "ended";
@@ -396,7 +389,11 @@ export function EnsemblePane({
         },
       ],
       onSelect: (next: string) => {
-        patch(which === "from" ? { filterFrom: next === "" ? undefined : next } : { filterTo: next === "" ? undefined : next });
+        patch(
+          which === "from"
+            ? { filterFrom: next === "" ? undefined : next }
+            : { filterTo: next === "" ? undefined : next },
+        );
       },
     };
   };
@@ -547,7 +544,8 @@ export function EnsemblePane({
       );
     }
     const member = ensemble.members.find((item) => item.name === owner);
-    const color = member !== undefined ? ensembleAuthorColor(ensemble.members, owner, "member") : undefined;
+    const color =
+      member !== undefined ? ensembleAuthorColor(ensemble.members, owner, "member") : undefined;
     return (
       <span className="ensemble-owner" title={`@${owner}`}>
         <EnsembleAvatar kind="member" color={color} size="sm" />
@@ -558,7 +556,13 @@ export function EnsemblePane({
 
   const taskRow = (task: EnsembleTask) => {
     const label =
-      task.status === "done" ? "已完成" : task.status === "work" ? "进行中" : task.status === "wait" ? "等待" : "待办";
+      task.status === "done"
+        ? "已完成"
+        : task.status === "work"
+          ? "进行中"
+          : task.status === "wait"
+            ? "等待"
+            : "待办";
     return (
       <li key={task.id} className={`ensemble-task ${task.status}`}>
         <span className="ensemble-task-glyph" title={label} aria-label={label}>
@@ -597,7 +601,10 @@ export function EnsemblePane({
     const owners = [...new Set(line.tasks.map((task) => task.owner))];
     if (owners.length === 0) owners.push(line.owner);
     return (
-      <section key={line.id} className={`ensemble-line${open ? " open" : ""}${waiting ? " wait" : ""}`}>
+      <section
+        key={line.id}
+        className={`ensemble-line${open ? " open" : ""}${waiting ? " wait" : ""}`}
+      >
         <button
           type="button"
           className="ensemble-line-head"
@@ -606,11 +613,7 @@ export function EnsemblePane({
             patch({ lineToggles: { ...lineToggles, [line.id]: !open } });
           }}
         >
-          <Icon
-            name="right_small"
-            size={ICON_SM}
-            className={`fold-arrow${open ? " down" : ""}`}
-          />
+          <Icon name="right_small" size={ICON_SM} className={`fold-arrow${open ? " down" : ""}`} />
           <span className="ensemble-line-title">
             <span className="ensemble-line-name">{line.title}</span>
             {lineStats.total > 0 && (
@@ -623,18 +626,20 @@ export function EnsemblePane({
             {line.post !== undefined && <span className="ensemble-postref">#{line.post}</span>}
           </span>
           <span className="ensemble-line-owners">
-            {owners.slice(0, 4).map((owner) =>
-              owner === "maestro" ? (
-                <EnsembleAvatar key={owner} kind="maestro" size="sm" />
-              ) : (
-                <EnsembleAvatar
-                  key={owner}
-                  kind="member"
-                  color={ensembleAuthorColor(ensemble.members, owner, "member")}
-                  size="sm"
-                />
-              ),
-            )}
+            {owners
+              .slice(0, 4)
+              .map((owner) =>
+                owner === "maestro" ? (
+                  <EnsembleAvatar key={owner} kind="maestro" size="sm" />
+                ) : (
+                  <EnsembleAvatar
+                    key={owner}
+                    kind="member"
+                    color={ensembleAuthorColor(ensemble.members, owner, "member")}
+                    size="sm"
+                  />
+                ),
+              )}
           </span>
           {line.progress !== undefined && (
             <span className={`ensemble-line-progress${waiting ? " wait" : ""}`}>
@@ -907,8 +912,7 @@ export function EnsemblePane({
                 {(["from", "to"] as const).map((which) => {
                   const value = which === "from" ? filterFrom : filterTo;
                   const label = which === "from" ? "来自" : "发给";
-                  const isOpen =
-                    menu !== null && menu.kind === "filter" && menu.which === which;
+                  const isOpen = menu !== null && menu.kind === "filter" && menu.which === which;
                   return (
                     <div key={which} className={`ensemble-dd${value !== undefined ? " set" : ""}`}>
                       <button
@@ -937,7 +941,9 @@ export function EnsemblePane({
                               ? "指挥"
                               : `@${value}`}
                         </span>
-                        {value === undefined && <Icon name="down_small" size={ICON_SM} className="ensemble-dd-chev" />}
+                        {value === undefined && (
+                          <Icon name="down_small" size={ICON_SM} className="ensemble-dd-chev" />
+                        )}
                       </button>
                       {value !== undefined && (
                         <button
@@ -946,7 +952,9 @@ export function EnsemblePane({
                           aria-label={`移除${label}筛选`}
                           onClick={() => {
                             patch(
-                              which === "from" ? { filterFrom: undefined } : { filterTo: undefined },
+                              which === "from"
+                                ? { filterFrom: undefined }
+                                : { filterTo: undefined },
                             );
                           }}
                         >

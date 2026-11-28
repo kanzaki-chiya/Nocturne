@@ -75,7 +75,14 @@ describe("Ensemble RPC 方法与成员子会话通道", { timeout: 20_000 }, () 
           ];
         }
         // ADR-0131：概览写入后第二批请求触发；验证 RPC 订阅推送的视图含概览结构
-        if (!req.messages.some((m) => m.role === "tool" && typeof m.content === "string" && m.content.includes("Overview updated to revision 1"))) {
+        if (
+          !req.messages.some(
+            (m) =>
+              m.role === "tool" &&
+              typeof m.content === "string" &&
+              m.content.includes("Overview updated to revision 1"),
+          )
+        ) {
           return [
             {
               type: "tool_call",
@@ -86,7 +93,15 @@ describe("Ensemble RPC 方法与成员子会话通道", { timeout: 20_000 }, () 
                 goal: "RPC 概览",
                 checkpoints: ["写入 rpc-out.txt"],
                 lines: [{ id: "l1", title: "写入", owner: "writer" }],
-                tasks: [{ id: "t1", line: "l1", title: "写 rpc-out.txt", status: "work", owner: "writer" }],
+                tasks: [
+                  {
+                    id: "t1",
+                    line: "l1",
+                    title: "写 rpc-out.txt",
+                    status: "work",
+                    owner: "writer",
+                  },
+                ],
               },
             },
             { type: "finish", reason: "tool_calls" },

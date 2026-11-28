@@ -410,7 +410,14 @@ describe("ADR-0131 ensemble_overview 控制器单元测试", { timeout: 30_000 }
           { id: "line-new-a", title: "a", owner: "impl-1", before: "line-never-exists" },
         ],
         tasks: [
-          { id: "task-x", line: "line-settings", title: "x", status: "work", owner: "impl-1", post: 99 },
+          {
+            id: "task-x",
+            line: "line-settings",
+            title: "x",
+            status: "work",
+            owner: "impl-1",
+            post: 99,
+          },
           { id: "task-no-line", line: "line-missing", title: "y", status: "todo", owner: "impl-1" },
         ],
       },
@@ -492,15 +499,18 @@ describe("ADR-0131 ensemble_overview 控制器单元测试", { timeout: 30_000 }
     await setupEnsemble(controller, ["impl-1", "verify-1"]);
     const tool = must(controller.maestroTools().find((t) => t.name === "ensemble_overview"));
 
-    await tool.execute({
-      base: 0,
-      goal: "g",
-      lines: [
-        { id: "l1", title: "L1", owner: "impl-1" },
-        { id: "l2", title: "L2", owner: "maestro" },
-      ],
-      tasks: [{ id: "t1", line: "l1", title: "T1", status: "todo", owner: "impl-1" }],
-    }, {} as never);
+    await tool.execute(
+      {
+        base: 0,
+        goal: "g",
+        lines: [
+          { id: "l1", title: "L1", owner: "impl-1" },
+          { id: "l2", title: "L2", owner: "maestro" },
+        ],
+        tasks: [{ id: "t1", line: "l1", title: "T1", status: "todo", owner: "impl-1" }],
+      },
+      {} as never,
+    );
 
     // 移除成员 verify-1 后仍可引用其名字（历史归属），但引用从未加入的成员被拒绝
     await must(controller.maestroTools().find((t) => t.name === "ensemble_remove_member")).execute(
@@ -510,9 +520,7 @@ describe("ADR-0131 ensemble_overview 控制器单元测试", { timeout: 30_000 }
     const res = await tool.execute(
       {
         base: 1,
-        tasks: [
-          { id: "t1", line: "l2", owner: "verify-1", status: "done" },
-        ],
+        tasks: [{ id: "t1", line: "l2", owner: "verify-1", status: "done" }],
         goal: null,
         checkpoints: ["only one"],
       },
@@ -628,7 +636,10 @@ describe("ADR-0131 ensemble_overview 控制器单元测试", { timeout: 30_000 }
     await byName("ensemble_end").execute({ summary: "done" }, {} as never);
 
     // 结束后调用拒绝（控制器侧）；且工具集已卸载在 Runtime 层由 syncMaestroTools 负责
-    const endRes = await byName("ensemble_overview").execute({ base: 1, goal: "late" }, {} as never);
+    const endRes = await byName("ensemble_overview").execute(
+      { base: 1, goal: "late" },
+      {} as never,
+    );
     expect(endRes.status).toBe("error");
     expect(endRes.modelContent).toContain("No active ensemble");
 
@@ -645,7 +656,10 @@ describe("ADR-0131 ensemble_overview 控制器单元测试", { timeout: 30_000 }
     expect(view.ensemble?.overview).toBeUndefined();
 
     // 新一场 base 从 0 开始
-    const res = await byName("ensemble_overview").execute({ base: 0, goal: "new goal" }, {} as never);
+    const res = await byName("ensemble_overview").execute(
+      { base: 0, goal: "new goal" },
+      {} as never,
+    );
     expect(res.status).toBe("ok");
     expect((res.output as EnsembleOverviewWriteOutput).revision).toBe(1);
   });
@@ -739,13 +753,13 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
     await waitFor(() =>
       s1
         .durableEvents()
-        .some(
-          (ev) => ev.type === "ensemble.overview_updated" && ev.payload.revision === 2,
-        ),
+        .some((ev) => ev.type === "ensemble.overview_updated" && ev.payload.revision === 2),
     );
     const events = s1.durableEvents().filter((ev) => ev.type === "ensemble.overview_updated");
     // 幂等重试不写第二条 rev=1 事件：总共只有 rev1 + rev2 两条
-    expect(events.map((ev) => (ev.type === "ensemble.overview_updated" ? ev.payload.revision : 0))).toEqual([1, 2]);
+    expect(
+      events.map((ev) => (ev.type === "ensemble.overview_updated" ? ev.payload.revision : 0)),
+    ).toEqual([1, 2]);
 
     // 事件 encode/decode 往返保持一致（持久化格式验证）
     for (const ev of s1.durableEvents()) {
@@ -767,10 +781,7 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
       if (role !== "maestro") return stopText("member idle");
       step2++;
       if (step2 === 1) {
-        return [
-          callTool("read", "ensemble_read", {}),
-          { type: "finish", reason: "tool_calls" },
-        ];
+        return [callTool("read", "ensemble_read", {}), { type: "finish", reason: "tool_calls" }];
       }
       if (step2 === 2) {
         // 重试与重启前最后一次成功更新相同的输入 → 跨重启幂等命中
@@ -815,9 +826,7 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
     await waitFor(() =>
       s2
         .durableEvents()
-        .some(
-          (ev) => ev.type === "ensemble.overview_updated" && ev.payload.revision === 3,
-        ),
+        .some((ev) => ev.type === "ensemble.overview_updated" && ev.payload.revision === 3),
     );
 
     // 跨重启幂等：rev=2 没有重复事件；rev=3 正常追加
@@ -849,7 +858,11 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
       return originalEmit(type, payload);
     };
 
-    const input = { base: 1, tasks: [{ id: "t-x", line: "line-x", title: "x", status: "todo", owner: "impl-1" }], lines: [{ id: "line-x", title: "线", owner: "impl-1" }] };
+    const input = {
+      base: 1,
+      tasks: [{ id: "t-x", line: "line-x", title: "x", status: "todo", owner: "impl-1" }],
+      lines: [{ id: "line-x", title: "线", owner: "impl-1" }],
+    };
     const failed = await tool.execute(input, {} as never);
     expect(failed.status).toBe("error");
     expect(failed.modelContent).toContain("nothing was written");
@@ -906,7 +919,9 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
 
     // revision 连续、视图与事件一致
     const events = durable.filter((ev) => ev.type === "ensemble.overview_updated");
-    expect(events.map((ev) => (ev.type === "ensemble.overview_updated" ? ev.payload.revision : 0))).toEqual([1, 2]);
+    expect(
+      events.map((ev) => (ev.type === "ensemble.overview_updated" ? ev.payload.revision : 0)),
+    ).toEqual([1, 2]);
     const view = replaySessionView(durable);
     expect(view.ensemble?.overview?.revision).toBe(2);
 
@@ -1059,9 +1074,11 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
     expect(replaySessionView(forked.durableEvents()).ensemble).toBeUndefined();
 
     // 回退到建立合奏的用户消息之前：写入 ensemble.ended(reason: "rewound")，视图结束但快照保留
-    const goMsg = session.durableEvents().find(
-      (ev) => ev.type === "message.user" && ev.payload.content.some((b) => b.text.includes("go")),
-    );
+    const goMsg = session
+      .durableEvents()
+      .find(
+        (ev) => ev.type === "message.user" && ev.payload.content.some((b) => b.text.includes("go")),
+      );
     expect(goMsg).toBeDefined();
     await session.rewind(goMsg!.seq, "conversation");
     await waitFor(() =>
@@ -1173,9 +1190,7 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
     const s2 = await rt2.resumeSession(sessionId);
     openSessions.push(s2);
     await s2.submit({ text: "write overview now" });
-    await waitFor(() =>
-      s2.durableEvents().some((ev) => ev.type === "ensemble.overview_updated"),
-    );
+    await waitFor(() => s2.durableEvents().some((ev) => ev.type === "ensemble.overview_updated"));
     expect(replaySessionView(s2.durableEvents()).ensemble?.overview?.goal).toBe("旧合奏补写概览");
     expect(replaySessionView(s2.durableEvents()).ensemble?.overview?.revision).toBe(1);
   });

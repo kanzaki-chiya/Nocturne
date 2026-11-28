@@ -396,9 +396,15 @@ export function createEnsembleOverviewTool(
         type: ["object", "null"],
         description: "Current progress snapshot; null clears it.",
         properties: {
-          text: { type: "string", description: "Progress summary in the ensemble's working language." },
+          text: {
+            type: "string",
+            description: "Progress summary in the ensemble's working language.",
+          },
           post: { type: "integer", description: "Optional source post number for this progress." },
-          wait: { type: "boolean", description: "True when the line is blocked or waiting on someone." },
+          wait: {
+            type: "boolean",
+            description: "True when the line is blocked or waiting on someone.",
+          },
         },
         additionalProperties: false,
       },
@@ -414,7 +420,11 @@ export function createEnsembleOverviewTool(
   const taskUpdateSchema = {
     type: "object",
     properties: {
-      id: { type: "string", description: "Stable task id; reused ids update in place (idempotent retries never duplicate)." },
+      id: {
+        type: "string",
+        description:
+          "Stable task id; reused ids update in place (idempotent retries never duplicate).",
+      },
       line: { type: "string", description: "Id of the line this task belongs to." },
       title: { type: "string", description: "Task title (required for new tasks)." },
       status: {

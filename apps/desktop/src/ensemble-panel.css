@@ -155,7 +155,6 @@
   cursor: pointer;
 }
 
-
 .ensemble-mem-col {
   flex: 1;
   min-width: 0;
@@ -383,7 +382,8 @@
 }
 
 /* 留言板搜索命中高亮（ADR-0131 §7） */
-.ensemble-pane mark, .ensemble-body mark {
+.ensemble-pane mark,
+.ensemble-body mark {
   background: color-mix(in srgb, var(--a-warning) 30%, transparent);
   color: inherit;
   border-radius: 2px;

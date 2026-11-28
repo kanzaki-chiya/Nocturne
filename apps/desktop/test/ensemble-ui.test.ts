@@ -221,19 +221,84 @@ describe("作者、提及、筛选、搜索与分组", () => {
     // 与 ADR-0131 §7 样例留言板等价的 14 条内容帖（#9..#22）
     const posts = [
       makePost(9, { text: "分派任务后先等首轮回报" }),
-      makePost(10, { from: "auth", fromKind: "member", recipients: ["maestro"], text: "auth 部分收到，开始" }),
-      makePost(11, { from: "runtime", fromKind: "runtime", recipients: ["maestro"], text: "runtime 常规心跳" }),
-      makePost(12, { from: "maestro", fromKind: "maestro", recipients: ["web"], text: "@web 状态页先做" }),
-      makePost(13, { from: "cli", fromKind: "member", recipients: ["maestro"], text: "CLI 侧重启逻辑已改完" }),
-      makePost(14, { from: "web", fromKind: "member", recipients: ["maestro"], text: "状态页初版好了" }),
-      makePost(15, { from: "maestro", fromKind: "maestro", recipients: ["web"], text: "@web 补上失败态" }),
-      makePost(16, { from: "runtime", fromKind: "runtime", recipients: ["maestro"], text: "run-114 在重启后恢复失败" }),
-      makePost(17, { from: "auth", fromKind: "member", recipients: ["maestro"], text: "鉴权中间件合入" }),
-      makePost(18, { from: "maestro", fromKind: "maestro", recipients: ["cli"], text: "@cli 重启路径要覆盖恢复" }),
-      makePost(19, { from: "web", fromKind: "member", recipients: ["maestro"], text: "失败态也好了" }),
-      makePost(20, { from: "runtime", fromKind: "runtime", recipients: ["maestro"], text: "重启恢复的全链路验证通过" }),
-      makePost(21, { from: "maestro", fromKind: "maestro", recipients: ["auth"], text: "@auth 收尾文档" }),
-      makePost(22, { from: "cli", fromKind: "member", recipients: ["maestro"], text: "文档草稿已交" }),
+      makePost(10, {
+        from: "auth",
+        fromKind: "member",
+        recipients: ["maestro"],
+        text: "auth 部分收到，开始",
+      }),
+      makePost(11, {
+        from: "runtime",
+        fromKind: "runtime",
+        recipients: ["maestro"],
+        text: "runtime 常规心跳",
+      }),
+      makePost(12, {
+        from: "maestro",
+        fromKind: "maestro",
+        recipients: ["web"],
+        text: "@web 状态页先做",
+      }),
+      makePost(13, {
+        from: "cli",
+        fromKind: "member",
+        recipients: ["maestro"],
+        text: "CLI 侧重启逻辑已改完",
+      }),
+      makePost(14, {
+        from: "web",
+        fromKind: "member",
+        recipients: ["maestro"],
+        text: "状态页初版好了",
+      }),
+      makePost(15, {
+        from: "maestro",
+        fromKind: "maestro",
+        recipients: ["web"],
+        text: "@web 补上失败态",
+      }),
+      makePost(16, {
+        from: "runtime",
+        fromKind: "runtime",
+        recipients: ["maestro"],
+        text: "run-114 在重启后恢复失败",
+      }),
+      makePost(17, {
+        from: "auth",
+        fromKind: "member",
+        recipients: ["maestro"],
+        text: "鉴权中间件合入",
+      }),
+      makePost(18, {
+        from: "maestro",
+        fromKind: "maestro",
+        recipients: ["cli"],
+        text: "@cli 重启路径要覆盖恢复",
+      }),
+      makePost(19, {
+        from: "web",
+        fromKind: "member",
+        recipients: ["maestro"],
+        text: "失败态也好了",
+      }),
+      makePost(20, {
+        from: "runtime",
+        fromKind: "runtime",
+        recipients: ["maestro"],
+        text: "重启恢复的全链路验证通过",
+      }),
+      makePost(21, {
+        from: "maestro",
+        fromKind: "maestro",
+        recipients: ["auth"],
+        text: "@auth 收尾文档",
+      }),
+      makePost(22, {
+        from: "cli",
+        fromKind: "member",
+        recipients: ["maestro"],
+        text: "文档草稿已交",
+      }),
     ];
     // 只用关键词：命中 #13、#16、#18、#20
     expect(filterEnsembleBoardPosts(posts, { query: "重启" }).map((p) => p.number)).toEqual([
@@ -266,13 +331,20 @@ describe("作者、提及、筛选、搜索与分组", () => {
 
   it("来自筛选按作者身份，成员筛选可与收件人同时收窄", () => {
     const posts = [
-      makePost(1, { from: "users", fromKind: "member", recipients: ["maestro"], text: "users 汇报" }),
+      makePost(1, {
+        from: "users",
+        fromKind: "member",
+        recipients: ["maestro"],
+        text: "users 汇报",
+      }),
       makePost(2, { recipients: ["orders"], text: "请 orders 复核" }),
       makePost(3, { text: "整体进度" }),
     ];
     expect(filterEnsembleBoardPosts(posts, { from: "users" }).map((p) => p.number)).toEqual([1]);
     expect(filterEnsembleBoardPosts(posts, { to: "orders" }).map((p) => p.number)).toEqual([2]);
-    expect(filterEnsembleBoardPosts(posts, { from: "maestro", to: "orders" }).map((p) => p.number)).toEqual([2]);
+    expect(
+      filterEnsembleBoardPosts(posts, { from: "maestro", to: "orders" }).map((p) => p.number),
+    ).toEqual([2]);
     expect(filterEnsembleBoardPosts(posts, { from: "users", to: "orders" })).toEqual([]);
     expect(filterEnsembleBoardPosts(posts, {})).toHaveLength(3);
   });
@@ -456,7 +528,9 @@ describe("作者、提及、筛选、搜索与分组", () => {
         owner: "x",
       })),
     });
-    const allWork = { lines: [line("l1", ["done"]), line("l2", ["todo", "work"]), line("l3", ["work"])] };
+    const allWork = {
+      lines: [line("l1", ["done"]), line("l2", ["todo", "work"]), line("l3", ["work"])],
+    };
     expect(ensembleDefaultOpenLines(allWork)).toEqual(["l2"]);
     const noWork = { lines: [line("l1", ["done"]), line("l2", ["done", "todo"])] };
     expect(ensembleDefaultOpenLines(noWork)).toEqual(["l2"]);
@@ -470,14 +544,19 @@ describe("作者、提及、筛选、搜索与分组", () => {
       hasWork: true,
       allDone: false,
     });
-    expect(ensembleOverviewStats({ lines: [line("a", ["done", "done"]), line("b", ["todo"])] })).toEqual({
+    expect(
+      ensembleOverviewStats({ lines: [line("a", ["done", "done"]), line("b", ["todo"])] }),
+    ).toEqual({
       total: 3,
       done: 2,
       work: 0,
       wait: 0,
       ratio: 2 / 3,
     });
-    expect(ensembleOverviewStats({ lines: [line("a", ["work", "wait"])] })).toMatchObject({ work: 1, wait: 1 });
+    expect(ensembleOverviewStats({ lines: [line("a", ["work", "wait"])] })).toMatchObject({
+      work: 1,
+      wait: 1,
+    });
     expect(ensembleOwnerLabel("maestro")).toBe("指挥");
     expect(ensembleOwnerLabel("web")).toBe("@web");
   });

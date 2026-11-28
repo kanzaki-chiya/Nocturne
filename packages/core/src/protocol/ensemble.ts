@@ -251,9 +251,7 @@ export function applyOverviewDelta(
   for (const update of delta.tasks ?? []) {
     const line = next.lines.find((item) => item.id === update.line);
     if (line === undefined) continue;
-    let task = next.lines
-      .flatMap((item) => item.tasks)
-      .find((item) => item.id === update.id);
+    let task = next.lines.flatMap((item) => item.tasks).find((item) => item.id === update.id);
     if (task !== undefined) {
       const origin = next.lines.find((item) => item.tasks.some((t) => t.id === update.id));
       if (origin !== undefined && origin !== line) {

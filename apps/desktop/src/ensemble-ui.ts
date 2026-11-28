@@ -97,7 +97,8 @@ export function ensembleToolSummary(name: string, input: unknown): string | unde
       return ensembleReadFilterParts(input).text;
     case "ensemble_overview": {
       // 指挥概览更新：优先显示目标文本，否则报告行/任务变更数量
-      if (typeof rec.goal === "string" && rec.goal.trim() !== "") return firstEnsembleLine(rec.goal);
+      if (typeof rec.goal === "string" && rec.goal.trim() !== "")
+        return firstEnsembleLine(rec.goal);
       const lines = Array.isArray(rec.lines) ? rec.lines.length : 0;
       const tasks = Array.isArray(rec.tasks) ? rec.tasks.length : 0;
       const removed =

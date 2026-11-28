@@ -33,8 +33,7 @@ export interface NormalizedOverviewUpdate {
 }
 
 export type NormalizeOverviewResult =
-  | { ok: true; update: NormalizedOverviewUpdate }
-  | { ok: false; errors: string[] };
+  { ok: true; update: NormalizedOverviewUpdate } | { ok: false; errors: string[] };
 
 const TASK_STATUSES: readonly EnsembleTaskStatus[] = ["todo", "work", "wait", "done"];
 const ID_MAX_LENGTH = 80;
@@ -88,7 +87,11 @@ function readOptionalOwner(value: unknown, label: string, errors: string[]): str
   return value.trim();
 }
 
-function readOptionalPost(value: unknown, label: string, errors: string[]): number | null | undefined {
+function readOptionalPost(
+  value: unknown,
+  label: string,
+  errors: string[],
+): number | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
@@ -98,7 +101,11 @@ function readOptionalPost(value: unknown, label: string, errors: string[]): numb
   return value;
 }
 
-function normalizeLineDelta(raw: unknown, index: number, errors: string[]): EnsembleOverviewLineDelta | undefined {
+function normalizeLineDelta(
+  raw: unknown,
+  index: number,
+  errors: string[],
+): EnsembleOverviewLineDelta | undefined {
   const label = `lines[${index}]`;
   if (!isRecord(raw)) {
     errors.push(`${label} must be an object.`);
@@ -162,7 +169,11 @@ function normalizeLineDelta(raw: unknown, index: number, errors: string[]): Ense
   return out;
 }
 
-function normalizeTaskDelta(raw: unknown, index: number, errors: string[]): EnsembleOverviewTaskDelta | undefined {
+function normalizeTaskDelta(
+  raw: unknown,
+  index: number,
+  errors: string[],
+): EnsembleOverviewTaskDelta | undefined {
   const label = `tasks[${index}]`;
   if (!isRecord(raw)) {
     errors.push(`${label} must be an object.`);
@@ -183,7 +194,10 @@ function normalizeTaskDelta(raw: unknown, index: number, errors: string[]): Ense
     }
   }
   if (raw.status !== undefined) {
-    if (typeof raw.status !== "string" || !TASK_STATUSES.includes(raw.status as EnsembleTaskStatus)) {
+    if (
+      typeof raw.status !== "string" ||
+      !TASK_STATUSES.includes(raw.status as EnsembleTaskStatus)
+    ) {
       errors.push(`${label}.status must be one of ${TASK_STATUSES.join(", ")}.`);
     } else {
       out.status = raw.status as EnsembleTaskStatus;
@@ -210,7 +224,15 @@ function readIdArray(raw: unknown, label: string, errors: string[]): string[] | 
   return out;
 }
 
-const KNOWN_KEYS = new Set(["base", "goal", "checkpoints", "lines", "tasks", "removeLines", "removeTasks"]);
+const KNOWN_KEYS = new Set([
+  "base",
+  "goal",
+  "checkpoints",
+  "lines",
+  "tasks",
+  "removeLines",
+  "removeTasks",
+]);
 
 /**
  * 规范化并做与状态无关的校验；返回的 `update` 只含规范化后的值。
@@ -226,7 +248,9 @@ export function normalizeOverviewInput(raw: unknown): NormalizeOverviewResult {
   }
 
   if (typeof raw.base !== "number" || !Number.isInteger(raw.base) || raw.base < 0) {
-    errors.push("`base` must be a non-negative integer: the `revision` from your latest overview read (use 0 before the first update).");
+    errors.push(
+      "`base` must be a non-negative integer: the `revision` from your latest overview read (use 0 before the first update).",
+    );
   }
   const base = typeof raw.base === "number" && Number.isInteger(raw.base) ? raw.base : -1;
 
@@ -361,13 +385,17 @@ export function validateOverviewState(
   const checkOwner = (owner: string | undefined, label: string): void => {
     if (owner === undefined) return;
     if (!context.owners.has(owner)) {
-      errors.push(`${label}: unknown owner "${owner}" — owners must be "maestro" or an ensemble member name (current or removed).`);
+      errors.push(
+        `${label}: unknown owner "${owner}" — owners must be "maestro" or an ensemble member name (current or removed).`,
+      );
     }
   };
   const checkPost = (post: number | null | undefined, label: string): void => {
     if (post === undefined || post === null) return;
     if (post > context.lastPost) {
-      errors.push(`${label}: post #${post} does not exist yet — only posts 1..${context.lastPost} have been posted. Publish or locate the post first, then update the overview.`);
+      errors.push(
+        `${label}: post #${post} does not exist yet — only posts 1..${context.lastPost} have been posted. Publish or locate the post first, then update the overview.`,
+      );
     }
   };
 
@@ -399,9 +427,14 @@ export function validateOverviewState(
     }
     checkOwner(line.owner, label);
     checkPost(line.post ?? undefined, label);
-    checkPost(line.progress !== undefined && line.progress !== null ? line.progress.post : undefined, label);
+    checkPost(
+      line.progress !== undefined && line.progress !== null ? line.progress.post : undefined,
+      label,
+    );
     if (line.before !== undefined && !lineIds.has(line.before)) {
-      errors.push(`${label}: \`before\` target "${line.before}" is not a known line — it must already exist or appear earlier in this update's lines array.`);
+      errors.push(
+        `${label}: \`before\` target "${line.before}" is not a known line — it must already exist or appear earlier in this update's lines array.`,
+      );
     }
     lineIds.add(line.id);
   }
@@ -412,7 +445,9 @@ export function validateOverviewState(
   for (const task of update.tasks ?? []) {
     const label = `tasks["${task.id}"]`;
     if (!lineIds.has(task.line)) {
-      errors.push(`${label}: line "${task.line}" does not exist (was it removed or never created?).`);
+      errors.push(
+        `${label}: line "${task.line}" does not exist (was it removed or never created?).`,
+      );
     }
     const exists = taskIds.has(task.id);
     if (!exists) {
