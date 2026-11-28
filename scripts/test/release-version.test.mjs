@@ -25,6 +25,7 @@ function makeFixture() {
     "packages/mcp/package.json",
     "packages/acp/package.json",
     "packages/mcp-server/package.json",
+    "packages/open-artifact/package.json",
     "apps/cli/package.json",
     "apps/relay/package.json",
     "apps/tui/package.json",
