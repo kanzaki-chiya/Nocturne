@@ -792,28 +792,6 @@ export function EnsemblePane({
           </button>
         </div>
         <div className="ensemble-tools">
-          {tab === "board" && (
-            <button
-              type="button"
-              className={follow ? "ensemble-ib on" : "ensemble-ib"}
-              aria-label="跟随最新"
-              aria-pressed={follow}
-              onClick={() => {
-                if (follow) {
-                  patch({ follow: false });
-                  return;
-                }
-                patch({ follow: true });
-                const element = body.current;
-                if (element !== null) {
-                  element.scrollTop = element.scrollHeight;
-                  previousScrollTop.current = element.scrollTop;
-                }
-              }}
-            >
-              <Icon name="down_small" size={ICON_MD} />
-            </button>
-          )}
           {active && (
             <button
               type="button"
@@ -853,11 +831,6 @@ export function EnsemblePane({
                 />
                 {query.trim() !== "" && (
                   <span className="ensemble-q-hits">{`${posts.length}/${ensemble.posts.length}`}</span>
-                )}
-                {query.trim() !== "" && (
-                  <span className="ensemble-q-hits" aria-hidden="true">
-                    {posts.length}
-                  </span>
                 )}
                 {query !== "" && (
                   <button
@@ -928,52 +901,86 @@ export function EnsemblePane({
               </div>
             )}
           </div>
-          <div className="ensemble-body-wrap">
-            {filterOpen && (
-              <div className="ensemble-filterpop">
-                <div className="ensemble-fselrow">
-                  <span className="ensemble-flab">来自</span>
+          {filterOpen && (
+            <div className="ensemble-filterpop">
+              <div className="ensemble-fdds">
+                {(["from", "to"] as const).map((which) => {
+                  const value = which === "from" ? filterFrom : filterTo;
+                  const label = which === "from" ? "来自" : "发给";
+                  const isOpen =
+                    menu !== null && menu.kind === "filter" && menu.which === which;
+                  return (
+                    <div key={which} className={`ensemble-dd${value !== undefined ? " set" : ""}`}>
+                      <button
+                        type="button"
+                        className="ensemble-dd-main"
+                        aria-haspopup="menu"
+                        aria-expanded={isOpen}
+                        aria-label={`${label} ${value === undefined ? "全部成员" : value === "maestro" ? "指挥" : `@${value}`}`}
+                        onClick={(event) => {
+                          setMenu({ kind: "filter", which, anchor: event.currentTarget });
+                        }}
+                      >
+                        <span className="ensemble-dd-k">{label}</span>
+                        {value !== undefined && value !== "maestro" && (
+                          <EnsembleAvatar
+                            kind="member"
+                            color={ensembleAuthorColor(ensemble.members, value, "member")}
+                            size="xs"
+                          />
+                        )}
+                        {value === "maestro" && <EnsembleAvatar kind="maestro" size="xs" />}
+                        <span className="ensemble-dd-v">
+                          {value === undefined
+                            ? "全部成员"
+                            : value === "maestro"
+                              ? "指挥"
+                              : `@${value}`}
+                        </span>
+                        {value === undefined && <Icon name="down_small" size={ICON_SM} className="ensemble-dd-chev" />}
+                      </button>
+                      {value !== undefined && (
+                        <button
+                          type="button"
+                          className="ensemble-dd-x"
+                          aria-label={`移除${label}筛选`}
+                          onClick={() => {
+                            patch(
+                              which === "from" ? { filterFrom: undefined } : { filterTo: undefined },
+                            );
+                          }}
+                        >
+                          <Icon name="close" size={ICON_SM} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="ensemble-frow">
+                <label className="ensemble-follow-lab">
                   <button
                     type="button"
-                    className="ensemble-fsel"
-                    aria-haspopup="menu"
-                    aria-expanded={menu !== null && menu.kind === "filter" && menu.which === "from"}
-                    onClick={(event) => {
-                      setMenu({ kind: "filter", which: "from", anchor: event.currentTarget });
+                    className={follow ? "switch on" : "switch"}
+                    role="switch"
+                    aria-checked={follow}
+                    aria-label="跟随最新"
+                    onClick={() => {
+                      if (follow) {
+                        patch({ follow: false });
+                        return;
+                      }
+                      patch({ follow: true });
+                      const element = body.current;
+                      if (element !== null) {
+                        element.scrollTop = element.scrollHeight;
+                        previousScrollTop.current = element.scrollTop;
+                      }
                     }}
-                  >
-                    <span className="ensemble-fsel-v">
-                      {filterFrom === undefined
-                        ? "全部"
-                        : filterFrom === "maestro"
-                          ? "指挥"
-                          : `@${filterFrom}`}
-                    </span>
-                    <Icon name="down_small" size={ICON_SM} />
-                  </button>
-                </div>
-                <div className="ensemble-fselrow">
-                  <span className="ensemble-flab">发给</span>
-                  <button
-                    type="button"
-                    className="ensemble-fsel"
-                    aria-haspopup="menu"
-                    aria-expanded={menu !== null && menu.kind === "filter" && menu.which === "to"}
-                    onClick={(event) => {
-                      setMenu({ kind: "filter", which: "to", anchor: event.currentTarget });
-                    }}
-                  >
-                    <span className="ensemble-fsel-v">
-                      {filterTo === undefined
-                        ? "全部"
-                        : filterTo === "maestro"
-                          ? "指挥"
-                          : `@${filterTo}`}
-                    </span>
-                    <Icon name="down_small" size={ICON_SM} />
-                  </button>
-                </div>
-                <div className="ensemble-fselrow end">
+                  />
+                  跟随最新
+                </label>
+                {filterCount > 0 && (
                   <button
                     type="button"
                     className="ensemble-fclear"
@@ -983,15 +990,35 @@ export function EnsemblePane({
                   >
                     清除筛选
                   </button>
-                </div>
+                )}
               </div>
-            )}
+            </div>
+          )}
+          <div className="ensemble-body-wrap">
             <div className="ensemble-body" ref={body} onScroll={onBodyScroll} onWheel={onBodyWheel}>
               {posts.map(post)}
               {posts.length === 0 && ensemble.posts.length > 0 && (
                 <p className="ensemble-nomatch">没有符合筛选的帖子</p>
               )}
             </div>
+            {!follow && (
+              <button
+                type="button"
+                className="ensemble-jump"
+                aria-label="回到最新"
+                onClick={() => {
+                  patch({ follow: true });
+                  const element = body.current;
+                  if (element !== null) {
+                    element.scrollTop = element.scrollHeight;
+                    previousScrollTop.current = element.scrollTop;
+                  }
+                }}
+              >
+                <Icon name="down_small" size={ICON_SM} />
+                最新
+              </button>
+            )}
           </div>
           <div className="ensemble-meta">
             {filtered ? `${posts.length}/${ensemble.posts.length}` : `${ensemble.posts.length}`}

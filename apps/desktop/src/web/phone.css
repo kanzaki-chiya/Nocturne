@@ -105,7 +105,7 @@
 /* 触控目标不小于 44px（DESIGN.md 第 2 节）：保持高优先级，按钮类写的更小 min-height 不生效 */
 .phone
   button:not(.btn):not(.ib):not(.switch):not(.seg button):not(.ensemble-seg button):not(
-    .ensemble-fsel
+    .ensemble-dd-main
   ):not(.input-label-button):not(.phone-item):not(.usage-cell):not(.thumb2-open):not(.thumb2 .x),
 .phone input:not(.check input),
 .phone select,

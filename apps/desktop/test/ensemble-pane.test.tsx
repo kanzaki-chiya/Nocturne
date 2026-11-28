@@ -466,7 +466,7 @@ describe("Ensemble 面板留言板", () => {
     expect(pop?.textContent).toContain("发给");
 
     // 打开「来自」菜单选 @users
-    const selectors = nodes(pop as HTMLElement, ".ensemble-fsel");
+    const selectors = nodes(pop as HTMLElement, ".ensemble-dd-main");
     fireEvent.click(selectors[0] as HTMLElement);
     const menu = await screen.findByRole("menu", { name: "来自" });
     const labels = Array.from(menu.querySelectorAll(".menu-label")).map((el) => el.textContent);
@@ -509,7 +509,7 @@ describe("Ensemble 面板留言板", () => {
     const pop = () => page.container.querySelector(".ensemble-filterpop") as HTMLElement;
 
     // 来自 @runtime
-    fireEvent.click(nodes(pop(), ".ensemble-fsel")[0] as HTMLElement);
+    fireEvent.click(nodes(pop(), ".ensemble-dd-main")[0] as HTMLElement);
     await screen.findByRole("menu", { name: "来自" });
     fireEvent.click(screen.getByRole("menuitemradio", { name: "@runtime" }));
 
@@ -517,7 +517,7 @@ describe("Ensemble 面板留言板", () => {
     await waitFor(() => {
       expect(pop()).not.toBeNull();
     });
-    fireEvent.click(nodes(pop(), ".ensemble-fsel")[1] as HTMLElement);
+    fireEvent.click(nodes(pop(), ".ensemble-dd-main")[1] as HTMLElement);
     await screen.findByRole("menu", { name: "发给" });
     fireEvent.click(screen.getByRole("menuitemradio", { name: "指挥" }));
 
@@ -537,31 +537,41 @@ describe("Ensemble 面板留言板", () => {
     expect(page.container.querySelector(".ensemble-filter-n")).toBeNull();
   });
 
-  it("跟随最新默认开启，往上滚自动关闭，点按钮重新开启并滚到底", () => {
+  it("跟随最新默认开启，往上滚自动关闭；筛选面板内开关与跳底按钮都能重新开启并滚到底", () => {
     const page = renderPane({ ensemble: makeEnsemble({ posts: [makePost(1), makePost(2)] }) });
     openBoard();
     const body = scrollableBody(page.container, 600);
-    const follow = () => screen.getByRole("button", { name: "跟随最新" });
-    expect(follow().getAttribute("aria-pressed")).toBe("true");
+
+    // 开关在展开的筛选面板里（ADR-0131 §6 独立开关）
+    fireEvent.click(screen.getByRole("button", { name: "筛选" }));
+    const follow = () => screen.getByRole("switch", { name: "跟随最新" });
+    expect(follow().getAttribute("aria-checked")).toBe("true");
+    // 跟随中不显示跳底按钮
+    expect(screen.queryByRole("button", { name: "回到最新" })).toBeNull();
 
     page.show(makeEnsemble({ posts: [makePost(1), makePost(2), makePost(3)] }));
     expect(body.scrollTop).toBe(600);
 
     body.scrollTop = 100;
     fireEvent.scroll(body);
-    expect(follow().getAttribute("aria-pressed")).toBe("false");
+    expect(follow().getAttribute("aria-checked")).toBe("false");
+    // 关闭跟随后出现跳底按钮
+    expect(screen.getByRole("button", { name: "回到最新" })).not.toBeNull();
 
     page.show(makeEnsemble({ posts: [makePost(1), makePost(2), makePost(3), makePost(4)] }));
     expect(body.scrollTop).toBe(100);
 
-    fireEvent.click(follow());
-    expect(follow().getAttribute("aria-pressed")).toBe("true");
+    // 点跳底按钮：重新开启并滚到底
+    fireEvent.click(screen.getByRole("button", { name: "回到最新" }));
+    expect(follow().getAttribute("aria-checked")).toBe("true");
     expect(body.scrollTop).toBe(600);
 
     fireEvent.wheel(body, { deltaY: -12 });
-    expect(follow().getAttribute("aria-pressed")).toBe("false");
+    expect(follow().getAttribute("aria-checked")).toBe("false");
 
+    // 点面板内开关：重新开启并滚到底
     fireEvent.click(follow());
+    expect(follow().getAttribute("aria-checked")).toBe("true");
     body.scrollTop = 0;
     page.show(makeEnsemble({ posts: [makePost(1), makePost(2), makePost(3), makePost(4)] }), false);
     page.show(makeEnsemble({ posts: [makePost(1), makePost(2), makePost(3), makePost(4)] }));

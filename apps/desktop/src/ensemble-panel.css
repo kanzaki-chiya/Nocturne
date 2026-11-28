@@ -295,6 +295,12 @@
   font-size: 10px;
 }
 
+.ensemble-av.xs {
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+}
+
 .ensemble-av .ui-icon {
   width: 16px;
   height: 16px;
@@ -303,6 +309,11 @@
 .ensemble-av.sm .ui-icon {
   width: 12px;
   height: 12px;
+}
+
+.ensemble-av.xs .ui-icon {
+  width: 10px;
+  height: 10px;
 }
 
 /* 成员着色经内联变量 --ensemble-av-color（EnsembleAvatar）注入；未着色时保持中性底色 */
@@ -483,70 +494,147 @@
   padding: 0 2px;
 }
 
-/* ── 筛选面板与条件 chip（ADR-0131 §7）──────────────────── */
+/* ── 筛选面板与条件 chip（ADR-0131 §7，原型 eb-filter/eb-dds）── */
 .ensemble-filterpop {
-  position: absolute;
-  z-index: 5;
-  top: 0;
-  left: var(--space-3);
-  right: var(--space-3);
+  flex: none;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2);
-  border: 1px solid var(--a-border-strong);
-  border-radius: var(--radius-2);
-  background: var(--a-raised);
-  box-shadow: var(--shadow-popover);
-  max-height: 60%;
-  overflow-y: auto;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--a-border);
 }
 
-.ensemble-fselrow {
+/* 两个下拉并排（ADR-0131 §6「筛选展开并列 来自/发给 单选下拉」） */
+.ensemble-fdds {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.ensemble-dd {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
   min-width: 0;
+  height: 26px;
+  border: 1px solid var(--a-border);
+  border-radius: var(--radius-2);
+  background: transparent;
 }
 
-.ensemble-fselrow.end {
-  justify-content: flex-end;
+.ensemble-dd.set {
+  border-color: var(--a-accent-border);
+  background: var(--a-sel);
 }
 
-.ensemble-flab {
-  flex: none;
-  width: 2.5em;
-  color: var(--a-secondary);
-  font-size: var(--fs-2);
+.ensemble-dd:hover {
+  border-color: var(--a-border-strong);
 }
 
-.ensemble-fsel {
+.ensemble-dd-main {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  height: 26px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--a-border);
+  height: 100%;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border: 0;
   border-radius: var(--radius-2);
-  background: var(--a-input);
+  background: none;
   color: var(--a-text);
   font-size: var(--fs-2);
+  text-align: left;
   cursor: pointer;
 }
 
-.ensemble-fsel:hover {
-  border-color: var(--a-border-strong);
+.ensemble-dd-k {
+  flex: none;
+  color: var(--a-muted);
+  font-size: var(--fs-1);
 }
 
-.ensemble-fsel-v {
+.ensemble-dd-v {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: left;
+}
+
+.ensemble-dd:not(.set) .ensemble-dd-v {
+  color: var(--a-secondary);
+}
+
+.ensemble-dd-chev {
+  flex: none;
+  color: var(--a-muted);
+}
+
+.ensemble-dd-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: var(--space-0-5);
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--a-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.ensemble-dd-x:hover {
+  color: var(--a-text);
+  background: var(--a-sel);
+}
+
+/* 面板底行：跟随最新开关 + 清除筛选（原型 eb-frow） */
+.ensemble-frow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 22px;
+}
+
+.ensemble-follow-lab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--a-text);
+  font-size: var(--fs-2);
+  cursor: pointer;
+}
+
+.ensemble-frow .ensemble-fclear {
+  margin-left: auto;
+}
+
+/* 浮动的「回到最新」跳底按钮（原型 eb-jump；.ensemble-body-wrap 已有 position:relative） */
+.ensemble-jump {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-3);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-0-5);
+  height: 26px;
+  padding: 0 var(--space-2) 0 var(--space-1);
+  border: 1px solid var(--a-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--a-panel);
+  color: var(--a-text);
+  font-size: var(--fs-1);
+  box-shadow: var(--shadow-popover);
+  cursor: pointer;
+}
+
+.ensemble-jump:hover {
+  border-color: var(--a-accent-border);
 }
 
 .ensemble-fchips {
@@ -1130,9 +1218,7 @@
 }
 
 .phone .ensemble-filterpop {
-  left: var(--space-4);
-  right: var(--space-4);
-  max-height: 70%;
+  padding: var(--space-1) var(--space-4) var(--space-2);
 }
 
 .phone .ensemble-ac {

@@ -9,8 +9,8 @@ export interface EnsembleAvatarProps {
   kind: EnsembleAvatarKind;
   /** 成员颜色 token（如 `var(--a-cat1)`）；未传时用中性底色与图标色 */
   color?: string | undefined;
-  /** `md` 用于留言板作者列，`sm` 用于概览行、成员页与 `@` 候选 */
-  size?: "sm" | "md" | undefined;
+  /** `md` 用于留言板作者列，`sm` 用于概览行、成员页与 `@` 候选，`xs` 用于筛选下拉内的值 */
+  size?: "xs" | "sm" | "md" | undefined;
   /** 成员存在待确认权限时给头像加警告色描边 */
   warn?: boolean | undefined;
 }
@@ -26,14 +26,15 @@ const AVATAR_ICONS: Record<EnsembleAvatarKind, IconName> = {
 
 export function EnsembleAvatar({ kind, color, size = "md", warn = false }: EnsembleAvatarProps) {
   const classes = ["ensemble-av"];
-  if (size === "sm") classes.push("sm");
+  if (size !== "md") classes.push(size);
   if (color !== undefined) classes.push("tinted");
   if (warn) classes.push("warn");
+  const iconSize = size === "xs" ? 10 : size === "sm" ? 12 : ICON_SM;
   const style =
     color !== undefined ? ({ "--ensemble-av-color": color } as CSSProperties) : undefined;
   return (
     <span className={classes.join(" ")} style={style} aria-hidden="true">
-      <Icon name={AVATAR_ICONS[kind]} size={size === "sm" ? 12 : ICON_SM} />
+      <Icon name={AVATAR_ICONS[kind]} size={iconSize} />
     </span>
   );
 }
