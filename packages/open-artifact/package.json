@@ -1,6 +1,6 @@
 {
   "name": "@nocturne/open-artifact",
-  "version": "0.68.0",
+  "version": "0.70.0",
   "description": "Nocturne Open Artifact 集成连接器与工具包装（ADR-0125）",
   "license": "GPL-3.0-only",
   "private": true,
