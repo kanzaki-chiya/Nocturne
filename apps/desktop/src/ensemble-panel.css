@@ -22,7 +22,7 @@
 .ensemble-seg {
   flex: 1;
   display: flex;
-  gap: 2px;
+  gap: var(--space-0-5);
   min-width: 0;
 }
 
@@ -82,11 +82,11 @@
   right: -1px;
   min-width: 12px;
   height: 12px;
-  padding: 0 2px;
-  border-radius: 6px;
+  padding: 0 var(--space-0-5);
+  border-radius: var(--radius-pill);
   background: var(--a-accent);
   color: var(--a-on-accent);
-  font-size: 9px;
+  font-size: var(--fs-file-badge);
   line-height: 12px;
   text-align: center;
   pointer-events: none;
@@ -132,7 +132,7 @@
 .ensemble-mems::-webkit-scrollbar-thumb,
 .ensemble-filterpop::-webkit-scrollbar-thumb {
   background: var(--a-border);
-  border-radius: 3px;
+  border-radius: var(--radius-1);
 }
 
 /* ── 成员行 ─────────────────────────────────────────────── */
@@ -160,7 +160,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-0-5);
 }
 
 .ensemble-mem-top {
@@ -291,13 +291,12 @@
 .ensemble-av.sm {
   width: 20px;
   height: 20px;
-  font-size: 10px;
+  font-size: var(--fs-file-badge);
 }
 
 .ensemble-av.xs {
   width: 16px;
   height: 16px;
-  font-size: 9px;
 }
 
 .ensemble-av .ui-icon {
@@ -318,6 +317,7 @@
 /* 成员着色经内联变量 --ensemble-av-color（EnsembleAvatar）注入；未着色时保持中性底色 */
 .ensemble-av.tinted {
   color: var(--ensemble-av-color);
+  /* stylelint-disable-next-line function-disallowed-list -- 成员头像底色用 14% 淡化 */
   background: color-mix(in srgb, var(--ensemble-av-color) 14%, transparent);
 }
 
@@ -384,10 +384,11 @@
 /* 留言板搜索命中高亮（ADR-0131 §7） */
 .ensemble-pane mark,
 .ensemble-body mark {
+  /* stylelint-disable-next-line function-disallowed-list -- 高亮色用 30% 警告色淡化 */
   background: color-mix(in srgb, var(--a-warning) 30%, transparent);
   color: inherit;
-  border-radius: 2px;
-  padding: 0 1px;
+  border-radius: var(--radius-0-5);
+  padding: 0;
 }
 
 .ensemble-at {
@@ -414,7 +415,7 @@
   display: flex;
   gap: var(--space-1);
   align-items: baseline;
-  margin-top: 2px;
+  margin-top: var(--space-0-5);
 }
 
 .ensemble-charter-tag {
@@ -491,7 +492,7 @@
   font-size: var(--fs-1);
   color: var(--a-faint);
   font-variant-numeric: tabular-nums;
-  padding: 0 2px;
+  padding: 0 var(--space-0-5);
 }
 
 /* ── 筛选面板与条件 chip（ADR-0131 §7，原型 eb-filter/eb-dds）── */
@@ -841,7 +842,7 @@
 .ensemble-ov-sum {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .ensemble-ov-sum h3 {
@@ -877,7 +878,7 @@
 .ensemble-ov-sum .flag {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   font-variant-numeric: tabular-nums;
 }
 
@@ -899,14 +900,14 @@
 /* 分段进度条：一个任务一格，颜色按状态（原型 eo-bar） */
 .ensemble-ov-bar {
   display: flex;
-  gap: 3px;
-  margin: 10px 0 4px;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 var(--space-1);
 }
 
 .ensemble-ov-bar i {
   flex: 1;
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-0-5);
   background: var(--a-border-strong);
 }
 
@@ -961,7 +962,7 @@
   height: 14px;
   color: var(--a-muted);
   align-self: start;
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 
 .ensemble-line-title {
@@ -994,7 +995,7 @@
 
 .ensemble-line-owners {
   display: flex;
-  gap: 3px;
+  gap: var(--space-1);
   justify-self: end;
   align-items: center;
 }
@@ -1012,7 +1013,7 @@
   grid-column: 2 / 4;
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--space-2);
   color: var(--a-secondary);
   font-size: var(--fs-2);
   line-height: var(--lh-base);
@@ -1047,7 +1048,7 @@
 .ensemble-tasks {
   list-style: none;
   margin: 0 0 var(--space-2);
-  padding: 0 0 0 22px;
+  padding: 0 0 0 var(--space-6);
   display: flex;
   flex-direction: column;
 }
@@ -1055,9 +1056,9 @@
 .ensemble-task {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto auto;
-  column-gap: 10px;
+  column-gap: var(--space-2);
   align-items: start;
-  padding: 7px 0;
+  padding: var(--space-2) 0;
   border-top: 1px solid var(--a-border);
   min-width: 0;
 }
@@ -1098,6 +1099,7 @@
   height: 9px;
   border-radius: 50%;
   border: 1.5px solid var(--a-accent);
+  /* stylelint-disable-next-line function-disallowed-list -- 进行中字形用 40% 强调色填充 */
   background: color-mix(in srgb, var(--a-accent) 40%, transparent);
 }
 
@@ -1132,7 +1134,7 @@
 .ensemble-owner {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   max-width: 150px;
   min-width: 0;
   height: 20px;
@@ -1149,7 +1151,7 @@
 
 .ensemble-task .ensemble-postref {
   align-self: start;
-  padding-top: 3px;
+  padding-top: var(--space-1);
 }
 
 /* ── 旧合奏降级（ADR-0131 §5）───────────────────────────── */
@@ -1210,11 +1212,8 @@
 }
 
 .phone .ensemble-boardin {
-  padding: var(--space-2) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
-}
-
-.phone .ensemble-boardin textarea {
-  font-size: 16px; /* 防 iOS 聚焦自动放大 */
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  padding-bottom: var(--space-safe-bottom);
 }
 
 .phone .ensemble-filterpop {

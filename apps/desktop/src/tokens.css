@@ -113,6 +113,7 @@
   --space-6: 24px;
   --space-8: 32px;
   --space-12: 48px;
+  --space-safe-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
   --radius-1: 4px;
   --radius-2: 6px;
   --radius-3: 8px;
