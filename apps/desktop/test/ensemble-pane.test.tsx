@@ -231,15 +231,33 @@ describe("Ensemble 面板页签与概览", () => {
     expect(screen.getByRole("tab", { name: "留言板" }).getAttribute("aria-selected")).toBe("true");
   });
 
+  it("检查点随更新推进只显示最新一条，旧值不残留", () => {
+    const page = renderPane({
+      ensemble: makeEnsemble({ overview: makeOverview({ checkpoints: ["早期检查点"] }) }),
+    });
+    expect(texts(page.container, ".ensemble-ov-cps li")).toEqual(["检查点早期检查点"]);
+    // 指挥追加新检查点后：只显示新的当前值
+    page.show(
+      makeEnsemble({
+        overview: makeOverview({ checkpoints: ["早期检查点", "重启验证通过"] }),
+      }),
+    );
+    expect(texts(page.container, ".ensemble-ov-cps li")).toEqual(["检查点重启验证通过"]);
+    expect(page.container.querySelector(".ensemble-overview")?.textContent).not.toContain(
+      "早期检查点",
+    );
+  });
+
   it("概览显示目标、检查点、进度条与默认展开规则：首条进行中的线展开", () => {
     const page = renderPane({
       ensemble: makeEnsemble({ overview: makeOverview() }),
     });
     expect(page.container.textContent).toContain("实现 REST API v1");
-    expect(texts(page.container, ".ensemble-ov-cps li")).toEqual([
-      "检查点所有验收标准通过",
-      "检查点无 lint 错误",
-    ]);
+    // 只显示当前检查点（列表末位）；历史检查点不出现在概览
+    expect(texts(page.container, ".ensemble-ov-cps li")).toEqual(["检查点无 lint 错误"]);
+    expect(page.container.querySelector(".ensemble-overview")?.textContent).not.toContain(
+      "所有验收标准通过",
+    );
     expect(page.container.textContent).toContain("2/6");
 
     const lines = nodes(page.container, ".ensemble-line");
@@ -432,8 +450,15 @@ describe("Ensemble 面板留言板", () => {
     // 命中高亮为 mark.ensemble-hit，保留原大小写
     const hits = nodes(page.container, "mark.ensemble-hit");
     expect(hits.map((el) => el.textContent)).toEqual(["Hello"]);
-    // 计数 1/3
-    expect(page.container.querySelector(".ensemble-meta")?.textContent).toBe("1/3");
+    // 计数 1/3：唯一位置在搜索框内（DOM 唯一性断言），底部不再出现
+    const hitSpans = nodes(page.container, ".ensemble-q-hits");
+    expect(hitSpans).toHaveLength(1);
+    expect(hitSpans[0]?.textContent).toBe("1/3");
+    expect(page.container.querySelector(".ensemble-q-wrap .ensemble-q-hits")).not.toBeNull();
+    expect(page.container.querySelector(".ensemble-meta")).toBeNull();
+    // 计数在 DOM 中只出现一次（搜索框与底部不重复）
+    const countOccurrences = (page.container.textContent ?? "").split("1/3").length - 1;
+    expect(countOccurrences).toBe(1);
 
     fireEvent.change(input, { target: { value: "runtime" } });
     expect(nodes(page.container, ".ensemble-post")).toHaveLength(1);
@@ -443,7 +468,9 @@ describe("Ensemble 面板留言板", () => {
 
     fireEvent.change(input, { target: { value: "" } });
     expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
-    expect(page.container.querySelector(".ensemble-meta")?.textContent).toBe("3");
+    // 默认（无收窄）不显示任何计数
+    expect(nodes(page.container, ".ensemble-q-hits")).toHaveLength(0);
+    expect(page.container.textContent).not.toContain("3/3");
   });
 
   it("筛选按钮带计数徽标，展开面板内 来自/发给 单选，选择后折叠处显示可移除的条件 chip", async () => {
@@ -552,13 +579,78 @@ describe("Ensemble 面板留言板", () => {
     expect(page.container.querySelector(".ensemble-post-txt")?.textContent).toContain(
       "run-114 在重启后恢复失败",
     );
-    expect(page.container.querySelector(".ensemble-meta")?.textContent).toBe("1/3");
+    // 仅人员条件（无关键词）也收窄：计数唯一位置在搜索框内
+    const hitSpans = nodes(page.container, ".ensemble-q-hits");
+    expect(hitSpans).toHaveLength(1);
+    expect(hitSpans[0]?.textContent).toBe("1/3");
+    expect(page.container.querySelector(".ensemble-meta")).toBeNull();
+    expect((page.container.textContent ?? "").split("1/3").length - 1).toBe(1);
     expect(page.container.querySelector(".ensemble-filter-n")?.textContent).toBe("2");
 
     // 清除筛选（面板内按钮）：条件与过滤全部清空
     const clears = Array.from(pop().querySelectorAll<HTMLElement>(".ensemble-fclear"));
     fireEvent.click(clears[0] as HTMLElement);
     expect(nodes(page.container, ".ensemble-post")).toHaveLength(3);
+    expect(page.container.querySelector(".ensemble-filter-n")).toBeNull();
+  });
+
+  it("关键词与人员条件叠加：计数只出现一次；清除人员筛选后保留关键词", async () => {
+    const page = renderPane({
+      ensemble: makeEnsemble({
+        members: [makeMember("runtime"), makeMember("cli")],
+        posts: [
+          makePost(1, {
+            from: "runtime",
+            fromKind: "runtime",
+            recipients: ["maestro"],
+            text: "run-114 在重启后恢复失败",
+          }),
+          makePost(2, {
+            from: "runtime",
+            fromKind: "runtime",
+            recipients: ["maestro"],
+            text: "配置模块拆完了",
+          }),
+          makePost(3, {
+            from: "cli",
+            fromKind: "member",
+            recipients: ["maestro"],
+            text: "cli 汇报重启",
+          }),
+        ],
+      }),
+    });
+    openBoard();
+
+    const input = screen.getByRole("textbox", { name: "搜索留言" }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "重启" } });
+    expect(nodes(page.container, ".ensemble-post")).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "筛选" }));
+    const pop = () => page.container.querySelector(".ensemble-filterpop") as HTMLElement;
+    fireEvent.click(nodes(pop(), ".ensemble-dd-main")[0] as HTMLElement);
+    await screen.findByRole("menu", { name: "来自" });
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "@runtime" }));
+    await waitFor(() => {
+      expect(pop()).not.toBeNull();
+    });
+    fireEvent.click(nodes(pop(), ".ensemble-dd-main")[1] as HTMLElement);
+    await screen.findByRole("menu", { name: "发给" });
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "指挥" }));
+
+    await waitFor(() => {
+      expect(nodes(page.container, ".ensemble-post")).toHaveLength(1);
+    });
+    expect(nodes(page.container, ".ensemble-q-hits")).toHaveLength(1);
+    expect((page.container.textContent ?? "").split("1/3").length - 1).toBe(1);
+
+    // 清除人员筛选：关键词保留，回到关键词命中集
+    fireEvent.click(pop().querySelector(".ensemble-fclear") as HTMLElement);
+    expect(input.value).toBe("重启");
+    expect(nodes(page.container, ".ensemble-post")).toHaveLength(2);
+    const hitSpans = nodes(page.container, ".ensemble-q-hits");
+    expect(hitSpans).toHaveLength(1);
+    expect(hitSpans[0]?.textContent).toBe("2/3");
     expect(page.container.querySelector(".ensemble-filter-n")).toBeNull();
   });
 

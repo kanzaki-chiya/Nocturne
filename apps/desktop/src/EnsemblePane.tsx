@@ -355,8 +355,9 @@ export function EnsemblePane({
     },
     ensemble.members,
   );
-  const filtered = posts.length !== ensemble.posts.length;
   const filterCount = (filterFrom !== undefined ? 1 : 0) + (filterTo !== undefined ? 1 : 0);
+  // 收窄态（关键词或任一人员条件生效）才显示命中/总数计数——唯一的计数位置在搜索框内（原型 eb-hits）
+  const narrowed = filterCount > 0 || query.trim() !== "";
 
   const groups = groupEnsembleMembers(ensemble.members);
   const maestroModel = shortModelName(ensemble.maestro.model);
@@ -693,13 +694,13 @@ export function EnsemblePane({
           </section>
         )}
         {overview.checkpoints.length > 0 && (
+          /* 只显示当前检查点（列表末位，原型 eo-check 单行）；
+             历史检查点仍在 ensemble.overview_updated 事件里可查（ADR-0131 §3 一行检查点） */
           <ul className="ensemble-ov-cps">
-            {overview.checkpoints.map((checkpoint) => (
-              <li key={checkpoint}>
-                <span className="ensemble-cp-tag">检查点</span>
-                <span>{checkpoint}</span>
-              </li>
-            ))}
+            <li>
+              <span className="ensemble-cp-tag">检查点</span>
+              <span>{overview.checkpoints[overview.checkpoints.length - 1]}</span>
+            </li>
           </ul>
         )}
         {stats !== undefined && stats.total > 0 && (
@@ -834,7 +835,7 @@ export function EnsemblePane({
                     patch({ query: event.target.value });
                   }}
                 />
-                {query.trim() !== "" && (
+                {narrowed && (
                   <span className="ensemble-q-hits">{`${posts.length}/${ensemble.posts.length}`}</span>
                 )}
                 {query !== "" && (
@@ -1027,9 +1028,6 @@ export function EnsemblePane({
                 最新
               </button>
             )}
-          </div>
-          <div className="ensemble-meta">
-            {filtered ? `${posts.length}/${ensemble.posts.length}` : `${ensemble.posts.length}`}
           </div>
           {active && (
             <div className="ensemble-boardin">

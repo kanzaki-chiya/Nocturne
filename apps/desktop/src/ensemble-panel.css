@@ -693,16 +693,7 @@
   text-decoration: underline;
 }
 
-/* ── 留言板计数与输入区 ─────────────────────────────────── */
-.ensemble-meta {
-  flex: none;
-  padding: 0 var(--space-3) var(--space-0-5);
-  color: var(--a-muted);
-  font-size: var(--fs-1);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
+/* ── 输入区（计数唯一位置在搜索框内，ADR-0131 §4/§7）────────── */
 .ensemble-boardin {
   flex: none;
   position: relative;
@@ -1207,10 +1198,6 @@
   padding: var(--space-2) var(--space-4) var(--space-2);
 }
 
-.phone .ensemble-meta {
-  padding: 0 var(--space-4) var(--space-0-5);
-}
-
 .phone .ensemble-boardin {
   padding: var(--space-2) var(--space-4) var(--space-3);
   padding-bottom: var(--space-safe-bottom);
@@ -1218,6 +1205,29 @@
 
 .phone .ensemble-filterpop {
   padding: var(--space-1) var(--space-4) var(--space-2);
+}
+
+/* 覆盖 .phone input:not(.check input){width:100%;border/背景/圆角}（特异度 0,3,1）：
+   搜索输入在 q-wrap 内按 flex 布局，独立边框与白底会画出一个比容器更宽的视觉盒子 */
+.phone input.ensemble-q:not(.check input) {
+  width: auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  /* 手机端输入不小于 16px，避免聚焦触发系统自动放大（同 phone.css 全局规则） */
+  font-size: var(--fs-4);
+}
+
+.phone .ensemble-q-wrap {
+  min-height: 44px;
+}
+
+/* 覆盖 .phone label:not(.check){display:block;margin:20px 0 12px}（特异度 0,2,1）：
+   开关与文字保持同行间距，面板底行不被撑高 */
+.phone .ensemble-frow label.ensemble-follow-lab {
+  display: inline-flex;
+  margin: 0;
 }
 
 .phone .ensemble-ac {
