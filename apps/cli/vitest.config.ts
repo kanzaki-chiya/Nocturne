@@ -33,6 +33,10 @@ export default defineConfig({
         replacement: path.resolve(here, "../../packages/acp/src/agent.ts"),
       },
       {
+        find: /^@nocturne\/open-artifact$/,
+        replacement: path.resolve(here, "../../packages/open-artifact/src/index.ts"),
+      },
+      {
         find: /^@nocturne\/tui\/provider-setup-flow$/,
         replacement: path.resolve(here, "../tui/src/provider-setup-flow.ts"),
       },
