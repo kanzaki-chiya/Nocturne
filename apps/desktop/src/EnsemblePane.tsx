@@ -77,6 +77,11 @@ export interface EnsemblePaneProps {
   visible?: boolean | undefined;
   /** `/ensemble board` 直达信号：值变化时强制切到留言板页签（ADR-0131 §6） */
   boardNonce?: number | undefined;
+  /**
+   * 已被此前的打开消费过的 nonce：首次挂载时只有 `boardNonce` 大于它才直达留言板。
+   * 通用入口重新打开（新挂载）时宿主把它推到当前 nonce，避免旧的直达意图再次生效。
+   */
+  boardNonceSeen?: number | undefined;
 }
 
 type EnsembleTab = "overview" | "board" | "members";
@@ -105,10 +110,10 @@ interface EnsemblePaneState {
   lineToggles: Record<string, boolean>;
 }
 
-function initialPaneState(boardNonce?: number): EnsemblePaneState {
+function initialPaneState(board = false): EnsemblePaneState {
   return {
-    // 首次打开就是被 /ensemble board 触发（nonce > 0）时直接落在留言板（ADR-0131 §6）
-    tab: (boardNonce ?? 0) > 0 ? "board" : "overview",
+    // 首次打开就是被 /ensemble board 触发（nonce 未被消费）时直接落在留言板（ADR-0131 §6）
+    tab: board ? "board" : "overview",
     query: "",
     filterFrom: undefined,
     filterTo: undefined,
@@ -140,13 +145,14 @@ export function EnsemblePane({
   onSelectMaestro,
   visible,
   boardNonce,
+  boardNonceSeen,
 }: EnsemblePaneProps) {
   // ── 按场（createdSeq）隔离的全部界面状态：新一场合奏回到「概览」与默认展开 ──
   // useState 的初值只取首次挂载；场 key 变化时用 React 官方认可的「渲染期 key 派生重置」
   // （存上一次 key，不一致就同步 setState 触发丢弃式重渲染）
   const [store, setStore] = useState<{ key: number; state: EnsemblePaneState }>(() => ({
     key: ensemble.createdSeq,
-    state: initialPaneState(boardNonce),
+    state: initialPaneState((boardNonce ?? 0) > (boardNonceSeen ?? 0)),
   }));
   if (store.key !== ensemble.createdSeq) {
     // 场次变化只重置页内状态；boardNonce 是打开意图，不随新场再次生效

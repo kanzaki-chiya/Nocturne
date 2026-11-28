@@ -131,6 +131,7 @@ function renderPane(options: {
   onSelectMaestro?: () => void;
   visible?: boolean;
   boardNonce?: number;
+  boardNonceSeen?: number;
 }) {
   const session = options.session ?? makeSession();
   const onOpenMember = options.onOpenMember ?? vi.fn();
@@ -144,6 +145,7 @@ function renderPane(options: {
       onSelectMaestro={onSelectMaestro}
       visible={visible}
       boardNonce={nonce ?? options.boardNonce ?? 0}
+      boardNonceSeen={options.boardNonceSeen}
     />
   );
   const page = render(element(options.ensemble, options.visible ?? true));
@@ -219,6 +221,16 @@ describe("Ensemble 面板页签与概览", () => {
     });
     expect(screen.getByRole("tab", { name: "留言板" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: "概览" }).getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("直达意图已被通用入口消费（boardNonceSeen = boardNonce）时重新挂载落在概览", () => {
+    renderPane({
+      ensemble: makeEnsemble({ overview: makeOverview() }),
+      boardNonce: 3,
+      boardNonceSeen: 3,
+    });
+    expect(screen.getByRole("tab", { name: "概览" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "留言板" }).getAttribute("aria-selected")).toBe("false");
   });
 
   it("boardNonce 变化时强制切到留言板页签", () => {

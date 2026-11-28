@@ -1154,7 +1154,8 @@ export function PhoneApp({
           history.go(page.panel?.kind === "overview" ? -1 : -2);
         }}
         onOpenEnsemble={(options) => {
-          if (options?.board === true) boardNavStamp.current = Date.now();
+          // 合奏页每次进入都重新挂载：通用入口清零，避免上一次 /ensemble board 的直达意图残留
+          boardNavStamp.current = options?.board === true ? Date.now() : 0;
           navigate({
             kind: "ensemble",
             hostId: page.hostId,

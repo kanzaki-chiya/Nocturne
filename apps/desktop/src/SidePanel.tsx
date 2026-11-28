@@ -253,6 +253,8 @@ export interface PanelEnsemble {
   session: EnsembleSession | undefined;
   /** /ensemble board 直达留言板的信号；值变化时 EnsemblePane 切到留言板页签（ADR-0131 §6） */
   boardNonce?: number | undefined;
+  /** 已被通用入口消费的 nonce（见 EnsemblePane `boardNonceSeen`） */
+  boardNonceSeen?: number | undefined;
   ensureClient?: (() => Promise<RpcClient>) | undefined;
   images?: AttachmentImageSource | undefined;
   prefs?: PrefsStore | undefined;
@@ -1725,6 +1727,7 @@ export function SidePanel(props: SidePanelProps) {
                       onOpenMember={props.ensemble.onOpenMember}
                       onSelectMaestro={props.ensemble.onSelectMaestro}
                       boardNonce={props.ensemble.boardNonce}
+                      boardNonceSeen={props.ensemble.boardNonceSeen}
                       visible={!hidden && tab.id === activeId && current.has(tab.id)}
                     />
                   ) : (

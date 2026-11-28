@@ -1256,10 +1256,17 @@ export function useSidePanel({
     });
   };
   // ADR-0131 §6：通用入口打开落在「概览」页签；board:true（/ensemble board 等）直达留言板
-  const [ensembleBoardNonce, setEnsembleBoardNonce] = useState(0);
+  // seen：通用入口打开时标记当前 nonce 已消费，关掉合奏标签后再从通用入口打开（新挂载）仍落在概览
+  const [ensembleBoard, setEnsembleBoard] = useState({ nonce: 0, seen: 0 });
   const openEnsemble = useCallback(
     (options?: { board?: boolean | undefined }) => {
-      if (options?.board === true) setEnsembleBoardNonce((value) => value + 1);
+      setEnsembleBoard((value) =>
+        options?.board === true
+          ? { ...value, nonce: value.nonce + 1 }
+          : value.seen === value.nonce
+            ? value
+            : { ...value, seen: value.nonce },
+      );
       hideBrowserThen(() => {
         update((panel) => {
           const found = panel.tabs.find((tab) => tab.kind === "ensemble");
@@ -2053,7 +2060,8 @@ export function useSidePanel({
           ? {
               ensemble: active.view.ensemble,
               session: active.session,
-              boardNonce: ensembleBoardNonce,
+              boardNonce: ensembleBoard.nonce,
+              boardNonceSeen: ensembleBoard.seen,
               ensureClient,
               images: imageSource,
               prefs,

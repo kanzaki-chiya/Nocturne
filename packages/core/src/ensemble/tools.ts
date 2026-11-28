@@ -471,7 +471,8 @@ export function createEnsembleOverviewTool(
         checkpoints: {
           type: "array",
           items: { type: "string" },
-          description: "Full replacement of the checkpoint list.",
+          description:
+            "Full replacement of the checkpoint history, oldest first. The user sees only the last entry as the current checkpoint; to move on, resend the list with the new checkpoint appended so earlier ones stay as history.",
         },
         lines: {
           type: "array",
