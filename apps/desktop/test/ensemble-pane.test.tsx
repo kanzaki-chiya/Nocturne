@@ -731,7 +731,7 @@ describe("Ensemble 面板留言板", () => {
         throw new Error("ensemble 已结束，无法发帖");
       }),
     });
-    const page = renderPane({ ensemble: makeEnsemble(), session });
+    renderPane({ ensemble: makeEnsemble(), session });
     openBoard();
     const field = screen.getByRole("textbox", { name: "留言板" }) as HTMLTextAreaElement;
     fireEvent.change(field, { target: { value: "要不要并回" } });

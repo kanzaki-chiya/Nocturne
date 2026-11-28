@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { worktreeGit } from "../src/agent/worktree.js";
 import {
@@ -278,7 +278,7 @@ const INITIAL_PLAN = {
 describe("ADR-0131 ensemble_overview 控制器单元测试", { timeout: 30_000 }, () => {
   it("首次写入 base=0 成功，revision=1；视图归约得到完整概览结构", async () => {
     const { controller, durable } = makeControllerHarness();
-    const byName = await setupEnsemble(controller);
+    await setupEnsemble(controller);
     const tool = must(controller.maestroTools().find((t) => t.name === "ensemble_overview"));
 
     const res = await tool.execute({ base: 0, ...INITIAL_PLAN }, {} as never);
@@ -304,7 +304,6 @@ describe("ADR-0131 ensemble_overview 控制器单元测试", { timeout: 30_000 }
     expect(overview.lines[0]?.progress?.text).toBe("进行中");
     expect(overview.lines[0]?.tasks.map((t) => t.id)).toEqual(["task-migrate", "task-test"]);
     expect(overview.lines[0]?.tasks[0]?.status).toBe("work");
-    void byName;
   });
 
   it("base 不匹配的旧更新被拒绝且不写事件；正确的 base 接受后 revision 递增", async () => {
@@ -602,7 +601,7 @@ describe("ADR-0131 ensemble_overview 控制器单元测试", { timeout: 30_000 }
 
   it("ensemble_read 输出附带概览快照与 revision 提示；未写入时提示 base: 0", async () => {
     const { controller } = makeControllerHarness();
-    const byName = await setupEnsemble(controller);
+    await setupEnsemble(controller);
     const readTool = must(controller.maestroTools().find((t) => t.name === "ensemble_read"));
 
     const before = await readTool.execute({}, {} as never);
@@ -744,11 +743,7 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
     await s1.submit({ text: "go", workMode: "ensemble" });
     // 等待若干轮工具循环完成
     const waitFor = async (fn: () => boolean, ms = 8000) => {
-      const start = Date.now();
-      while (!fn()) {
-        if (Date.now() - start > ms) throw new Error("waitFor timeout");
-        await new Promise((r) => setTimeout(r, 25));
-      }
+      await vi.waitFor(fn, { timeout: ms, interval: 25 });
     };
     await waitFor(() =>
       s1
@@ -1056,11 +1051,7 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
     openSessions.push(session);
     await session.submit({ text: "go", workMode: "ensemble" });
     const waitFor = async (fn: () => boolean, ms = 8000) => {
-      const start = Date.now();
-      while (!fn()) {
-        if (Date.now() - start > ms) throw new Error("waitFor timeout");
-        await new Promise((r) => setTimeout(r, 25));
-      }
+      await vi.waitFor(fn, { timeout: ms, interval: 25 });
     };
     await waitFor(() =>
       session.durableEvents().some((ev) => ev.type === "ensemble.overview_updated"),
@@ -1080,7 +1071,8 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
         (ev) => ev.type === "message.user" && ev.payload.content.some((b) => b.text.includes("go")),
       );
     expect(goMsg).toBeDefined();
-    await session.rewind(goMsg!.seq, "conversation");
+    if (goMsg === undefined) throw new Error("找不到续跑消息");
+    await session.rewind(goMsg.seq, "conversation");
     await waitFor(() =>
       session
         .durableEvents()
@@ -1150,11 +1142,7 @@ describe("ADR-0131 ensemble_overview Runtime 集成测试", { timeout: 30_000 },
     openSessions.push(s1);
     await s1.submit({ text: "go", workMode: "ensemble" });
     const waitFor = async (fn: () => boolean, ms = 8000) => {
-      const start = Date.now();
-      while (!fn()) {
-        if (Date.now() - start > ms) throw new Error("waitFor timeout");
-        await new Promise((r) => setTimeout(r, 25));
-      }
+      await vi.waitFor(fn, { timeout: ms, interval: 25 });
     };
     await waitFor(() => replaySessionView(s1.durableEvents()).ensemble?.status === "active");
     expect(replaySessionView(s1.durableEvents()).ensemble?.overview).toBeUndefined();

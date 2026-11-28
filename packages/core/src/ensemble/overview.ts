@@ -118,7 +118,7 @@ function normalizeLineDelta(
   if (title.present) {
     if (title.value === null) {
       errors.push(`${label}.title cannot be null; omit it to keep the current title.`);
-    } else if (title.value !== undefined && title.value.trim() === "") {
+    } else if (title.value?.trim() === "") {
       errors.push(`${label}.title must not be empty.`);
     } else if (title.value !== undefined) {
       out.title = title.value;
@@ -135,7 +135,7 @@ function normalizeLineDelta(
       errors.push(`${label}.progress must be an object (or null to clear).`);
     } else {
       const text = readOptionalText(raw.progress.text, `${label}.progress.text`, errors);
-      if (text.present === false || text.value === undefined || text.value === null) {
+      if (!text.present || text.value === undefined || text.value === null) {
         if (!errors.some((e) => e.startsWith(`${label}.progress.text`))) {
           errors.push(`${label}.progress.text must be a string.`);
         }
@@ -187,7 +187,7 @@ function normalizeTaskDelta(
   if (title.present) {
     if (title.value === null) {
       errors.push(`${label}.title cannot be null; omit it to keep the current title.`);
-    } else if (title.value !== undefined && title.value.trim() === "") {
+    } else if (title.value?.trim() === "") {
       errors.push(`${label}.title must not be empty.`);
     } else if (title.value !== undefined) {
       out.title = title.value;
@@ -259,7 +259,7 @@ export function normalizeOverviewInput(raw: unknown): NormalizeOverviewResult {
   if (raw.goal !== undefined) {
     const goal = readOptionalText(raw.goal, "goal", errors);
     if (goal.present) {
-      if (goal.value !== null && goal.value !== undefined && goal.value.trim() === "") {
+      if (typeof goal.value === "string" && goal.value.trim() === "") {
         errors.push("`goal` must not be empty (pass null to clear it).");
       } else if (goal.value !== undefined) {
         out.goal = goal.value;
@@ -274,7 +274,7 @@ export function normalizeOverviewInput(raw: unknown): NormalizeOverviewResult {
       const list: string[] = [];
       let failed = false;
       for (let i = 0; i < raw.checkpoints.length; i += 1) {
-        const item = raw.checkpoints[i];
+        const item: unknown = raw.checkpoints[i];
         if (typeof item !== "string" || item.trim() === "") {
           errors.push(`checkpoints[${i}] must be a non-empty string.`);
           failed = true;

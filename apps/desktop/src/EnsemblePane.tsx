@@ -105,7 +105,7 @@ interface EnsemblePaneState {
   lineToggles: Record<string, boolean>;
 }
 
-function initialPaneState(boardNonce?: number | undefined): EnsemblePaneState {
+function initialPaneState(boardNonce?: number): EnsemblePaneState {
   return {
     // 首次打开就是被 /ensemble board 触发（nonce > 0）时直接落在留言板（ADR-0131 §6）
     tab: (boardNonce ?? 0) > 0 ? "board" : "overview",

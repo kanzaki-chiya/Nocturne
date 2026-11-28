@@ -516,7 +516,11 @@ function isShortTableCell(source: string): boolean {
 }
 
 /** 在单个文本片段内渲染大小写不敏感的关键词命中（`<mark>`），保留原文大小写 */
-function renderHighlightFragment(text: string, highlight: string | undefined, key: number): ReactNode {
+function renderHighlightFragment(
+  text: string,
+  highlight: string | undefined,
+  key: number,
+): ReactNode {
   if (highlight === undefined || highlight.trim() === "") return text;
   const parts = splitHighlight(text, highlight);
   if (parts.every((part) => !part.hit)) return text;
@@ -650,7 +654,9 @@ function markdownNodes(
       }
       case "paragraph":
         return (
-          <p key={key}>{markdownNodes((token as Tokens.Paragraph).tokens, openUrl, mentions, highlight)}</p>
+          <p key={key}>
+            {markdownNodes((token as Tokens.Paragraph).tokens, openUrl, mentions, highlight)}
+          </p>
         );
       case "text": {
         const node = token as Tokens.Text;
@@ -671,10 +677,16 @@ function markdownNodes(
           </strong>
         );
       case "em":
-        return <em key={key}>{markdownNodes((token as Tokens.Em).tokens, openUrl, mentions, highlight)}</em>;
+        return (
+          <em key={key}>
+            {markdownNodes((token as Tokens.Em).tokens, openUrl, mentions, highlight)}
+          </em>
+        );
       case "del":
         return (
-          <del key={key}>{markdownNodes((token as Tokens.Del).tokens, openUrl, mentions, highlight)}</del>
+          <del key={key}>
+            {markdownNodes((token as Tokens.Del).tokens, openUrl, mentions, highlight)}
+          </del>
         );
       case "codespan":
         return <CodeRef key={key} text={(token as Tokens.Codespan).text} />;

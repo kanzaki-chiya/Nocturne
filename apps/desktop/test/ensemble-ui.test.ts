@@ -325,8 +325,11 @@ describe("作者、提及、筛选、搜索与分组", () => {
     ];
     expect(filterEnsembleBoardPosts(posts, { to: "impl-1" }).map((p) => p.number)).toEqual([1, 3]);
     expect(filterEnsembleBoardPosts(posts, { to: "review-1" }).map((p) => p.number)).toEqual([2]);
-    expect(ensemblePostDeliveredTo(posts[0]!, "impl-1")).toBe(true);
-    expect(ensemblePostDeliveredTo(posts[3]!, "impl-1")).toBe(false);
+    const [first, , , fourth] = posts;
+    expect(first).toBeDefined();
+    expect(fourth).toBeDefined();
+    expect(first !== undefined && ensemblePostDeliveredTo(first, "impl-1")).toBe(true);
+    expect(fourth !== undefined && ensemblePostDeliveredTo(fourth, "impl-1")).toBe(false);
   });
 
   it("来自筛选按作者身份，成员筛选可与收件人同时收窄", () => {
