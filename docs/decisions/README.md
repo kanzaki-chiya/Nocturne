@@ -128,6 +128,7 @@ ADR 只记录满足以下至少一条的决定：难以逆转；影响多个模�
 | [ADR-0118](ADR-0118-subdir-instructions.md) | 子目录 AGENTS.md 按需加载、日志快照与摘要补注 | 已接受 |
 | [ADR-0119](ADR-0119-goal-check.md) | `/goal` 完成时独立抽查工具证据与清单覆盖 | 已接受 |
 | [ADR-0120](ADR-0120-acp-agent-stdio.md) | 通过 `nctrn acp` 让外部宿主运行 Nocturne（ACP Agent stdio 服务端与会话级宿主 MCP 注入） | 已接受 |
+| [ADR-0121](ADR-0121-managed-worktree-retention.md) | 托管工作树的保留、清理与恢复 | 提议（补记 0.67.0 实现） |
 | [ADR-0122](ADR-0122-project-memory-browser.md) | 设置页按项目浏览与删除记忆（其他项目摘要在总览返回、项目子页、删除位置与焦点规则） | 已接受 |
 | [ADR-0127](ADR-0127-acp-capability-roadmap.md) | ACP 能力分期：派单选模型与思考档位、跨进程恢复、宿主提问、附件与进度、外部 agent 续派 | 已接受 |
 | [ADR-0131](ADR-0131-ensemble-overview-board.md) | 合奏概览、常驻搜索与留言筛选（指挥维护的目标/检查点/工作线/任务、`ensemble_overview` 增量工具、留言板常驻搜索与来自/发给筛选） | 已接受 |

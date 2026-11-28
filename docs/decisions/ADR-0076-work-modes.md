@@ -60,7 +60,7 @@ plan?: { restorePreset: string } | null   // null = 退出计划模式
 - 只在目标为 `active` 时注册（在 Turn 边界按状态安装或移除，同技能工具）。输入 `{ status: "met" | "blocked", checklist?: Array<{ item: string, evidence: string }>, reason?: string }`：`met` 要求 `checklist` 至少一项且每项 `evidence` 非空；`blocked` 要求 `reason` 非空。
 - `permissionSubjects` 为 `[]`，`traits.mutates = false`、`fileEffects: "none"`。执行时由目标模块写 `config_changed.goal`（`met` 或 `blocked`，`reason` 记原因），`tool.completed.output` 保存清单与证据。目标已不是 `active`（例如用户刚停止）时以 `invalid_input` 结算。
 
-修订（2026-11-25）：`update_goal(met)` 可启用独立抽查，见 [ADR-0119](ADR-0119-goal-check.md)。
+修订（2026-11-25）：`update_goal` 仅在目标为 `active`、处于计划模式之外的顶层会话中注册。`update_goal(met)` 可启用独立抽查，见 [ADR-0119](ADR-0119-goal-check.md)。
 
 #### 4.3 拦下与续跑
 
